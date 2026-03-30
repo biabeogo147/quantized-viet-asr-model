@@ -1,4 +1,5 @@
 import contextlib
+import logging
 import os
 import shutil
 import uuid
@@ -6,13 +7,10 @@ from pathlib import Path
 from typing import Sequence
 from unittest import mock
 
-from onnxruntime.quantization import (
-    CalibrationMethod,
-    QuantFormat,
-    QuantType,
-    quantize_dynamic,
-    quantize_static,
-)
+from onnxruntime.quantization.calibrate import TensorsData, create_calibrator
+from onnxruntime.quantization import CalibrationMethod, QuantFormat, QuantType, quantize_dynamic, quantize_static
+from onnxruntime.quantization.qdq_quantizer import QDQQuantizer
+from onnxruntime.quantization.quant_utils import load_model_with_shape_infer, model_has_pre_process_metadata
 
 from quantize.calibration import CalibrationSample, ListCalibrationDataReader
 from quantize.config import DEFAULT_TEMP_ROOT
@@ -57,27 +55,97 @@ def run_static_quantization(
     calibration_method: CalibrationMethod | None = None,
     percentile: float | None = None,
     per_channel: bool | None = None,
+    calibration_chunk_size: int | None = None,
 ) -> None:
     reader = ListCalibrationDataReader(records)
-    extra_options = {
-        "CalibPercentile": percentile if percentile is not None else plan.percentile,
-    }
+    resolved_method = calibration_method or resolve_calibration_method(plan.calibration_method)
+    resolved_per_channel = plan.per_channel if per_channel is None else per_channel
+    extra_options = {"CalibPercentile": percentile if percentile is not None else plan.percentile}
     with temporary_workspace_tempdir(DEFAULT_TEMP_ROOT):
         with isolated_model_input(fp32_onnx_path) as staged_input:
             with mock.patch("tempfile.TemporaryDirectory", ManualTemporaryDirectory):
-                quantize_static(
-                    model_input=os.fspath(staged_input),
-                    model_output=os.fspath(output_path),
-                    calibration_data_reader=reader,
-                    quant_format=QuantFormat.QDQ,
-                    op_types_to_quantize=list(plan.op_types_to_quantize),
-                    per_channel=plan.per_channel if per_channel is None else per_channel,
-                    activation_type=QuantType.QInt8,
-                    weight_type=QuantType.QInt8,
-                    nodes_to_exclude=list(plan.nodes_to_exclude),
-                    calibrate_method=calibration_method or resolve_calibration_method(plan.calibration_method),
-                    extra_options=extra_options,
-                )
+                if calibration_chunk_size and calibration_chunk_size > 0:
+                    _run_static_quantization_chunked(
+                        fp32_onnx_path=staged_input,
+                        output_path=output_path,
+                        plan=plan,
+                        reader=reader,
+                        calibration_method=resolved_method,
+                        percentile=extra_options["CalibPercentile"],
+                        per_channel=resolved_per_channel,
+                        calibration_chunk_size=calibration_chunk_size,
+                    )
+                else:
+                    quantize_static(
+                        model_input=os.fspath(staged_input),
+                        model_output=os.fspath(output_path),
+                        calibration_data_reader=reader,
+                        quant_format=QuantFormat.QDQ,
+                        op_types_to_quantize=list(plan.op_types_to_quantize),
+                        per_channel=resolved_per_channel,
+                        activation_type=QuantType.QInt8,
+                        weight_type=QuantType.QInt8,
+                        nodes_to_exclude=list(plan.nodes_to_exclude),
+                        calibrate_method=resolved_method,
+                        calibration_providers=["CPUExecutionProvider"],
+                        extra_options=extra_options,
+                    )
+
+
+def _run_static_quantization_chunked(
+    fp32_onnx_path: Path,
+    output_path: Path,
+    plan: QuantizationPlan,
+    reader: ListCalibrationDataReader,
+    calibration_method: CalibrationMethod,
+    percentile: float,
+    per_channel: bool,
+    calibration_chunk_size: int,
+) -> None:
+    model = load_model_with_shape_infer(fp32_onnx_path)
+    pre_processed = model_has_pre_process_metadata(model)
+    calibrator = create_calibrator(
+        fp32_onnx_path,
+        list(plan.op_types_to_quantize),
+        augmented_model_path=(DEFAULT_TEMP_ROOT / f"augmented_model.{uuid.uuid4().hex}.onnx").as_posix(),
+        calibrate_method=calibration_method,
+        use_external_data_format=False,
+        providers=["CPUExecutionProvider"],
+        extra_options={"percentile": percentile},
+    )
+
+    total_records = len(reader)
+    chunk_size = max(1, calibration_chunk_size)
+    for start_index in range(0, total_records, chunk_size):
+        end_index = min(total_records, start_index + chunk_size)
+        reader.set_range(start_index=start_index, end_index=end_index)
+        calibrator.collect_data(reader)
+
+    tensors_range = calibrator.compute_data()
+    if not isinstance(tensors_range, TensorsData):
+        raise TypeError(f"Unexpected type {type(tensors_range)} for tensors_range.")
+
+    quantizer = QDQQuantizer(
+        model,
+        per_channel,
+        False,
+        QuantType.QInt8,
+        QuantType.QInt8,
+        tensors_range,
+        None,
+        list(plan.nodes_to_exclude),
+        list(plan.op_types_to_quantize),
+        {"CalibPercentile": percentile},
+    )
+    quantizer.quantize_model()
+    quantizer.model.save_model_to_file(output_path, False)
+
+    if not pre_processed:
+        logging.warning(
+            "Please consider to run pre-processing before quantization. Refer to example: "
+            "https://github.com/microsoft/onnxruntime-inference-examples/blob/main/quantization/image_classification"
+            "/cpu/ReadMe.md "
+        )
 
 
 def run_dynamic_quantization(

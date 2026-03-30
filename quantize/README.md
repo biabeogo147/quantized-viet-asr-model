@@ -47,6 +47,21 @@ Hoac alias:
 --calibration-text <path>
 ```
 
+## ORT Provider
+
+Calibration inference ho tro:
+
+- `--ort-provider cuda`
+- `--ort-provider cpu`
+
+Mac dinh la:
+
+```powershell
+--ort-provider cuda
+```
+
+Khi chon `cuda`, module se thu `CUDAExecutionProvider` truoc. Neu may hoac environment hien tai khong co CUDA provider, no se tu dong fallback ve `CPUExecutionProvider`.
+
 ## Lenh Thuong Dung
 
 Dry-run de xem preset va so node bi exclude:
@@ -55,7 +70,7 @@ Dry-run de xem preset va so node bi exclude:
 & D:\Anaconda\envs\speech2text\python.exe -m quantize --dry-run --preset sd8g2_quality
 ```
 
-Static quantization voi calibration mac dinh trong `quantize/calibration`:
+Static quantization voi calibration mac dinh trong `quantize/calibration` va provider mac dinh `cuda`:
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality
@@ -65,6 +80,12 @@ Static quantization voi mot file calibration cu the:
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality --calibration-source quantize\calibration\vpcd_calibration_ngan.txt
+```
+
+Static quantization va ep calibration inference chay CPU:
+
+```powershell
+& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality --ort-provider cpu
 ```
 
 Static quantization voi output rieng:
@@ -108,6 +129,7 @@ Nen chay tuan tu, khong nen chay song song nhieu job quantize cung luc.
 
 - `--max-calibration-samples`: gioi han so sample calibration duoc doc.
 - `--max-generation-length`: gioi han do dai decoder khi tao calibration records.
+- `--ort-provider`: chon `cuda` hoac `cpu` cho calibration inference.
 - `--percentile`: threshold cho calibration method `percentile`.
 - `--calibration-method`: `minmax`, `entropy`, `percentile`, `distribution`.
 - `--per-channel` hoac `--no-per-channel`: override setting cua preset.

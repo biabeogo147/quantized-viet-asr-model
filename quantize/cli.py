@@ -4,12 +4,14 @@ from typing import Sequence
 
 from quantize.calibration import build_calibration_records
 from quantize.config import (
+    DEFAULT_CALIBRATION_CHUNK_SIZE,
     DEFAULT_CALIBRATION_SOURCE,
     DEFAULT_DYNAMIC_OUTPUT_ONNX,
     DEFAULT_FP32_ONNX,
     DEFAULT_MAX_CALIBRATION_SAMPLES,
     DEFAULT_MAX_GENERATION_LENGTH,
     DEFAULT_MODEL_DIR,
+    DEFAULT_ORT_PROVIDER,
     DEFAULT_OUTPUT_ONNX,
     DEFAULT_PERCENTILE,
     DEFAULT_SIZE_BUDGET_MB,
@@ -43,6 +45,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--preset", choices=list_supported_presets(), default="sd8g2_quality")
     parser.add_argument("--max-calibration-samples", type=int, default=DEFAULT_MAX_CALIBRATION_SAMPLES)
     parser.add_argument("--max-generation-length", type=int, default=DEFAULT_MAX_GENERATION_LENGTH)
+    parser.add_argument(
+        "--calibration-chunk-size",
+        type=int,
+        default=DEFAULT_CALIBRATION_CHUNK_SIZE,
+        help="So calibration records moi chunk khi ORT collect activation stats. Giam RAM peak cho static quantization.",
+    )
+    parser.add_argument(
+        "--ort-provider",
+        choices=("cuda", "cpu"),
+        default=DEFAULT_ORT_PROVIDER,
+        help="Provider alias cho calibration inference. 'cuda' se thu CUDA truoc va fallback ve CPU neu can.",
+    )
     parser.add_argument("--size-budget-mb", type=float, default=DEFAULT_SIZE_BUDGET_MB)
     parser.add_argument("--percentile", type=float, default=DEFAULT_PERCENTILE)
     parser.add_argument(
@@ -107,6 +121,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             calibration_source_path=Path(args.calibration_text),
             max_calibration_samples=args.max_calibration_samples,
             max_generation_length=args.max_generation_length,
+            ort_provider=args.ort_provider,
         )
         if not records:
             raise ValueError("Khong tao duoc calibration records tu file dau vao.")
@@ -114,6 +129,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(summarize_quantization_plan(plan, node_names))
         print(
             "Calibration stats: "
+            f"requested_provider={stats['requested_provider']}, "
+            f"session_providers={stats['session_providers']}, "
             f"source_files={stats['source_files']}, "
             f"text_samples={stats['text_samples']}, "
             f"records={stats['records']}, "
@@ -129,6 +146,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             calibration_method=resolve_calibration_method(args.calibration_method or plan.calibration_method),
             percentile=args.percentile,
             per_channel=args.per_channel,
+            calibration_chunk_size=args.calibration_chunk_size,
         )
 
     size_mb = file_size_mb(output_path)

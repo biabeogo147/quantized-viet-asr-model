@@ -8,8 +8,8 @@ import onnxruntime as ort
 from transformers import AutoTokenizer
 
 
-MODEL_DIR = os.path.join("../assets", "vietnamese-punc-cap-denorm-v1")
-ONNX_PATH = os.path.join(MODEL_DIR, "onnx", "model.fp32.onnx")
+MODEL_DIR = os.path.join("assets", "vietnamese-punc-cap-denorm-v1")
+ONNX_PATH = os.path.join(MODEL_DIR, "onnx", "vpcd_quality.onnx")
 
 DEFAULT_TEXTS = [
     "hôm nay là buổi nhậm chức của tôi phước thành",

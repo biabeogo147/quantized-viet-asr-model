@@ -14,14 +14,37 @@ from quantize.types import CalibrationSample
 class ListCalibrationDataReader(CalibrationDataReader):
     def __init__(self, records: Sequence[CalibrationSample]):
         self._all_records = list(records)
+        self._start_index = 0
+        self._end_index = len(self._all_records)
         self._records = iter(self._all_records)
+
+    def __len__(self) -> int:
+        return len(self._all_records)
 
     def get_next(self) -> dict[str, np.ndarray] | None:
         sample = next(self._records, None)
         return None if sample is None else sample.inputs
 
     def rewind(self) -> None:
-        self._records = iter(self._all_records)
+        self._records = iter(self._all_records[self._start_index : self._end_index])
+
+    def set_range(self, start_index: int, end_index: int) -> None:
+        self._start_index = max(0, start_index)
+        self._end_index = min(len(self._all_records), end_index)
+        self.rewind()
+
+
+def resolve_ort_providers(ort_provider: str) -> list[str]:
+    if ort_provider == "cpu":
+        return ["CPUExecutionProvider"]
+
+    if ort_provider != "cuda":
+        raise ValueError(f"Unsupported ort provider alias: {ort_provider}")
+
+    available_providers = set(ort.get_available_providers())
+    if "CUDAExecutionProvider" in available_providers:
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    return ["CPUExecutionProvider"]
 
 
 def iter_calibration_texts(path: str | os.PathLike[str], max_samples: int) -> Iterator[str]:
@@ -177,10 +200,12 @@ def build_calibration_records(
     calibration_source_path: Path,
     max_calibration_samples: int,
     max_generation_length: int,
+    ort_provider: str,
 ) -> tuple[list[CalibrationSample], dict[str, int]]:
     tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
     decoder_start_token_id = load_decoder_start_token_id(model_dir, tokenizer)
-    session = ort.InferenceSession(os.fspath(fp32_onnx_path), providers=["CPUExecutionProvider"])
+    requested_providers = resolve_ort_providers(ort_provider)
+    session = ort.InferenceSession(os.fspath(fp32_onnx_path), providers=requested_providers)
 
     records: list[CalibrationSample] = []
     max_encoder_len = 0
@@ -207,6 +232,8 @@ def build_calibration_records(
         )
 
     stats = {
+        "requested_provider": ort_provider,
+        "session_providers": ",".join(session.get_providers()),
         "source_files": len(source_files),
         "text_samples": sample_count,
         "records": len(records),
