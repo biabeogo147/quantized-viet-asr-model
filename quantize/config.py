@@ -3,7 +3,8 @@ from pathlib import Path
 
 DEFAULT_MODEL_DIR = Path("assets") / "vietnamese-punc-cap-denorm-v1"
 DEFAULT_FP32_ONNX = DEFAULT_MODEL_DIR / "onnx" / "model.fp32.onnx"
-DEFAULT_OUTPUT_ONNX = DEFAULT_MODEL_DIR / "onnx" / "model.int8.sd8g2.onnx"
+DEFAULT_OUTPUT_ONNX = DEFAULT_MODEL_DIR / "onnx" / "model.qnn.qdq.uint16u8.quality.sd8g2.onnx"
+DEFAULT_BALANCED_OUTPUT_ONNX = DEFAULT_MODEL_DIR / "onnx" / "model.qnn.qdq.uint16u8.sd8g2.onnx"
 DEFAULT_DYNAMIC_OUTPUT_ONNX = DEFAULT_MODEL_DIR / "onnx" / "model.dynamic.int8.sd8g2.onnx"
 DEFAULT_CALIBRATION_SOURCE = Path("quantize") / "calibration_400_cau"
 DEFAULT_ORT_PROVIDER = "cuda"

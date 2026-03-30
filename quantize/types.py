@@ -17,6 +17,8 @@ class PresetSpec:
     calibration_method: str
     percentile: float
     per_channel: bool
+    activation_type: str
+    weight_type: str
 
 
 @dataclass(frozen=True)
@@ -29,7 +31,5 @@ class QuantizationPlan:
     calibration_method: str
     percentile: float
     per_channel: bool
-
-    @property
-    def quantized_node_count(self) -> int:
-        return 0
+    activation_type: str
+    weight_type: str

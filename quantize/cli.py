@@ -4,6 +4,7 @@ from typing import Sequence
 
 from quantize.calibration import build_calibration_records
 from quantize.config import (
+    DEFAULT_BALANCED_OUTPUT_ONNX,
     DEFAULT_CALIBRATION_CHUNK_SIZE,
     DEFAULT_CALIBRATION_SOURCE,
     DEFAULT_DYNAMIC_OUTPUT_ONNX,
@@ -18,6 +19,7 @@ from quantize.config import (
 )
 from quantize.model_introspection import load_model_node_names, summarize_quantization_plan
 from quantize.presets import build_quantization_plan, list_supported_presets
+from quantize.qnn import run_qnn_static_quantization
 from quantize.runner import (
     build_size_budget_message,
     file_size_mb,
@@ -76,6 +78,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def _resolve_output_path(args: argparse.Namespace) -> Path:
     if args.output:
         return Path(args.output)
+    if args.preset == "sd8g2_balanced":
+        return DEFAULT_BALANCED_OUTPUT_ONNX
     if args.preset == "baseline_dynamic_int8":
         return DEFAULT_DYNAMIC_OUTPUT_ONNX
     return DEFAULT_OUTPUT_ONNX
@@ -111,6 +115,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    print(summarize_quantization_plan(plan, node_names))
+
     if plan.runner_kind == "dynamic":
         run_dynamic_quantization(
             fp32_onnx_path=fp32_onnx_path,
@@ -129,7 +135,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not records:
             raise ValueError("Khong tao duoc calibration records tu file dau vao.")
 
-        print(summarize_quantization_plan(plan, node_names))
         print(
             "Calibration stats: "
             f"requested_provider={stats['requested_provider']}, "
@@ -140,17 +145,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"max_encoder_len={stats['max_encoder_len']}, "
             f"max_decoder_len={stats['max_decoder_len']}"
         )
-
-        run_static_quantization(
-            fp32_onnx_path=fp32_onnx_path,
-            output_path=output_path,
-            plan=plan,
-            records=records,
-            calibration_method=resolve_calibration_method(args.calibration_method or plan.calibration_method),
-            percentile=args.percentile,
-            per_channel=args.per_channel,
-            calibration_chunk_size=args.calibration_chunk_size,
-        )
+        resolved_calibration_method = resolve_calibration_method(args.calibration_method or plan.calibration_method)
+        if plan.runner_kind == "qnn_static":
+            run_qnn_static_quantization(
+                fp32_onnx_path=fp32_onnx_path,
+                output_path=output_path,
+                plan=plan,
+                records=records,
+                calibration_method=resolved_calibration_method,
+                calibration_chunk_size=args.calibration_chunk_size,
+            )
+        else:
+            run_static_quantization(
+                fp32_onnx_path=fp32_onnx_path,
+                output_path=output_path,
+                plan=plan,
+                records=records,
+                calibration_method=resolved_calibration_method,
+                percentile=args.percentile,
+                per_channel=args.per_channel,
+                calibration_chunk_size=args.calibration_chunk_size,
+            )
 
     size_mb = file_size_mb(output_path)
     print(f"Quantized ONNX: {output_path}")

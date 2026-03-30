@@ -1,11 +1,10 @@
 import contextlib
 import logging
 import os
-import shutil
-import uuid
 from pathlib import Path
 from typing import Sequence
 from unittest import mock
+import uuid
 
 from onnxruntime.quantization.calibrate import TensorsData, create_calibrator
 from onnxruntime.quantization import CalibrationMethod, QuantFormat, QuantType, quantize_dynamic, quantize_static
@@ -14,7 +13,7 @@ from onnxruntime.quantization.quant_utils import load_model_with_shape_infer, mo
 
 from quantize.calibration import CalibrationSample, ListCalibrationDataReader
 from quantize.config import DEFAULT_TEMP_ROOT
-from quantize.runtime import ManualTemporaryDirectory, temporary_workspace_tempdir
+from quantize.runtime import ManualTemporaryDirectory, isolated_model_input, temporary_workspace_tempdir
 from quantize.types import QuantizationPlan
 
 
@@ -35,25 +34,6 @@ def build_static_extra_options(percentile: float) -> dict[str, float]:
     return {"CalibPercentile": percentile}
 
 
-@contextlib.contextmanager
-def isolated_model_input(fp32_onnx_path: Path) -> Path:
-    temp_root = DEFAULT_TEMP_ROOT / "model_inputs"
-    temp_root.mkdir(parents=True, exist_ok=True)
-    staged_input = temp_root / f"{fp32_onnx_path.stem}.{uuid.uuid4().hex}{fp32_onnx_path.suffix}"
-    try:
-        os.link(fp32_onnx_path, staged_input)
-    except OSError:
-        shutil.copy2(fp32_onnx_path, staged_input)
-
-    try:
-        yield staged_input
-    finally:
-        inferred_path = staged_input.with_name(f"{staged_input.stem}-inferred{staged_input.suffix}")
-        for cleanup_path in (inferred_path, staged_input):
-            with contextlib.suppress(FileNotFoundError, PermissionError):
-                cleanup_path.unlink()
-
-
 def run_static_quantization(
     fp32_onnx_path: Path,
     output_path: Path,
@@ -69,7 +49,7 @@ def run_static_quantization(
     resolved_per_channel = plan.per_channel if per_channel is None else per_channel
     extra_options = build_static_extra_options(percentile if percentile is not None else plan.percentile)
     with temporary_workspace_tempdir(DEFAULT_TEMP_ROOT):
-        with isolated_model_input(fp32_onnx_path) as staged_input:
+        with isolated_model_input(fp32_onnx_path, DEFAULT_TEMP_ROOT) as staged_input:
             with mock.patch("tempfile.TemporaryDirectory", ManualTemporaryDirectory):
                 if calibration_chunk_size and calibration_chunk_size > 0:
                     _run_static_quantization_chunked(
@@ -167,7 +147,7 @@ def run_dynamic_quantization(
     plan: QuantizationPlan,
 ) -> None:
     with temporary_workspace_tempdir(DEFAULT_TEMP_ROOT):
-        with isolated_model_input(fp32_onnx_path) as staged_input:
+        with isolated_model_input(fp32_onnx_path, DEFAULT_TEMP_ROOT) as staged_input:
             with mock.patch("tempfile.TemporaryDirectory", ManualTemporaryDirectory):
                 quantize_dynamic(
                     model_input=os.fspath(staged_input),
@@ -192,7 +172,15 @@ def build_size_budget_message(size_mb: float, size_budget_mb: float) -> str:
 def recommend_next_steps(plan: QuantizationPlan, size_mb: float, size_budget_mb: float) -> list[str]:
     recommendations: list[str] = []
     if size_mb > size_budget_mb and plan.preset == "sd8g2_quality":
-        recommendations.append("sd8g2_quality dang uu tien giu decoder o FP32; chi thu balanced/aggressive neu ban chap nhan rui ro giam quality.")
-    if plan.runner_kind == "static":
+        recommendations.append(
+            "sd8g2_quality dang uu tien QNN QDQ QUInt16/QUInt8 va giu decoder o FP32; "
+            "chi thu balanced/aggressive neu ban chap nhan rui ro giam quality."
+        )
+    if size_mb > size_budget_mb and plan.preset == "sd8g2_balanced":
+        recommendations.append(
+            "sd8g2_balanced dang uu tien QDQ QUInt16/QUInt8 cho QNN; "
+            "neu can nho hon nua thi phai mo rong pham vi quantize o decoder."
+        )
+    if plan.runner_kind in {"static", "qnn_static"}:
         recommendations.append("Neu quality chua tot, tang do da dang cua calibration text hoac giam pham vi quantize thay vi mo rong them.")
     return recommendations

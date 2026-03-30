@@ -16,8 +16,8 @@ python -m quantize --help
 
 ## Presets
 
-- `sd8g2_quality`: static PTQ, uu tien giu quality bang cach giu decoder va `lm_head` o FP32, chi quantize phan an toan hon.
-- `sd8g2_balanced`: static PTQ de benchmark tradeoff, rui ro giam quality cao hon.
+- `sd8g2_quality`: QNN-targeted PTQ + QDQ, dung `QUInt16` activations va `QUInt8` weights, giu toan bo decoder va `lm_head` o FP32 de uu tien quality.
+- `sd8g2_balanced`: balanced mode theo huong PTQ + QDQ cho QNN, dung `QUInt16` activations va `QUInt8` weights, giu `lm_head`, attention-score cua decoder, va 4 layer FFN decoder cuoi o FP32.
 - `sd8g2_aggressive`: static PTQ de nghien cuu/benchmark, rui ro giam quality cao nhat.
 - `baseline_dynamic_int8`: dynamic INT8 baseline.
 
@@ -70,10 +70,16 @@ Dry-run de xem preset va so node bi exclude:
 & D:\Anaconda\envs\speech2text\python.exe -m quantize --dry-run --preset sd8g2_quality
 ```
 
-Static quantization voi calibration mac dinh trong `quantize/calibration_400_cau` va provider mac dinh `cuda`:
+Quality QNN QDQ voi calibration mac dinh trong `quantize/calibration_400_cau` va provider mac dinh `cuda`:
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality
+```
+
+Balanced QNN QDQ can calibration text va mac dinh dung `minmax`:
+
+```powershell
+& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_balanced --calibration-source quantize\calibration_100_cau
 ```
 
 Static quantization voi mot file calibration cu the:
@@ -131,6 +137,7 @@ Nen chay tuan tu, khong nen chay song song nhieu job quantize cung luc.
 - `--max-generation-length`: gioi han do dai decoder khi tao calibration records.
 - `--ort-provider`: chon `cuda` hoac `cpu` cho calibration inference.
 - `--calibration-chunk-size`: chia calibration records thanh nhieu chunk nho khi ORT collect activation stats, giam RAM peak.
+- `sd8g2_balanced` la QNN-targeted QDQ nen van can calibration text.
 - `--percentile`: threshold cho calibration method `percentile`.
 - `--calibration-method`: `minmax`, `entropy`, `percentile`, `distribution`.
 - `--per-channel` hoac `--no-per-channel`: override setting cua preset.

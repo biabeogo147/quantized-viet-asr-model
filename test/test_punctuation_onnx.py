@@ -9,7 +9,7 @@ from transformers import AutoTokenizer
 
 
 MODEL_DIR = os.path.join("assets", "vietnamese-punc-cap-denorm-v1")
-ONNX_PATH = os.path.join(MODEL_DIR, "onnx", "vpcd_quality.onnx")
+ONNX_PATH = os.path.join(MODEL_DIR, "onnx", "vpcd_balanced.onnx")
 
 DEFAULT_TEXTS = [
     "hôm nay là buổi nhậm chức của tôi phước thành",
