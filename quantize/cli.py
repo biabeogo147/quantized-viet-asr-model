@@ -87,6 +87,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_path = _resolve_output_path(args)
     model_dir = Path(args.model_dir)
 
+    if args.calibration_chunk_size is not None and args.calibration_chunk_size < 1:
+        raise ValueError("--calibration-chunk-size phai >= 1.")
+
     if not fp32_onnx_path.exists():
         raise FileNotFoundError(f"Khong tim thay FP32 ONNX: {fp32_onnx_path}")
 

@@ -16,9 +16,9 @@ python -m quantize --help
 
 ## Presets
 
-- `sd8g2_quality`: static PTQ, uu tien giu quality.
-- `sd8g2_balanced`: static PTQ, can bang quality va size.
-- `sd8g2_aggressive`: static PTQ, mo rong pham vi quantize.
+- `sd8g2_quality`: static PTQ, uu tien giu quality bang cach giu decoder va `lm_head` o FP32, chi quantize phan an toan hon.
+- `sd8g2_balanced`: static PTQ de benchmark tradeoff, rui ro giam quality cao hon.
+- `sd8g2_aggressive`: static PTQ de nghien cuu/benchmark, rui ro giam quality cao nhat.
 - `baseline_dynamic_int8`: dynamic INT8 baseline.
 
 ## Calibration Source
@@ -26,7 +26,7 @@ python -m quantize --help
 Static quantization mac dinh se dung thu muc:
 
 ```text
-quantize/calibration
+quantize/calibration_400_cau
 ```
 
 Thu muc nay co the chua nhieu file `.txt`. Moi dong khong rong duoc xem la mot sample calibration.
@@ -70,7 +70,7 @@ Dry-run de xem preset va so node bi exclude:
 & D:\Anaconda\envs\speech2text\python.exe -m quantize --dry-run --preset sd8g2_quality
 ```
 
-Static quantization voi calibration mac dinh trong `quantize/calibration` va provider mac dinh `cuda`:
+Static quantization voi calibration mac dinh trong `quantize/calibration_400_cau` va provider mac dinh `cuda`:
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality
@@ -130,6 +130,7 @@ Nen chay tuan tu, khong nen chay song song nhieu job quantize cung luc.
 - `--max-calibration-samples`: gioi han so sample calibration duoc doc.
 - `--max-generation-length`: gioi han do dai decoder khi tao calibration records.
 - `--ort-provider`: chon `cuda` hoac `cpu` cho calibration inference.
+- `--calibration-chunk-size`: chia calibration records thanh nhieu chunk nho khi ORT collect activation stats, giam RAM peak.
 - `--percentile`: threshold cho calibration method `percentile`.
 - `--calibration-method`: `minmax`, `entropy`, `percentile`, `distribution`.
 - `--per-channel` hoac `--no-per-channel`: override setting cua preset.
@@ -145,6 +146,7 @@ Nen chay tuan tu, khong nen chay song song nhieu job quantize cung luc.
 Sau khi chay xong, CLI se in:
 - preset dang dung
 - calibration stats
+- quality guard cho `sd8g2_quality`
 - duong dan output
 - kich thuoc file
 - size budget PASS/FAIL

@@ -29,3 +29,7 @@ class QuantizationPlan:
     calibration_method: str
     percentile: float
     per_channel: bool
+
+    @property
+    def quantized_node_count(self) -> int:
+        return 0

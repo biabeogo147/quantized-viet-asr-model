@@ -5,6 +5,8 @@ from typing import Sequence
 from quantize.types import PresetSpec, QuantizationPlan
 
 
+QUALITY_REQUIRED_SUBSTRINGS = ("/decoder/", "/lm_head/MatMul")
+
 _PRESET_SPECS: "OrderedDict[str, PresetSpec]" = OrderedDict(
     [
         (
@@ -14,6 +16,7 @@ _PRESET_SPECS: "OrderedDict[str, PresetSpec]" = OrderedDict(
                 runner_kind="static",
                 op_types_to_quantize=("MatMul",),
                 exclusion_patterns=(
+                    "*/decoder/*",
                     "*/self_attn/MatMul",
                     "*/self_attn/MatMul_1",
                     "*/encoder_attn/MatMul",
@@ -80,12 +83,19 @@ def get_preset_spec(preset: str) -> PresetSpec:
         raise ValueError(f"Unsupported preset: {preset}") from exc
 
 
-def build_exclusion_patterns(preset: str) -> tuple[str, ...]:
-    return get_preset_spec(preset).exclusion_patterns
-
-
 def _matches_any_pattern(node_name: str, patterns: Sequence[str]) -> bool:
     return any(fnmatch.fnmatch(node_name, pattern) for pattern in patterns)
+
+
+def _validate_quality_plan(nodes_to_exclude: Sequence[str]) -> None:
+    missing_requirements = [
+        required_substring
+        for required_substring in QUALITY_REQUIRED_SUBSTRINGS
+        if not any(required_substring in node_name for node_name in nodes_to_exclude)
+    ]
+    if missing_requirements:
+        missing_text = ", ".join(missing_requirements)
+        raise ValueError(f"sd8g2_quality must keep these paths in FP32: {missing_text}")
 
 
 def build_quantization_plan(
@@ -101,6 +111,8 @@ def build_quantization_plan(
     nodes_to_exclude = tuple(
         node_name for node_name in node_names if _matches_any_pattern(node_name, patterns)
     )
+    if spec.name == "sd8g2_quality":
+        _validate_quality_plan(nodes_to_exclude)
     return QuantizationPlan(
         preset=spec.name,
         runner_kind=spec.runner_kind,
