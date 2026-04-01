@@ -2,3 +2,4 @@ assets
 _tmp
 __pycache__
 .idea
+/build/
