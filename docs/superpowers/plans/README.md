@@ -8,4 +8,5 @@ Nguyen tac:
 - Khi mot plan phu thuoc vao plan truoc, ghi ro dependency thay vi tron chung vao mot file qua lon.
 
 Plan hien tai:
-- `2026-04-01-zipformer-python-first-bundle-qnn.md`: phase Python-first cho Zipformer, gom bundle contract, `test_acoustic_model_onnx.py`, verifier, fixed-shape prep, va QNN-targeted quantization artifacts.
+- `2026-03-26-quantize-vpcd.md`: ke hoach cu cho quantize punctuation model theo huong Snapdragon 8 Gen 2.
+- `2026-04-01-zipformer-python-first-bundle-qnn.md`: ke hoach canonical hien tai. File nay da duoc mo rong thanh architecture plan cho shared `model_bundle` + multi-project `quantize`, dung cho ca `vpcd` va `zipformer`, va bao gom phase Zipformer `fixed-shape + PTQ + QDQ` candidate bundle.

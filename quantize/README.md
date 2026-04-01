@@ -1,160 +1,208 @@
-# Quantize CLI
+﻿# Quantize Module
 
-Module `quantize` dung de quantize ONNX model `vietnamese-punc-cap-denorm-v1` theo nhieu preset phu hop cho Snapdragon 8 Gen 2.
+`quantize/` chua framework quantization multi-project. Hien tai no phuc vu 2 bai toan:
 
-## Entry Point
+- quantize punctuation model `vpcd`
+- quantize Zipformer de tao candidate bundle `qnn_u16u8`
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --help
-```
+## Muc tieu
 
-Neu `python` da co trong PATH:
+- chia ro phan generic va phan project-specific
+- gom calibration, preset, runner, QNN helper, va report vao mot noi
+- de `zipformer` co the di tu fixed-shape -> PTQ + QDQ -> bundle candidate
 
-```powershell
-python -m quantize --help
-```
-
-## Presets
-
-- `sd8g2_quality`: QNN-targeted PTQ + QDQ, dung `QUInt16` activations va `QUInt8` weights, giu toan bo decoder va `lm_head` o FP32 de uu tien quality.
-- `sd8g2_balanced`: balanced mode theo huong PTQ + QDQ cho QNN, dung `QUInt16` activations va `QUInt8` weights, giu `lm_head`, attention-score cua decoder, va 4 layer FFN decoder cuoi o FP32.
-- `sd8g2_aggressive`: static PTQ de nghien cuu/benchmark, rui ro giam quality cao nhat.
-- `baseline_dynamic_int8`: dynamic INT8 baseline.
-
-## Calibration Source
-
-Static quantization mac dinh se dung thu muc:
+## File map
 
 ```text
-quantize/calibration_400_cau
+python-model-test/quantize/
+  cli.py
+  calibration.py
+  config.py
+  evaluate.py
+  fixed_shapes.py
+  model_introspection.py
+  presets.py
+  qnn.py
+  reports.py
+  runner.py
+  runtime.py
+  types.py
+  projects/
+    __init__.py
+    vpcd.py
+    zipformer.py
+  README.md
 ```
 
-Thu muc nay co the chua nhieu file `.txt`. Moi dong khong rong duoc xem la mot sample calibration.
+## Tung script giai quyet van de gi
 
-Ban cung co the truyen:
-- mot file txt duy nhat
-- hoac mot thu muc chua nhieu file txt
+### `cli.py`
 
-Thong qua:
+Vai tro:
+- entrypoint chung cua module quantize
+- parse `--project` truoc
+- route parser va runner sang project adapter dung
 
-```powershell
---calibration-source <path>
-```
+Ham chinh:
+- `_build_project_probe_parser()`
+- `parse_args(argv=None)`
+- `main(argv=None)`
 
-Hoac alias:
+### `types.py`
 
-```powershell
---calibration-text <path>
-```
+Vai tro:
+- khai bao dataclass dung xuyen suot module
 
-## ORT Provider
+Class chinh:
+- `CalibrationSample`
+- `PresetSpec`
+- `QuantizationPlan`
 
-Calibration inference ho tro:
+### `config.py`
 
-- `--ort-provider cuda`
-- `--ort-provider cpu`
+Vai tro:
+- chua default path va default numeric config cho flow punctuation cu
+- dac biet dung boi project `vpcd`
 
-Mac dinh la:
+### `calibration.py`
 
-```powershell
---ort-provider cuda
-```
+Vai tro:
+- tao calibration records cho static quantization
+- chuan hoa provider selection va sample padding
 
-Khi chon `cuda`, module se thu `CUDAExecutionProvider` truoc. Neu may hoac environment hien tai khong co CUDA provider, no se tu dong fallback ve `CPUExecutionProvider`.
+Class/ham chinh:
+- `ListCalibrationDataReader`
+  - adapter giua list `CalibrationSample` va ORT quantization API
+- `resolve_ort_providers(...)`
+- `iter_calibration_texts(...)`
+- `iter_calibration_files(...)`
+- `make_calibration_records(...)`
+- `pad_calibration_samples(...)`
+- `load_decoder_start_token_id(...)`
+- `greedy_decode_ids(...)`
+- `build_calibration_records(...)`
 
-## Lenh Thuong Dung
+### `presets.py`
 
-Dry-run de xem preset va so node bi exclude:
+Vai tro:
+- chua preset cho punctuation static/dynamic quantization
+- map pattern exclusion -> `QuantizationPlan`
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --dry-run --preset sd8g2_quality
-```
+Ham chinh:
+- `list_supported_presets()`
+- `get_preset_spec(preset)`
+- `build_quantization_plan(node_names, preset, extra_exclude_patterns=None)`
 
-Quality QNN QDQ voi calibration mac dinh trong `quantize/calibration_400_cau` va provider mac dinh `cuda`:
+### `runner.py`
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality
-```
+Vai tro:
+- chua generic quantization runner cho static va dynamic path
 
-Balanced QNN QDQ can calibration text va mac dinh dung `minmax`:
+Ham chinh:
+- `resolve_calibration_method(...)`
+- `run_static_quantization(...)`
+- `_run_static_quantization_chunked(...)`
+- `run_dynamic_quantization(...)`
+- `file_size_mb(...)`
+- `build_size_budget_message(...)`
+- `recommend_next_steps(...)`
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_balanced --calibration-source quantize\calibration_100_cau
-```
+### `qnn.py`
 
-Static quantization voi mot file calibration cu the:
+Vai tro:
+- helper rieng cho QNN-targeted static quantization
+- dung `qnn_preprocess_model` va `get_qnn_qdq_config`
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality --calibration-source quantize\calibration\vpcd_calibration_ngan.txt
-```
+Ham chinh:
+- `resolve_quant_type(...)`
+- `resolve_safe_stride(...)`
+- `run_qnn_static_quantization(...)`
 
-Static quantization va ep calibration inference chay CPU:
+### `fixed_shapes.py`
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality --ort-provider cpu
-```
+Vai tro:
+- dong bang input shape cua ONNX model truoc khi quantize
+- rat quan trong cho Zipformer vi NPU/QNN khong thich dynamic shape
 
-Static quantization voi output rieng:
+Ham chinh:
+- `freeze_model_inputs(model_path, output_path, input_shapes)`
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_balanced --output test\_tmp\sd8g2_balanced.onnx
-```
+### `evaluate.py`
 
-Dynamic baseline:
+Vai tro:
+- bridge nho giua quantize va `model_bundle.verifier`
+- de quantize phase co the goi verify ma khong duplicate logic
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset baseline_dynamic_int8 --output test\_tmp\baseline_dynamic_int8.onnx
-```
+Ham chinh:
+- `evaluate_bundle_against_model_dir(...)`
+- `evaluate_candidate_bundle(...)`
 
-## Chay Nhieu Preset
+### `reports.py`
 
-Chay lan luot tung preset:
+Vai tro:
+- dinh nghia report schema de ghi ket qua quantization ra JSON
 
-```powershell
-$py = "D:\Anaconda\envs\speech2text\python.exe"
+Class chinh:
+- `ComponentQuantizationReport`
+- `QuantizationReport`
 
-& $py -m quantize --preset baseline_dynamic_int8 --output test\_tmp\baseline_dynamic_int8.onnx
-& $py -m quantize --preset sd8g2_quality --output test\_tmp\sd8g2_quality.onnx
-& $py -m quantize --preset sd8g2_balanced --output test\_tmp\sd8g2_balanced.onnx
-& $py -m quantize --preset sd8g2_aggressive --output test\_tmp\sd8g2_aggressive.onnx
-```
+### `model_introspection.py`
 
-Hoac loop cho 3 preset static:
+Vai tro:
+- doc named nodes tu ONNX graph
+- sinh preview text cho dry-run
 
-```powershell
-$py = "D:\Anaconda\envs\speech2text\python.exe"
+Ham chinh:
+- `load_model_node_names(path)`
+- `summarize_quantization_plan(plan, node_names)`
 
-foreach ($preset in @("sd8g2_quality", "sd8g2_balanced", "sd8g2_aggressive")) {
-    & $py -m quantize --preset $preset --output "test\_tmp\$preset.onnx"
-}
-```
+### `runtime.py`
 
-Nen chay tuan tu, khong nen chay song song nhieu job quantize cung luc.
+Vai tro:
+- workaround cho temp directory va hardlink/copy model input tren Windows
+- giup ORT quantization chay on dinh hon trong workspace hien tai
 
-## Mot Vai Option Quan Trong
+Class/ham chinh:
+- `ManualTemporaryDirectory`
+- `isolated_model_input(...)`
+- `temporary_workspace_tempdir(...)`
 
-- `--max-calibration-samples`: gioi han so sample calibration duoc doc.
-- `--max-generation-length`: gioi han do dai decoder khi tao calibration records.
-- `--ort-provider`: chon `cuda` hoac `cpu` cho calibration inference.
-- `--calibration-chunk-size`: chia calibration records thanh nhieu chunk nho khi ORT collect activation stats, giam RAM peak.
-- `sd8g2_balanced` la QNN-targeted QDQ nen van can calibration text.
-- `--percentile`: threshold cho calibration method `percentile`.
-- `--calibration-method`: `minmax`, `entropy`, `percentile`, `distribution`.
-- `--per-channel` hoac `--no-per-channel`: override setting cua preset.
-- `--extra-exclude-pattern`: bo sung pattern node can giu FP32.
-- `--size-budget-mb`: muc tieu size de in PASS/FAIL sau quantize.
+## Project adapters
 
-## Vi Du Smoke Run
+Chi tiet nam o `quantize/projects/README.md`, nhung tom tat:
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --preset sd8g2_quality --max-calibration-samples 4 --max-generation-length 8 --output test\_tmp\model.static.smoke.onnx
-```
+- `projects/vpcd.py`
+  - route punctuation quantization theo preset
+- `projects/zipformer.py`
+  - collect audio calibration
+  - freeze shape cho encoder/decoder/joiner
+  - quantize tung component
+  - export candidate bundle
+  - ghi `quantization_report.json` va `evaluation_report.json`
 
-Sau khi chay xong, CLI se in:
-- preset dang dung
-- calibration stats
-- quality guard cho `sd8g2_quality`
-- duong dan output
-- kich thuoc file
-- size budget PASS/FAIL
-- goi y tinh chinh tiep theo
+## Flow tong quat cua quantize
+
+### VPCD
+
+`python -m quantize --project vpcd`
+-> load FP32 ONNX
+-> build preset plan
+-> calibration text / dynamic path
+-> quantize
+-> in size budget + goi y
+
+### Zipformer
+
+`python -m quantize --project zipformer`
+-> load audio fixtures
+-> trace encoder/decoder/joiner records
+-> freeze fixed shapes
+-> QNN PTQ + QDQ tung component
+-> export candidate bundle `qnn_u16u8`
+-> verify candidate voi reference bundle
+-> ghi report
+
+## Ghi chu trung thuc
+
+- candidate `zipformer/qnn_u16u8` hien da runnable
+- no chua exact-match 100% voi FP32 reference tren bo sample hien tai

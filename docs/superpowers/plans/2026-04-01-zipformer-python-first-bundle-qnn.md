@@ -1,77 +1,124 @@
-# Zipformer Python-First Bundle And QNN Plan Implementation Plan
+﻿# Shared Model Bundle Platform And Quantization Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Python-first Zipformer workflow that can run `test_acoustic_model_onnx.py` in both model-dir mode and bundle-manifest mode, verify parity between the two, and only then produce QNN-oriented fixed-shape quantized artifacts for Snapdragon 8 Gen 2.
+**Goal:** Replace the model-specific Python bundle code with one shared `model_bundle` platform for both `vpcd` and `zipformer`, refactor `quantize` into a multi-project framework for both models, remove `acoustic_bundle`, and deliver the first fixed-shape `PTQ + QDQ` Zipformer candidate bundle.
 
-**Architecture:** Treat `python-model-test` as the source of truth for the acoustic model contract before Android consumes anything. First extract the current RNNT inference logic from `test/test_vietasr.py` into reusable runtimes, define an `acoustic_bundle` contract analogous to punctuation but specialized for encoder/decoder/joiner plus `tokens.txt`, and add a clean smoke runner `test_acoustic_model_onnx.py` with two mutually-exclusive modes. After bundle parity is locked, extend the existing `quantize` package to target Zipformer with fixed-shape preprocessing, `QUInt16/QUInt8` QDQ presets, and offline evaluation scripts.
+**Architecture:** Introduce a single `model_bundle` package that owns manifest contracts, layout helpers, export orchestration, verification, fixtures, and project adapters. Move the existing punctuation bundle logic from `android_bundle` and the acoustic bundle logic from `acoustic_bundle` behind project adapters so the top-level CLIs and smoke runners use one shared core. In parallel, refactor `quantize` to resolve a project adapter (`vpcd` or `zipformer`) and share the CLI, planning, reporting, and QNN helpers while letting each project provide its own calibration, exclusions, and quality gates.
 
-**Tech Stack:** Python 3, ONNX Runtime, ONNX, NumPy, Torchaudio, pytest, existing `quantize` package in `python-model-test`
+**Tech Stack:** Python 3, ONNX Runtime, ONNX Runtime quantization APIs, QNN preprocessing helpers, NumPy, Torchaudio, pytest
 
 ---
 
 ## Scope To Lock
 
-- This plan is **Python-only**. Do not touch `bkmeeting` implementation while executing it.
-- This plan covers only `assets/zipformer`.
-- `test/test_vietasr.py` remains the legacy exploratory script until the new runner is complete.
-- The first success milestone is **not** quantization. It is a clean `test_acoustic_model_onnx.py` that works like the punctuation runner:
-  - `--model-dir` mode uses only the source model directory.
-  - `--bundle-manifest` mode uses only the exported acoustic bundle.
-- QNN quantization starts only after bundle parity exists and is tested.
+- This plan is **Python-only**. Do not change `bkmeeting` while executing it.
+- The canonical shared bundle module becomes `python-model-test/model_bundle`.
+- `python-model-test/acoustic_bundle` must be removed by the end of this plan.
+- `python-model-test/android_bundle` must stop being a punctuation-only architectural root; its responsibilities move into `model_bundle`.
+- Domain-specific smoke runners may stay for usability:
+  - `test/test_punctuation_model_onnx.py`
+  - `test/test_acoustic_model_onnx.py`
+  But they must call the shared `model_bundle` core under the hood.
+- `quantize` must become explicitly multi-project:
+  - `vpcd`
+  - `zipformer`
+- The first quantized target remains Zipformer `QDQ` with `QUInt16` activations + `QUInt8` weights.
 
-## Assumptions
+## Design Rules
 
-- The reference source model directory is `python-model-test/assets/zipformer`.
-- The first acoustic bundle targets the current FP32 model set from that directory.
-- Bundle layout should be future-proof for Android, but this plan must be fully useful even if Android work is postponed.
-- Default quantization target for Snapdragon 8 Gen 2 remains `QUInt16` activations + `QUInt8` weights.
-- `QUInt8/QUInt8` stays experimental and must not be the default preset.
+- Core bundle logic lives once in `model_bundle`; project-specific logic lives in small project adapters.
+- Core quantization logic lives once in `quantize`; project-specific logic lives in `quantize/projects`.
+- Bundle manifests should be generic enough for both text-generation style models and RNNT component groups.
+- Verification and export CLIs should be generic, with the project selected by explicit metadata instead of hidden assumptions.
+- Existing behavior for punctuation must remain reproducible after migration.
+- Existing FP32 Zipformer bundle stays as a **reference bundle**, not a deployment artifact.
 
 ## Planned File Map
 
-### Acoustic Bundle Contract
+### Shared Model Bundle Platform
 
-- Create: `python-model-test/acoustic_bundle/__init__.py` - package boundary for acoustic bundle helpers.
-- Create: `python-model-test/acoustic_bundle/manifest.py` - manifest schema and path resolution helpers.
-- Create: `python-model-test/acoustic_bundle/runtime.py` - bundle-backed RNNT runtime for encoder/decoder/joiner.
-- Create: `python-model-test/acoustic_bundle/exporter.py` - export FP32 acoustic bundle from a model directory.
-- Create: `python-model-test/acoustic_bundle/verifier.py` - compare model-dir runtime against bundle runtime on audio fixtures.
-- Create: `python-model-test/acoustic_bundle/eval_fixtures.py` - deterministic sample manifest and transcript fixture helpers.
-- Create: `python-model-test/export_acoustic_bundle.py` - CLI entry point for bundle export.
-- Create: `python-model-test/verify_acoustic_bundle.py` - CLI entry point for parity verification.
+- Create: `python-model-test/model_bundle/__init__.py` - package boundary for the shared bundle framework.
+- Create: `python-model-test/model_bundle/contracts.py` - shared dataclasses and protocol interfaces for bundle projects, artifacts, and verification reports.
+- Create: `python-model-test/model_bundle/manifest.py` - generic manifest schema and path resolution helpers.
+- Create: `python-model-test/model_bundle/layout.py` - canonical directory and file layout helpers.
+- Create: `python-model-test/model_bundle/fixtures.py` - shared sample and expected-output fixture serialization.
+- Create: `python-model-test/model_bundle/exporter.py` - generic export orchestration that dispatches to a project adapter.
+- Create: `python-model-test/model_bundle/verifier.py` - generic verification runner that dispatches to a project adapter.
+- Create: `python-model-test/model_bundle/projects/__init__.py` - registry for bundle project adapters.
+- Create: `python-model-test/model_bundle/projects/vpcd.py` - punctuation-specific adapter using tokenizer graphs and bridge maps.
+- Create: `python-model-test/model_bundle/projects/zipformer.py` - RNNT-specific adapter using encoder/decoder/joiner plus tokens.
+- Create: `python-model-test/model_bundle/README.md` - operator docs for the shared bundle system.
 
-### Acoustic Runtimes And Smoke Tests
+### CLI And Smoke Runner Integration
 
-- Create: `python-model-test/test/test_acoustic_model_onnx.py` - new smoke runner with model-dir mode and bundle-manifest mode.
-- Create: `python-model-test/test/test_acoustic_bundle.py` - tests for bundle manifest, exporter, and runtime selection.
-- Modify: `python-model-test/test/test_vietasr.py` - extract reusable Zipformer RNNT helpers and reduce duplicated ad-hoc logic.
-- Modify: `python-model-test/test/README.md` - document the new acoustic smoke runner.
+- Create: `python-model-test/export/model_bundle.py` - generic CLI to export a bundle by project.
+- Create: `python-model-test/verify/model_bundle.py` - generic CLI to verify a bundle by project.
+- Modify: `python-model-test/test/test_punctuation_model_onnx.py` - use the shared `model_bundle` runtime path for bundle-manifest mode.
+- Modify: `python-model-test/test/test_acoustic_model_onnx.py` - use the shared `model_bundle` runtime path for bundle-manifest mode.
+- Modify: `python-model-test/test/test_vpcd_bundle.py` - migrate tests to the shared model bundle adapter model.
+- Modify: `python-model-test/test/test_zipformer_bundle.py` - rename/reframe around shared bundle behavior.
+- Modify: `python-model-test/test/README.md` - document the shared bundle commands and domain-specific smoke runners.
 
-### Zipformer Quantization Phase
+### Legacy Module Removal
 
-- Create: `python-model-test/quantize/projects/__init__.py` - project registry for quantization targets.
-- Create: `python-model-test/quantize/projects/zipformer.py` - Zipformer-specific quantization metadata and path discovery.
-- Create: `python-model-test/quantize/fixed_shapes.py` - helper to make encoder/decoder/joiner inputs fixed for QNN.
-- Create: `python-model-test/quantize/evaluate_zipformer.py` - offline evaluation and quality reporting.
-- Modify: `python-model-test/quantize/config.py` - remove punctuation-only assumptions from defaults.
-- Modify: `python-model-test/quantize/types.py` - add project/component/fixed-shape metadata.
-- Modify: `python-model-test/quantize/presets.py` - add Zipformer-specific QNN presets.
-- Modify: `python-model-test/quantize/cli.py` - add `--project zipformer` and component-level execution.
-- Modify: `python-model-test/quantize/qnn.py` - support Zipformer fixed-shape QDQ generation.
-- Modify: `python-model-test/quantize/README.md` - document the new Zipformer flow separately from punctuation.
+- Delete: `python-model-test/acoustic_bundle/__init__.py`
+- Delete: `python-model-test/acoustic_bundle/manifest.py`
+- Delete: `python-model-test/acoustic_bundle/runtime.py`
+- Delete: `python-model-test/acoustic_bundle/exporter.py`
+- Delete: `python-model-test/acoustic_bundle/verifier.py`
+- Delete: `python-model-test/acoustic_bundle/eval_fixtures.py`
+- Modify or delete: `python-model-test/android_bundle/*` after migrating code into `model_bundle`.
+- Modify: `python-model-test/acoustic_bundle/README.md` - replace with redirect or remove if empty after migration.
+- Modify: `python-model-test/android_bundle/README.md` - replace with redirect or remove if empty after migration.
 
-### Plan And Repo Docs
+### Multi-Project Quantization Framework
 
-- Create: `python-model-test/plans/README.md` - index for repo-level plans.
-- Create: `python-model-test/plans/2026-04-01-zipformer-python-first-bundle-qnn.md` - this plan.
+- Create: `python-model-test/quantize/projects/__init__.py` - registry for quantization project adapters.
+- Create: `python-model-test/quantize/projects/vpcd.py` - punctuation-specific calibration and exclusion logic.
+- Create: `python-model-test/quantize/projects/zipformer.py` - Zipformer-specific component metadata, calibration, fixed-shape policy, and quality gates.
+- Create: `python-model-test/quantize/fixed_shapes.py` - reusable fixed-shape helpers for component-based models.
+- Create: `python-model-test/quantize/reports.py` - shared report dataclasses for quantization and evaluation.
+- Create: `python-model-test/quantize/evaluate.py` - project-dispatched evaluation entry points.
+- Modify: `python-model-test/quantize/cli.py` - add `--project` and remove punctuation-only assumptions.
+- Modify: `python-model-test/quantize/config.py` - move defaults behind project adapters.
+- Modify: `python-model-test/quantize/types.py` - add project and component metadata.
+- Modify: `python-model-test/quantize/calibration.py` - split text and audio calibration through project adapters.
+- Modify: `python-model-test/quantize/presets.py` - move preset definitions behind project adapters.
+- Modify: `python-model-test/quantize/qnn.py` - support both single-model and component-wise QDQ workflows.
+- Modify: `python-model-test/quantize/runner.py` - orchestrate project-aware quantization and output staging.
+- Modify: `python-model-test/quantize/README.md` - document `vpcd` and `zipformer` flows side by side.
 
-## Bundle Layout To Standardize
+### Plans And Repo Docs
 
-The first exported acoustic bundle should look like:
+- Modify: `python-model-test/docs/superpowers/plans/README.md` - make this plan the canonical architecture and quantization plan.
+- Modify: `python-model-test/docs/superpowers/plans/2026-04-01-zipformer-python-first-bundle-qnn.md` - this file becomes the canonical shared-platform plan.
+
+## Standardized Output Layout
+
+All exported bundles should share one root pattern:
 
 ```text
-python-model-test/build/acoustic_bundle/zipformer/fp32/
+python-model-test/build/model_bundle/<project>/<variant>/
+  bundle_manifest.json
+  fixtures.jsonl or sample_manifest.jsonl
+  expected_outputs.jsonl
+  ...project-specific artifacts...
+```
+
+Examples:
+
+```text
+python-model-test/build/model_bundle/vpcd/fp32/
+  bundle_manifest.json
+  tokenizer.encode.onnx
+  tokenizer.decode.onnx
+  tokenizer.to_model_id_map.json
+  tokenizer.from_model_id_map.json
+  golden_samples.jsonl
+  model.mobile.onnx
+
+python-model-test/build/model_bundle/zipformer/fp32/
   bundle_manifest.json
   encoder.onnx
   decoder.onnx
@@ -79,63 +126,61 @@ python-model-test/build/acoustic_bundle/zipformer/fp32/
   tokens.txt
   sample_manifest.jsonl
   expected_outputs.jsonl
-```
 
-Minimum manifest fields:
-
-```json
-{
-  "bundle_version": 1,
-  "model_family": "zipformer-rnnt",
-  "model_name": "zipformer/fp32",
-  "asset_namespace": "models/asr/zipformer/fp32",
-  "encoder_file": "encoder.onnx",
-  "decoder_file": "decoder.onnx",
-  "joiner_file": "joiner.onnx",
-  "tokens_file": "tokens.txt",
-  "sample_manifest_file": "sample_manifest.jsonl",
-  "expected_outputs_file": "expected_outputs.jsonl",
-  "sample_rate": 16000,
-  "feature_dim": 80,
-  "blank_id": 0,
-  "context_size": 2
-}
+python-model-test/build/model_bundle/zipformer/qnn_u16u8/
+  bundle_manifest.json
+  encoder.onnx
+  decoder.onnx
+  joiner.onnx
+  tokens.txt
+  sample_manifest.jsonl
+  expected_outputs.jsonl
+  quantization_report.json
+  evaluation_report.json
 ```
 
 ## Success Gates
 
 Do not call this phase complete until all of these are true:
 
-- `test/test_acoustic_model_onnx.py` exists and supports `--model-dir` and `--bundle-manifest` modes.
-- `BundleAcousticRuntime` does not read anything from `model-dir` once `--bundle-manifest` is chosen.
-- `verify_acoustic_bundle.py` passes on the default sample set.
-- The default exported FP32 bundle can be replayed end-to-end using only the bundle manifest.
-- Zipformer quantization presets exist in the `quantize` package.
-- A fixed-shape QNN-ready artifact set can be produced for Zipformer and evaluated offline.
+- `model_bundle` is the only architectural bundle root in Python.
+- `acoustic_bundle` has been removed.
+- `android_bundle` no longer contains logic that exists only for punctuation; any remaining files are thin compatibility wrappers or are removed.
+- `python -m export.model_bundle --project vpcd` works.
+- `python -m export.model_bundle --project zipformer` works.
+- `python -m verify.model_bundle --project vpcd` works.
+- `python -m verify.model_bundle --project zipformer` works.
+- `python -m quantize --project vpcd` works.
+- `python -m quantize --project zipformer` works.
+- `test/test_punctuation_model_onnx.py` and `test/test_acoustic_model_onnx.py` still pass in both model-dir and bundle-manifest modes.
+- `build/model_bundle/zipformer/qnn_u16u8` can be produced with reports.
 
-## Task 1: Create The Clean Acoustic Smoke Runner
+## Task 1: Introduce The Shared `model_bundle` Core
 
 **Files:**
-- Create: `python-model-test/test/test_acoustic_model_onnx.py`
-- Modify: `python-model-test/test/test_vietasr.py`
-- Modify: `python-model-test/test/README.md`
+- Create: `python-model-test/model_bundle/__init__.py`
+- Create: `python-model-test/model_bundle/contracts.py`
+- Create: `python-model-test/model_bundle/manifest.py`
+- Create: `python-model-test/model_bundle/layout.py`
+- Create: `python-model-test/model_bundle/fixtures.py`
+- Create: `python-model-test/model_bundle/projects/__init__.py`
+- Create: `python-model-test/test/test_model_bundle_core.py`
 
-- [ ] **Step 1: Write a failing test for runtime selection**
+- [ ] **Step 1: Write a failing test for generic manifest round-trip**
 
 ```python
-def test_create_runtime_uses_bundle_runtime_when_bundle_manifest_is_provided():
-    args = parser.parse_args(["--bundle-manifest", "bundle_manifest.json"])
-    runtime = create_runtime(args)
-    assert runtime.__class__.__name__ == "BundleAcousticRuntime"
+def test_model_bundle_manifest_round_trips_generic_artifacts():
+    manifest = ModelBundleManifest(...)
+    restored = ModelBundleManifest.from_dict(manifest.to_dict())
+    assert restored.project == "vpcd"
 ```
 
-- [ ] **Step 2: Write a failing test for model-dir mode**
+- [ ] **Step 2: Write a failing test for project registry lookup**
 
 ```python
-def test_create_runtime_uses_model_dir_runtime_by_default():
-    args = parser.parse_args([])
-    runtime = create_runtime(args)
-    assert runtime.__class__.__name__ == "ModelDirAcousticRuntime"
+def test_model_bundle_project_registry_resolves_vpcd_and_zipformer():
+    assert resolve_bundle_project("vpcd").name == "vpcd"
+    assert resolve_bundle_project("zipformer").name == "zipformer"
 ```
 
 - [ ] **Step 3: Run the tests and confirm they fail**
@@ -143,289 +188,217 @@ def test_create_runtime_uses_model_dir_runtime_by_default():
 Run:
 
 ```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m pytest python-model-test/test/test_acoustic_bundle.py -q
+& D:\Anaconda\envs\speech2text\python.exe -m pytest python-model-test/test/test_model_bundle_core.py -q
 ```
 
-Expected: FAIL because `test_acoustic_model_onnx.py` and the new runtime classes do not exist yet.
+Expected: FAIL because the shared bundle core does not exist yet.
 
-- [ ] **Step 4: Extract shared RNNT inference helpers from `test/test_vietasr.py`**
-- [ ] **Step 5: Implement `ModelDirAcousticRuntime` in the new runner**
-- [ ] **Step 6: Re-run the tests**
-
-Expected: PASS
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add python-model-test/test/test_acoustic_model_onnx.py python-model-test/test/test_acoustic_bundle.py python-model-test/test/test_vietasr.py python-model-test/test/README.md
-git commit -m "feat: add clean zipformer acoustic smoke runner"
-```
-
-## Task 2: Define The Acoustic Bundle Contract
-
-**Files:**
-- Create: `python-model-test/acoustic_bundle/__init__.py`
-- Create: `python-model-test/acoustic_bundle/manifest.py`
-- Create: `python-model-test/acoustic_bundle/eval_fixtures.py`
-- Create: `python-model-test/test/test_acoustic_bundle.py`
-
-- [ ] **Step 1: Write a failing test for bundle manifest serialization**
-
-```python
-def test_acoustic_bundle_manifest_round_trips():
-    manifest = AcousticBundleManifest(...)
-    payload = manifest.to_dict()
-    restored = AcousticBundleManifest.from_dict(payload)
-    assert restored.encoder_file == "encoder.onnx"
-    assert restored.context_size == 2
-```
-
-- [ ] **Step 2: Write a failing test for fixture serialization**
-
-```python
-def test_expected_output_fixture_round_trips():
-    fixture = ExpectedOutputFixture(audio_path="sample.wav", text="xin chao")
-    payload = fixture.to_dict()
-    assert payload["text"] == "xin chao"
-```
-
-- [ ] **Step 3: Run the tests and verify failure**
-- [ ] **Step 4: Implement the manifest dataclass and path helpers**
-- [ ] **Step 5: Implement fixture helpers for sample manifests and expected outputs**
-- [ ] **Step 6: Re-run the tests**
-
-Expected: PASS
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add python-model-test/acoustic_bundle python-model-test/test/test_acoustic_bundle.py
-git commit -m "feat: add acoustic bundle manifest and fixtures"
-```
-
-## Task 3: Export And Replay A FP32 Acoustic Bundle
-
-**Files:**
-- Create: `python-model-test/acoustic_bundle/exporter.py`
-- Create: `python-model-test/acoustic_bundle/runtime.py`
-- Create: `python-model-test/export_acoustic_bundle.py`
-- Modify: `python-model-test/test/test_acoustic_model_onnx.py`
-- Test: `python-model-test/test/test_acoustic_bundle.py`
-
-- [ ] **Step 1: Write a failing test that exporter writes all required files**
-
-```python
-def test_export_acoustic_bundle_writes_manifest_and_model_files(tmp_path):
-    output_dir = tmp_path / "bundle"
-    export_acoustic_bundle(..., output_dir=output_dir)
-    assert (output_dir / "bundle_manifest.json").exists()
-    assert (output_dir / "encoder.onnx").exists()
-    assert (output_dir / "decoder.onnx").exists()
-    assert (output_dir / "joiner.onnx").exists()
-    assert (output_dir / "tokens.txt").exists()
-```
-
-- [ ] **Step 2: Write a failing test that bundle runtime loads without `model-dir`**
-
-```python
-def test_bundle_runtime_uses_only_manifest_paths(tmp_path):
-    runtime = BundleAcousticRuntime.from_manifest_path(tmp_path / "bundle_manifest.json")
-    assert runtime is not None
-```
-
-- [ ] **Step 3: Run the tests and verify failure**
-- [ ] **Step 4: Implement the exporter**
-- [ ] **Step 5: Implement the bundle runtime**
-- [ ] **Step 6: Wire `--bundle-manifest` into `test_acoustic_model_onnx.py`**
-- [ ] **Step 7: Re-run the tests**
-
-Expected: PASS
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add python-model-test/acoustic_bundle python-model-test/export_acoustic_bundle.py python-model-test/test/test_acoustic_model_onnx.py python-model-test/test/test_acoustic_bundle.py
-git commit -m "feat: add fp32 acoustic bundle export and runtime"
-```
-
-## Task 4: Verify Bundle Parity Against Model-Dir Mode
-
-**Files:**
-- Create: `python-model-test/acoustic_bundle/verifier.py`
-- Create: `python-model-test/verify_acoustic_bundle.py`
-- Modify: `python-model-test/test/test_acoustic_bundle.py`
-- Modify: `python-model-test/test/README.md`
-
-- [ ] **Step 1: Write a failing test for transcript parity verification**
-
-```python
-def test_verify_exported_bundle_matches_model_dir_mode(tmp_path):
-    report = verify_exported_acoustic_bundle(...)
-    assert report["passed"] is True
-```
-
-- [ ] **Step 2: Run the tests and verify failure**
-- [ ] **Step 3: Implement `verify_exported_acoustic_bundle()`**
-- [ ] **Step 4: Implement the CLI wrapper**
+- [ ] **Step 4: Implement the shared manifest, contracts, fixtures, and project registry**
 - [ ] **Step 5: Re-run the tests**
 
 Expected: PASS
 
-- [ ] **Step 6: Smoke-run both modes manually**
+- [ ] **Step 6: Commit**
 
-Run:
-
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m test.test_acoustic_model_onnx --model-dir python-model-testssets\zipformer --audio-file python-model-testssets\speech\sample-2.wav
+```bash
+git add python-model-test/model_bundle python-model-test/test/test_model_bundle_core.py
+git commit -m "feat: add shared model bundle core"
 ```
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe python-model-test\export_acoustic_bundle.py --model-dir python-model-testssets\zipformer --output-dir python-model-testuildcoustic_bundle\zipformerp32 --asset-namespace models/asr/zipformer/fp32
+## Task 2: Migrate VPCD From `android_bundle` To `model_bundle`
+
+**Files:**
+- Create: `python-model-test/model_bundle/projects/vpcd.py`
+- Modify: `python-model-test/test/test_punctuation_model_onnx.py`
+- Modify: `python-model-test/test/test_vpcd_bundle.py`
+- Modify: `python-model-test/android_bundle/README.md`
+- Modify or delete: `python-model-test/android_bundle/*.py`
+
+- [ ] **Step 1: Write a failing test that the shared bundle runtime can export and verify VPCD**
+- [ ] **Step 2: Run the test and confirm it fails**
+- [ ] **Step 3: Move punctuation-specific export, verify, runtime, and tokenizer-bridge logic into the `vpcd` project adapter**
+- [ ] **Step 4: Rewire punctuation smoke tests to use `model_bundle`**
+- [ ] **Step 5: Re-run the tests**
+
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add python-model-test/model_bundle/projects/vpcd.py python-model-test/test/test_punctuation_model_onnx.py python-model-test/test/test_vpcd_bundle.py python-model-test/android_bundle
+ git commit -m "refactor: migrate vpcd bundle flow to shared model bundle"
 ```
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m test.test_acoustic_model_onnx --bundle-manifest python-model-testuildcoustic_bundle\zipformerp32undle_manifest.json --audio-file python-model-testssets\speech\sample-2.wav
+## Task 3: Migrate Zipformer And Remove `acoustic_bundle`
+
+**Files:**
+- Create: `python-model-test/model_bundle/projects/zipformer.py`
+- Modify: `python-model-test/test/test_acoustic_model_onnx.py`
+- Modify: `python-model-test/test/test_zipformer_bundle.py`
+- Delete: `python-model-test/acoustic_bundle/*`
+- Modify: `python-model-test/acoustic_bundle/README.md`
+
+- [ ] **Step 1: Write a failing test that the shared bundle runtime can export and verify Zipformer**
+- [ ] **Step 2: Run the test and confirm it fails**
+- [ ] **Step 3: Move acoustic bundle manifest, runtime, exporter, verifier, and fixtures into the `zipformer` project adapter**
+- [ ] **Step 4: Delete `acoustic_bundle` once all imports are moved**
+- [ ] **Step 5: Re-run the tests**
+
+Expected: PASS
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add python-model-test/model_bundle/projects/zipformer.py python-model-test/test/test_acoustic_model_onnx.py python-model-test/test/test_zipformer_bundle.py python-model-test/acoustic_bundle
+git commit -m "refactor: migrate zipformer bundle flow and remove acoustic_bundle"
 ```
 
-Expected: the bundle mode transcript matches model-dir mode on the sample set.
+## Task 4: Replace Per-Model Bundle CLIs With Generic CLIs
+
+**Files:**
+- Create: `python-model-test/export/model_bundle.py`
+- Create: `python-model-test/verify/model_bundle.py`
+- Modify: `python-model-test/export_acoustic_bundle.py`
+- Modify: `python-model-test/verify_acoustic_bundle.py`
+- Modify: `python-model-test/verify_android_punctuation_bundle.py`
+- Modify: `python-model-test/test/README.md`
+
+- [ ] **Step 1: Write a failing test for `python -m export.model_bundle --project vpcd`**
+- [ ] **Step 2: Write a failing test for `python -m export.model_bundle --project zipformer`**
+- [ ] **Step 3: Run the tests and confirm they fail**
+- [ ] **Step 4: Implement the generic export and verify CLIs**
+- [ ] **Step 5: Turn old per-model scripts into thin wrappers or deprecate them explicitly**
+- [ ] **Step 6: Re-run the tests**
+
+Expected: PASS
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add python-model-test/acoustic_bundle python-model-test/verify_acoustic_bundle.py python-model-test/test/test_acoustic_bundle.py python-model-test/test/README.md
-git commit -m "feat: verify acoustic bundle parity against model-dir runtime"
+git add python-model-test/export python-model-test/verify python-model-test/export_acoustic_bundle.py python-model-test/verify_acoustic_bundle.py python-model-test/verify_android_punctuation_bundle.py python-model-test/test/README.md
+git commit -m "refactor: add generic model bundle CLIs"
 ```
 
-## Task 5: Make The Quantize Package Project-Aware For Zipformer
+## Task 5: Refactor `quantize` Into A Multi-Project Framework
 
 **Files:**
 - Create: `python-model-test/quantize/projects/__init__.py`
+- Create: `python-model-test/quantize/projects/vpcd.py`
 - Create: `python-model-test/quantize/projects/zipformer.py`
+- Modify: `python-model-test/quantize/cli.py`
 - Modify: `python-model-test/quantize/config.py`
 - Modify: `python-model-test/quantize/types.py`
-- Modify: `python-model-test/quantize/cli.py`
-- Modify: `python-model-test/quantize/README.md`
-
-- [ ] **Step 1: Write a failing test for Zipformer quantization project discovery**
-- [ ] **Step 2: Run the test and verify failure**
-- [ ] **Step 3: Add project registry and project-specific defaults**
-- [ ] **Step 4: Add `--project zipformer` and component-aware CLI options**
-- [ ] **Step 5: Re-run the tests**
-
-Expected: PASS
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add python-model-test/quantize python-model-test/test/test_acoustic_bundle.py
-git commit -m "feat: generalize quantize package for zipformer"
-```
-
-## Task 6: Add Fixed-Shape Preprocessing Before QNN
-
-**Files:**
-- Create: `python-model-test/quantize/fixed_shapes.py`
-- Create: `python-model-test/quantize/evaluate_zipformer.py`
-- Modify: `python-model-test/quantize/qnn.py`
-- Modify: `python-model-test/quantize/presets.py`
-- Test: `python-model-test/test/test_acoustic_bundle.py`
-
-- [ ] **Step 1: Write a failing test for fixed encoder shape conversion**
-
-```python
-def test_make_zipformer_encoder_shape_fixed():
-    fixed_model = make_zipformer_encoder_shape_fixed(..., frames=256)
-    assert read_input_shape(fixed_model, "x") == [1, 256, 80]
-```
-
-- [ ] **Step 2: Write a failing test for fixed decoder and joiner shapes**
-- [ ] **Step 3: Run the tests and verify failure**
-- [ ] **Step 4: Implement fixed-shape helpers**
-- [ ] **Step 5: Re-run the tests**
-
-Expected: PASS
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add python-model-test/quantize python-model-test/test/test_acoustic_bundle.py
-git commit -m "feat: add fixed-shape preprocessing for zipformer qnn"
-```
-
-## Task 7: Add Zipformer QNN Presets And Artifact Evaluation
-
-**Files:**
+- Modify: `python-model-test/quantize/calibration.py`
 - Modify: `python-model-test/quantize/presets.py`
 - Modify: `python-model-test/quantize/qnn.py`
-- Modify: `python-model-test/quantize/cli.py`
-- Create: `python-model-test/quantize/evaluate_zipformer.py`
-- Modify: `python-model-test/quantize/README.md`
+- Modify: `python-model-test/quantize/runner.py`
+- Create: `python-model-test/test/test_quantize_projects.py`
 
-- [ ] **Step 1: Write a failing test for the default Zipformer QNN preset**
-
-```python
-def test_zipformer_default_qnn_preset_uses_u16_u8():
-    plan = build_quantization_plan(...)
-    assert plan.activation_type == "quint16"
-    assert plan.weight_type == "quint8"
-```
-
-- [ ] **Step 2: Write a failing test for an experimental `u8/u8` preset**
-- [ ] **Step 3: Run the tests and verify failure**
-- [ ] **Step 4: Implement presets**
-  - `sd8g2_zipformer_u16u8_matmul_first`
-  - `sd8g2_zipformer_u16u8_matmul_conv`
-  - `sd8g2_zipformer_u8u8_experimental`
-- [ ] **Step 5: Add offline evaluation command that reports transcript quality and model support**
+- [ ] **Step 1: Write a failing test for `quantize --project vpcd` dry-run**
+- [ ] **Step 2: Write a failing test for `quantize --project zipformer` dry-run**
+- [ ] **Step 3: Run the tests and confirm they fail**
+- [ ] **Step 4: Add project adapters and move project-specific defaults out of shared files**
+- [ ] **Step 5: Make the CLI route calibration, presets, and output planning through the selected project**
 - [ ] **Step 6: Re-run the tests**
 
 Expected: PASS
 
-- [ ] **Step 7: Run a dry-run and a real smoke quantization**
+- [ ] **Step 7: Commit**
+
+```bash
+git add python-model-test/quantize python-model-test/test/test_quantize_projects.py
+git commit -m "refactor: make quantize multi-project for vpcd and zipformer"
+```
+
+## Task 6: Implement Zipformer Fixed-Shape PTQ QDQ On Top Of The New Framework
+
+**Files:**
+- Create: `python-model-test/quantize/fixed_shapes.py`
+- Create: `python-model-test/quantize/reports.py`
+- Create: `python-model-test/quantize/evaluate.py`
+- Modify: `python-model-test/quantize/projects/zipformer.py`
+- Modify: `python-model-test/model_bundle/projects/zipformer.py`
+- Create: `python-model-test/test/test_zipformer_quantize.py`
+
+- [ ] **Step 1: Write a failing test for fixed-shape Zipformer planning**
+- [ ] **Step 2: Write a failing test for quantization/evaluation report emission**
+- [ ] **Step 3: Run the tests and confirm they fail**
+- [ ] **Step 4: Implement fixed-shape prep, component-wise QDQ, and evaluation through the shared framework**
+- [ ] **Step 5: Stage the candidate bundle at `build/model_bundle/zipformer/qnn_u16u8` only after evaluation passes**
+- [ ] **Step 6: Re-run the tests**
+
+Expected: PASS
+
+- [ ] **Step 7: Verify the real workflow**
 
 Run:
 
 ```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m quantize --project zipformer --component encoder --preset sd8g2_zipformer_u16u8_matmul_first --model-dir python-model-testssets\zipformer --fixed-encoder-frames 256 --dry-run
+& D:\Anaconda\envs\speech2text\python.exe -m quantize --project zipformer --preset zipformer_sd8g2_qnn_u16u8 --model-dir python-model-test/assets/zipformer --output-root python-model-test/build/quantize/zipformer/qnn_u16u8
+
+& D:\Anaconda\envs\speech2text\python.exe -m verify.model_bundle --project zipformer --reference-bundle python-model-test/build/model_bundle/zipformer/fp32 --candidate-bundle python-model-test/build/model_bundle/zipformer/qnn_u16u8
 ```
 
-Expected: plan summary prints `qnn_static`, `quint16`, `quint8`, and fixed-shape settings.
+Expected: quantized component outputs and both reports are produced, and candidate bundle verification completes.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add python-model-test/quantize
-git commit -m "feat: add zipformer qnn presets and evaluation"
+git add python-model-test/quantize python-model-test/model_bundle/projects/zipformer.py python-model-test/test/test_zipformer_quantize.py
+git commit -m "feat: add zipformer fixed-shape ptq qdq candidate bundle"
 ```
 
-## Task 8: Write Docs For The Python-First Acoustic Phase
+## Task 7: Update Docs And Remove Legacy Architectural Drift
 
 **Files:**
-- Create: `python-model-test/acoustic_bundle/README.md`
+- Modify: `python-model-test/model_bundle/README.md`
 - Modify: `python-model-test/quantize/README.md`
 - Modify: `python-model-test/test/README.md`
-- Modify: `python-model-test/plans/README.md`
+- Modify: `python-model-test/docs/superpowers/plans/README.md`
+- Modify or remove: `python-model-test/android_bundle/README.md`
+- Modify or remove: `python-model-test/acoustic_bundle/README.md`
 
-- [ ] **Step 1: Document the acoustic bundle contract and CLI usage**
-- [ ] **Step 2: Document the two smoke-runner modes**
-- [ ] **Step 3: Document the Zipformer quantization flow and its gates**
-- [ ] **Step 4: Re-run the smoke commands from the README files**
+- [ ] **Step 1: Document the new shared `model_bundle` architecture and project adapters**
+- [ ] **Step 2: Document the multi-project `quantize` workflow for `vpcd` and `zipformer`**
+- [ ] **Step 3: Document compatibility wrappers or explicit removals for legacy scripts and modules**
+- [ ] **Step 4: Re-run the core verification commands**
 
-Expected: every documented command has been validated at least once.
+Run:
+
+```powershell
+& D:\Anaconda\envs\speech2text\python.exe -m pytest python-model-test/test/test_model_bundle_core.py -q
+& D:\Anaconda\envs\speech2text\python.exe -m pytest python-model-test/test/test_quantize_projects.py -q
+& D:\Anaconda\envs\speech2text\python.exe -m pytest python-model-test/test/test_zipformer_quantize.py -q
+& D:\Anaconda\envs\speech2text\python.exe -m quantize --project vpcd --dry-run --model-dir python-model-test/assets/vietnamese-punc-cap-denorm-v1
+& D:\Anaconda\envs\speech2text\python.exe -m quantize --project zipformer --dry-run --model-dir python-model-test/assets/zipformer
+```
+
+Expected: PASS and both dry-runs print project-specific plans without leaking assumptions from the other model.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add python-model-test/acoustic_bundle/README.md python-model-test/quantize/README.md python-model-test/test/README.md python-model-test/plans/README.md
-git commit -m "docs: document python-first zipformer bundle and qnn flow"
+git add python-model-test/model_bundle/README.md python-model-test/quantize/README.md python-model-test/test/README.md python-model-test/docs/superpowers/plans/README.md python-model-test/android_bundle python-model-test/acoustic_bundle
+git commit -m "docs: finalize shared bundle and multi-project quantize architecture"
 ```
 
-## Deliverables For The Android Phase
+## Final Verification Checklist
 
-The next repo must not start until this repo can provide all of the following:
+- [ ] `pytest python-model-test/test/test_model_bundle_core.py -q`
+- [ ] `pytest python-model-test/test/test_vpcd_bundle.py -q`
+- [ ] `pytest python-model-test/test/test_zipformer_bundle.py -q`
+- [ ] `pytest python-model-test/test/test_quantize_projects.py -q`
+- [ ] `pytest python-model-test/test/test_zipformer_quantize.py -q`
+- [ ] `python -m quantize --project vpcd --dry-run --model-dir python-model-test/assets/vietnamese-punc-cap-denorm-v1`
+- [ ] `python -m quantize --project zipformer --dry-run --model-dir python-model-test/assets/zipformer`
+- [ ] `python -m verify.model_bundle --project vpcd --bundle-dir python-model-test/build/model_bundle/vpcd/fp32`
+- [ ] `python -m verify.model_bundle --project zipformer --reference-bundle python-model-test/build/model_bundle/zipformer/fp32 --candidate-bundle python-model-test/build/model_bundle/zipformer/qnn_u16u8`
+- [ ] Confirm `acoustic_bundle` no longer exists as an implementation module
 
-- `python-model-test/test/test_acoustic_model_onnx.py`
-- `python-model-test/build/acoustic_bundle/zipformer/fp32/bundle_manifest.json`
-- `python-model-test/verify_acoustic_bundle.py`
-- a tested fixed-shape Zipformer artifact set for QNN evaluation
-- README docs that explain the bundle contract and smoke commands
+## Notes For `bkmeeting`
+
+- Android should target the shared Python `model_bundle` contract instead of model-specific bundle modules.
+- The first Android bundle migration should reuse the punctuation runtime behavior through a shared bundle core, then consume Zipformer through the same contract.
+- Android should stage `build/model_bundle/zipformer/qnn_u16u8` only after the Python evaluation gate passes.
+
+
