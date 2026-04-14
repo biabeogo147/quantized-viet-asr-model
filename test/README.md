@@ -1,12 +1,12 @@
-﻿# Test Module
+# Test Module
 
-`test/` chua 3 nhom script khac nhau:
+`test/` contains three different groups of scripts:
 
-- smoke runner de chay model that su
-- pytest suite de khoa contract cua bundle va quantize
-- mot vai reference script cu de so sanh behavior
+- smoke runners that execute real models
+- pytest suites that lock down the bundle and quantization contracts
+- a few legacy reference scripts used for behavior comparison
 
-## File map chinh
+## Main file map
 
 ```text
 python-model-test/test/
@@ -23,53 +23,53 @@ python-model-test/test/
   README.md
 ```
 
-## Smoke runner
+## Smoke runners
 
 ### `test_punctuation_model_onnx.py`
 
-Vai tro:
-- smoke runner canonical cho punctuation ONNX
-- ho tro 2 mode:
+Role:
+- canonical smoke runner for punctuation ONNX
+- supports two modes:
   - `--model-dir`
   - `--bundle-manifest`
 
-Class/ham chinh:
+Main classes and functions:
 - `PunctuationRuntime`
-  - protocol cho runtime punctuation
+  - protocol for punctuation runtimes
 - `ModelDirOnnxRuntime`
-  - runtime reference dung Hugging Face tokenizer + ONNX model
+  - reference runtime built from the Hugging Face tokenizer + ONNX model
 - `build_argument_parser()`
 - `load_inputs(args)`
 - `create_runtime(args)`
-  - chon `ModelDirOnnxRuntime` hoac `BundleOnnxRuntime`
+  - chooses `ModelDirOnnxRuntime` or `BundleOnnxRuntime`
 - `main()`
 
 ### `test_acoustic_model_onnx.py`
 
-Vai tro:
-- smoke runner canonical cho Zipformer acoustic model
-- ho tro 2 mode:
+Role:
+- canonical smoke runner for the Zipformer acoustic model
+- supports two modes:
   - `--model-dir`
   - `--bundle-manifest`
 
-Class/ham chinh:
+Main classes and functions:
 - `AcousticRuntime`
-  - protocol cho runtime acoustic
+  - protocol for acoustic runtimes
 - `build_argument_parser()`
 - `load_inputs(args)`
 - `create_runtime(args)`
-  - chon `ModelDirAcousticRuntime` hoac `BundleAcousticRuntime`
+  - chooses `ModelDirAcousticRuntime` or `BundleAcousticRuntime`
 - `main()`
 
-## Reference script cu van con gia tri
+## Legacy reference scripts that still have value
 
 ### `test_punctuation_model.py`
 
-Vai tro:
-- so sanh 2 model punctuation/capitalization o muc reference
-- khong thuoc shared bundle pipeline moi
+Role:
+- compares two punctuation/capitalization models at the reference level
+- not part of the newer shared bundle pipeline
 
-Class/ham chinh:
+Main classes and functions:
 - `VietnamesePuncCapDenormModel`
 - `VibertCapuModel`
 - `patch_vibert_capu_runtime(model_dir)`
@@ -79,12 +79,12 @@ Class/ham chinh:
 
 ### `test_vietasr.py`
 
-Vai tro:
-- reference script ASR cu cho Zipformer/VietASR
-- chua beam search implementation rieng
-- huu ich de benchmark nhanh ngoai shared bundle pipeline
+Role:
+- older ASR reference script for Zipformer/VietASR
+- includes its own beam-search implementation
+- still useful for quick benchmarking outside the shared bundle pipeline
 
-Class/ham chinh:
+Main classes and functions:
 - `ZipformerASR`
 - `ZipformerASRWithBeamSearch`
 - `main()`
@@ -93,47 +93,47 @@ Class/ham chinh:
 
 ### `test_model_bundle_core.py`
 
-Khoa cac assumption generic:
-- manifest round-trip
-- project registry
+Locks generic assumptions:
+- manifest round-trip behavior
+- project registry behavior
 
 ### `test_vpcd_bundle.py`
 
-Khoa punctuation bundle contract:
+Locks the punctuation bundle contract:
 - manifest schema
 - fixture JSONL
 - runtime selection
-- tokenizer bridge
-- bundle runtime restore
+- tokenizer bridge behavior
+- bundle runtime restoration
 - export layout
 
 ### `test_zipformer_bundle.py`
 
-Khoa acoustic bundle contract:
+Locks the acoustic bundle contract:
 - runtime selection
 - manifest schema
 - audio fixtures
 - export layout
 - bundle runtime path resolution
-- verify bundle
+- bundle verification
 
 ### `test_quantize_projects.py`
 
-Khoa quantize CLI dispatch theo `--project`.
+Locks quantize CLI dispatch by `--project`.
 
 ### `test_zipformer_quantize.py`
 
-Khoa fixed-shape helper va metadata fixed encoder frames cua Zipformer.
+Locks the fixed-shape helper and Zipformer fixed-encoder-frames metadata.
 
 ### `test_export_verify_modules.py`
 
-Khoa 2 package entrypoint:
+Locks the two package entrypoints:
 - `export.model_bundle`
 - `verify.model_bundle`
 
-## Cach su dung
+## How to use it
 
-### Chay smoke punctuation
+### Run the punctuation smoke test
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m test.test_punctuation_model_onnx `
@@ -141,7 +141,7 @@ Khoa 2 package entrypoint:
   --text "hom nay la buoi nham chuc cua toi phuoc thanh"
 ```
 
-### Chay smoke Zipformer quantized bundle
+### Run the Zipformer quantized-bundle smoke test
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m test.test_acoustic_model_onnx `
@@ -149,7 +149,7 @@ Khoa 2 package entrypoint:
   --audio-file D:\DS-AI\BKMeeting-Research\python-model-test\assets\speech\sample-2.wav
 ```
 
-### Chay pytest core suite
+### Run the core pytest suite
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m pytest `
@@ -161,8 +161,8 @@ Khoa 2 package entrypoint:
   D:\DS-AI\BKMeeting-Research\python-model-test\test\test_export_verify_modules.py -q
 ```
 
-## Cach nghi ve `test/`
+## How to think about `test/`
 
-- muon chay model that su -> dung smoke runner
-- muon khoa contract va refactor an toan -> dung pytest suite
-- muon tham khao behavior cu -> xem `test_punctuation_model.py` va `test_vietasr.py`
+- if you want to run a real model, use the smoke runners
+- if you want to lock the contract and refactor safely, use the pytest suite
+- if you want to inspect older behavior, read `test_punctuation_model.py` and `test_vietasr.py`

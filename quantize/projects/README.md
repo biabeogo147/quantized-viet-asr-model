@@ -1,6 +1,6 @@
-﻿# Quantize Project Adapters
+# Quantize Project Adapters
 
-`quantize/projects/` chua logic dac thu tung model cho CLI `python -m quantize`.
+`quantize/projects/` contains project-specific logic for the `python -m quantize` CLI.
 
 ## File map
 
@@ -14,33 +14,33 @@ python-model-test/quantize/projects/
 
 ## `__init__.py`
 
-Vai tro:
-- registry project cho quantize
+Role:
+- project registry for quantization
 
-Ham chinh:
+Main functions:
 - `resolve_quantize_project(name)`
 - `list_quantize_projects()`
 
 ## `vpcd.py`
 
-Vai tro:
-- project adapter cho punctuation quantization
-- giai bai toan quantize mot model seq2seq duy nhat
+Role:
+- project adapter for punctuation quantization
+- solves the problem of quantizing a single seq2seq model
 
-Ham chinh:
+Main functions:
 - `apply_default_arguments(parser)`
-  - them cac option CLI cho `vpcd`
+  - adds CLI options for `vpcd`
 - `validate_args(args)`
-  - validate preset va chunk size
+  - validates the selected preset and chunk size
 - `_resolve_output_path(args)`
-  - chon output onnx theo preset
+  - chooses the output ONNX path from the preset
 - `run(args)`
-  - load node names
-  - build quantization plan
-  - dry-run hoac quantize that su
-  - in size budget va next steps
+  - loads node names
+  - builds the quantization plan
+  - performs a dry run or real quantization
+  - prints size-budget guidance and next steps
 
-No goi cac helper generic trong:
+This adapter calls generic helpers from:
 - `quantize.presets`
 - `quantize.calibration`
 - `quantize.runner`
@@ -48,45 +48,45 @@ No goi cac helper generic trong:
 
 ## `zipformer.py`
 
-Vai tro:
-- project adapter cho Zipformer fixed-shape PTQ + QDQ
-- giai bai toan component-wise quantization
+Role:
+- project adapter for Zipformer fixed-shape PTQ + QDQ
+- solves the component-wise quantization workflow
 
-Ham chinh:
+Main functions:
 - `apply_default_arguments(parser)`
-  - them option cho model dir, output root, bundle output dir, reference bundle dir, provider, audio manifest
+  - adds options for model dir, output root, bundle output dir, reference bundle dir, provider, and audio manifest
 - `validate_args(args)`
-  - validate preset support
+  - validates preset support
 - `_load_audio_fixtures(manifest_path)`
-  - doc bo audio dung cho calibration/evaluation
+  - reads the audio set used for calibration and evaluation
 - `_collect_component_records(runtime, fixtures)`
-  - trace calibration record cho:
+  - traces calibration records for:
     - encoder
     - decoder
     - joiner
 - `_fixed_shape_paths(model_dir, output_root, stats)`
-  - tao fixed-shape ONNX file
+  - creates fixed-shape ONNX files
 - `_fixed_input_shapes(stats)`
-  - sinh metadata fixed-shape de ghi vao bundle manifest
+  - generates fixed-shape metadata for the bundle manifest
 - `_build_component_plan(component_model, preset)`
-  - tao `QuantizationPlan` rieng cho tung component
+  - creates a dedicated `QuantizationPlan` per component
 - `_load_reference_expected_outputs(reference_bundle_dir)`
-  - lay transcript reference da export truoc do
+  - loads the reference transcripts exported earlier
 - `run(args)`
-  - pipeline tong:
+  - full pipeline:
     - collect records
-    - freeze shape
-    - quantize tung component
-    - export candidate bundle
-    - evaluate candidate
-    - ghi report
+    - freeze shapes
+    - quantize each component
+    - export the candidate bundle
+    - evaluate the candidate
+    - write reports
 
-## Cach nghi ve hai adapter
+## How to think about the two adapters
 
 - `vpcd.py`
   - single-model quantization
-  - text calibration
+  - text-based calibration
 - `zipformer.py`
   - component-wise quantization
-  - audio calibration
-  - fixed-shape va candidate bundle staging
+  - audio-based calibration
+  - fixed-shape preparation and candidate-bundle staging

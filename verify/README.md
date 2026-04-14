@@ -1,12 +1,12 @@
-﻿# Verify Module
+# Verify Module
 
-`verify/` chua cac CLI dung de kiem tra artifact da export co con theo dung contract va quality gate hay khong.
+`verify/` contains the CLIs used to check whether exported artifacts still match the expected contract and quality gates.
 
-## Muc tieu
+## Goals
 
-- cung cap mot diem vao duy nhat de verify bundle theo `project`
-- giu cho `quantize` va smoke test khong phai tu viet logic so sanh
-- in mismatch report ro rang khi candidate bundle lech reference
+- provide a single verification entrypoint per `project`
+- keep `quantize` and smoke-test code from re-implementing comparison logic
+- print clear mismatch reports when a candidate bundle diverges from the reference
 
 ## File map
 
@@ -17,47 +17,47 @@ python-model-test/verify/
   README.md
 ```
 
-## Tung script giai quyet van de gi
+## What each script is responsible for
 
 ### `model_bundle.py`
 
-Day la CLI canonical de verify bundle.
+This is the canonical CLI for bundle verification.
 
-Van de no giai quyet:
-- voi `vpcd`, no verify parity encode/decode giua bundle va Hugging Face tokenizer
-- voi `zipformer`, no verify transcript giua model-dir runtime va bundle runtime, hoac giua reference bundle va candidate bundle
+Problems it solves:
+- for `vpcd`, it verifies encode/decode parity between the bundle and the Hugging Face tokenizer
+- for `zipformer`, it verifies transcripts between the model-dir runtime and the bundle runtime, or between a reference bundle and a candidate bundle
 
-Ham chinh:
+Main functions:
 - `build_argument_parser()`
-  - parse `--project`
-  - parse 3 kieu input:
+  - parses `--project`
+  - supports three input modes:
     - `--model-dir` + `--bundle-dir`
     - `--reference-bundle` + `--candidate-bundle`
-    - hoac mac dinh adapter defaults
+    - or adapter defaults when applicable
 - `main(argv=None)`
-  - resolve project adapter
-  - build kwargs hop le cho project do
-  - goi `verify_model_bundle(...)`
-  - in summary:
-    - encode/decode sample count cho `vpcd`
-    - checked samples, passed, mismatches cho `zipformer`
+  - resolves the project adapter
+  - builds valid kwargs for that project
+  - calls `verify_model_bundle(...)`
+  - prints the summary:
+    - encode/decode sample counts for `vpcd`
+    - checked samples, pass/fail, and mismatches for `zipformer`
 
-## Cach doc output
+## How to read the output
 
-- Neu output la:
+- If the output contains:
   - `Encode samples : ...`
   - `Decode samples : ...`
-  Thi day la verify tokenizer bundle cua `vpcd`.
+  then you are looking at tokenizer-bundle verification for `vpcd`.
 
-- Neu output la:
+- If the output contains:
   - `Checked samples: ...`
   - `Passed : True/False`
-  - danh sach `mismatches`
-  Thi day la verify transcript cua `zipformer`.
+  - a `mismatches` list
+  then you are looking at transcript verification for `zipformer`.
 
-## Lenh hay dung
+## Common commands
 
-### Verify punctuation bundle
+### Verify a punctuation bundle
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m verify.model_bundle `
@@ -66,7 +66,7 @@ Ham chinh:
   --bundle-dir D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\vpcd\fp32
 ```
 
-### Verify zipformer FP32 bundle voi model-dir
+### Verify a Zipformer FP32 bundle against `model-dir`
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m verify.model_bundle `
@@ -75,7 +75,7 @@ Ham chinh:
   --bundle-dir D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\zipformer\fp32
 ```
 
-### Verify zipformer quantized candidate voi FP32 reference
+### Verify a Zipformer quantized candidate against the FP32 reference bundle
 
 ```powershell
 & D:\Anaconda\envs\speech2text\python.exe -m verify.model_bundle `
@@ -84,10 +84,10 @@ Ham chinh:
   --candidate-bundle D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\zipformer\qnn_u16u8
 ```
 
-## Quan he voi module khac
+## Relationship to other modules
 
-- CLI nay chi la wrapper
-- logic verify that su nam trong `model_bundle/verifier.py`
-- project-specific comparison nam trong:
+- this CLI is only a wrapper
+- the actual generic verification logic lives in `model_bundle/verifier.py`
+- project-specific comparison logic lives in:
   - `model_bundle/projects/vpcd.py`
   - `model_bundle/projects/zipformer.py`

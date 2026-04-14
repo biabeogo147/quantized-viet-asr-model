@@ -1,118 +1,118 @@
-﻿# Python Model Test Repo
+# Python Model Test Repo
 
-`python-model-test/` la workspace Python de:
+`python-model-test/` is the Python workspace for:
 
-- export ONNX tu model source
-- dong goi bundle theo contract chung
-- verify parity giua reference runtime va bundle runtime
-- quantize model cho deployment sau nay
-- smoke test artifact truoc khi dua sang Android
+- exporting ONNX from source models
+- packaging model bundles against a shared contract
+- verifying parity between reference runtimes and bundle runtimes
+- quantizing models for later deployment
+- smoke-testing artifacts before they are handed off to Android
 
-## Repo nay giai quyet bai toan gi
+## What this repo is for
 
-Repo hien tai co 2 model family chinh:
+The repo currently focuses on two main model families:
 
 - `vpcd`
-  - punctuation / capitalization seq2seq
-  - output la text da phuc hoi dau/cau truc
+  - punctuation / capitalization / denormalization seq2seq model
+  - output is restored, formatted text
 - `zipformer`
-  - acoustic RNNT model
-  - output la transcript
+  - RNNT acoustic model
+  - output is a transcript
 
-Thay vi de moi model co mot he script rieng, repo da duoc dua ve 4 khoi chinh:
+Instead of maintaining one-off scripts per model, the repo is organized around four shared blocks:
 
 - `export/`
-  - entrypoint tao artifact
+  - entrypoints that create artifacts
 - `verify/`
-  - entrypoint kiem tra parity / mismatch
+  - entrypoints that check parity and report mismatches
 - `model_bundle/`
-  - shared contract cho bundle
+  - the shared bundle contract
 - `quantize/`
-  - shared framework quantization multi-project
+  - the shared multi-project quantization framework
 
-## Cau truc repo
+## Repository layout
 
 ```text
 python-model-test/
-  assets/                # model source, audio/text fixtures
-  build/                 # artifact sinh ra trong qua trinh export/quantize
-  docs/                  # plan va tai lieu implementation
-  export/                # CLI export
+  assets/                # source models, audio/text fixtures
+  build/                 # generated artifacts from export/quantize
+  docs/                  # implementation plans and design notes
+  export/                # export CLIs
   model_bundle/          # shared bundle contract
   quantize/              # quantization framework
   test/                  # smoke runners + pytest suites
-  verify/                # CLI verify
-  convert_bpe2token.py   # helper tao tokens.txt tu bpe.model
+  verify/                # verification CLIs
+  convert_bpe2token.py   # helper that generates tokens.txt from bpe.model
 ```
 
-## Module nao lam gi
+## What each module does
 
 ### `export/`
 
-Tao artifact dau vao:
-- bundle chung cho `vpcd` va `zipformer`
-- ONNX source cho punctuation
+Creates input artifacts:
+- shared bundles for `vpcd` and `zipformer`
+- source ONNX for punctuation
 
-Chi tiet: `export/README.md`
+See `export/README.md` for details.
 
 ### `verify/`
 
-Kiem tra bundle:
+Checks bundles:
 - punctuation encode/decode parity
-- Zipformer reference-vs-bundle
-- Zipformer reference-vs-candidate
+- Zipformer reference-vs-bundle parity
+- Zipformer reference-vs-candidate parity
 
-Chi tiet: `verify/README.md`
+See `verify/README.md` for details.
 
 ### `model_bundle/`
 
-Shared core:
-- manifest
+Shared core for:
+- manifests
 - fixtures
-- generic exporter/verifier
+- generic exporting and verification
 - project adapters
 
-Chi tiet:
+See:
 - `model_bundle/README.md`
 - `model_bundle/projects/README.md`
 
 ### `quantize/`
 
-Quantization framework:
+Shared quantization framework:
 - calibration
 - presets
-- QNN PTQ + QDQ
+- QNN PTQ + QDQ helpers
 - reports
-- project adapters cho `vpcd` va `zipformer`
+- project adapters for `vpcd` and `zipformer`
 
-Chi tiet:
+See:
 - `quantize/README.md`
 - `quantize/projects/README.md`
 
 ### `test/`
 
-Noi chua:
-- smoke runners canonical
-- pytest suite khoa contract
-- reference script cu de so sanh behavior
+Contains:
+- canonical smoke runners
+- pytest suites that lock the contract
+- legacy reference scripts used for behavior comparison
 
-Chi tiet: `test/README.md`
+See `test/README.md` for details.
 
-## Pipeline tong the
+## End-to-end pipeline
 
-### 1. Export source artifact
+### 1. Export source artifacts
 
 Punctuation:
-- neu can tai tao ONNX source, dung `python -m export.punctuation_onnx`
+- if you need to rebuild source ONNX, run `python -m export.punctuation_onnx`
 
-Bundle:
-- dung `python -m export.model_bundle --project <project>`
+Bundles:
+- run `python -m export.model_bundle --project <project>`
 
-Output:
+Outputs:
 - `build/model_bundle/vpcd/...`
 - `build/model_bundle/zipformer/...`
 
-### 2. Verify reference bundle
+### 2. Verify reference bundles
 
 Punctuation:
 - `python -m verify.model_bundle --project vpcd --model-dir ... --bundle-dir ...`
@@ -120,23 +120,23 @@ Punctuation:
 Zipformer FP32:
 - `python -m verify.model_bundle --project zipformer --model-dir ... --bundle-dir ...`
 
-Muc tieu:
-- bundle runtime phai theo dung behavior cua reference runtime
+Goal:
+- the bundle runtime must match the behavior of the reference runtime
 
-### 3. Quantize candidate bundle
+### 3. Quantize a candidate bundle
 
-Cho Zipformer:
+For Zipformer:
 - `python -m quantize --project zipformer ...`
 
-Pipeline ben trong:
+The internal pipeline:
 - collect calibration audio
 - freeze fixed shapes
-- QNN PTQ + QDQ tung component
-- export candidate bundle `qnn_u16u8`
-- verify candidate voi reference bundle
-- ghi `quantization_report.json` va `evaluation_report.json`
+- run QNN PTQ + QDQ per component
+- export the `qnn_u16u8` candidate bundle
+- verify the candidate against the reference bundle
+- write `quantization_report.json` and `evaluation_report.json`
 
-### 4. Smoke test artifact
+### 4. Smoke-test artifacts
 
 Punctuation:
 - `python -m test.test_punctuation_model_onnx --bundle-manifest ...`
@@ -144,37 +144,37 @@ Punctuation:
 Zipformer:
 - `python -m test.test_acoustic_model_onnx --bundle-manifest ...`
 
-Muc tieu:
-- xac nhan artifact that su chay duoc end-to-end
+Goal:
+- confirm the artifact really runs end to end
 
-### 5. Hand-off sang Android
+### 5. Hand off to Android
 
-Sau khi bundle reference/candidate on:
-- sync bundle sang `bkmeeting/modelassets`
-- Android dung cung `bundle_manifest.json` va layout do Python export
+Once a reference or candidate bundle is ready:
+- sync the bundle into `bkmeeting/modelassets`
+- Android consumes the same `bundle_manifest.json` and exported layout produced by Python
 
-## Hai pipeline cu the
+## Concrete pipelines
 
 ### VPCD
 
 `model-dir`
 -> Hugging Face tokenizer + ONNX model
--> export tokenizer ONNX + bridge map
--> bundle `vpcd/fp32`
--> verify encode/decode parity
--> smoke run bundle-only
+-> exported tokenizer ONNX + bridge maps
+-> `vpcd/fp32` bundle
+-> encode/decode parity verification
+-> bundle-only smoke run
 
 ### Zipformer
 
 `model-dir`
--> export FP32 reference bundle
--> verify bundle vs model-dir
--> quantize tung component thanh `qnn_u16u8`
--> export candidate bundle
--> verify candidate vs reference
--> smoke run quantized bundle
+-> exported FP32 reference bundle
+-> bundle-vs-model-dir verification
+-> component-wise quantization into `qnn_u16u8`
+-> exported candidate bundle
+-> candidate-vs-reference verification
+-> smoke run of the quantized bundle
 
-## Artifact quan trong trong `build/`
+## Important build artifacts
 
 ### Punctuation
 
@@ -217,21 +217,21 @@ build/model_bundle/zipformer/qnn_u16u8/
   evaluation_report.json
 ```
 
-## Script nho o root repo
+## Small helper at repo root
 
 ### `convert_bpe2token.py`
 
-Vai tro:
-- doc `assets/zipformer/bpe.model`
-- sinh `assets/zipformer/tokens.txt`
+Role:
+- reads `assets/zipformer/bpe.model`
+- generates `assets/zipformer/tokens.txt`
 
-Dung khi:
-- token table bi thieu
-- can dong bo lai `tokens.txt` tu SentencePiece model
+Use it when:
+- the token table is missing
+- you need to regenerate `tokens.txt` from the SentencePiece model
 
-## Trang thai hien tai
+## Current status
 
-- shared bundle contract da dung chung cho `vpcd` va `zipformer`
-- quantize da ho tro 2 project
-- candidate `zipformer/qnn_u16u8` da runnable
-- candidate nay chua exact-match 100% voi FP32 reference tren bo sample hien tai, nen can tiep tuc tune neu muc tieu la parity chat
+- the shared bundle contract is now used by both `vpcd` and `zipformer`
+- quantization supports both projects
+- the `zipformer/qnn_u16u8` candidate bundle is runnable
+- that candidate still does not exact-match the FP32 reference on the current sample set, so more tuning is still needed if strict parity is the goal

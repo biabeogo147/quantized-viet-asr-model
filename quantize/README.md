@@ -1,15 +1,15 @@
-﻿# Quantize Module
+# Quantize Module
 
-`quantize/` chua framework quantization multi-project. Hien tai no phuc vu 2 bai toan:
+`quantize/` contains the shared multi-project quantization framework. It currently serves two use cases:
 
-- quantize punctuation model `vpcd`
-- quantize Zipformer de tao candidate bundle `qnn_u16u8`
+- quantizing the punctuation model `vpcd`
+- quantizing Zipformer to produce the `qnn_u16u8` candidate bundle
 
-## Muc tieu
+## Goals
 
-- chia ro phan generic va phan project-specific
-- gom calibration, preset, runner, QNN helper, va report vao mot noi
-- de `zipformer` co the di tu fixed-shape -> PTQ + QDQ -> bundle candidate
+- clearly separate generic logic from project-specific logic
+- keep calibration, presets, runners, QNN helpers, and reports in one place
+- support the Zipformer path from fixed-shape preparation -> PTQ + QDQ -> candidate bundle export
 
 ## File map
 
@@ -34,45 +34,45 @@ python-model-test/quantize/
   README.md
 ```
 
-## Tung script giai quyet van de gi
+## What each script is responsible for
 
 ### `cli.py`
 
-Vai tro:
-- entrypoint chung cua module quantize
-- parse `--project` truoc
-- route parser va runner sang project adapter dung
+Role:
+- shared entrypoint for the quantize module
+- parses `--project` first
+- routes the parser and the runner to the correct project adapter
 
-Ham chinh:
+Main functions:
 - `_build_project_probe_parser()`
 - `parse_args(argv=None)`
 - `main(argv=None)`
 
 ### `types.py`
 
-Vai tro:
-- khai bao dataclass dung xuyen suot module
+Role:
+- declares dataclasses used throughout the module
 
-Class chinh:
+Main classes:
 - `CalibrationSample`
 - `PresetSpec`
 - `QuantizationPlan`
 
 ### `config.py`
 
-Vai tro:
-- chua default path va default numeric config cho flow punctuation cu
-- dac biet dung boi project `vpcd`
+Role:
+- stores default paths and numeric defaults for the older punctuation flow
+- currently used by project `vpcd`
 
 ### `calibration.py`
 
-Vai tro:
-- tao calibration records cho static quantization
-- chuan hoa provider selection va sample padding
+Role:
+- creates calibration records for static quantization
+- normalizes provider selection and sample padding
 
-Class/ham chinh:
+Main classes and functions:
 - `ListCalibrationDataReader`
-  - adapter giua list `CalibrationSample` va ORT quantization API
+  - adapter between a list of `CalibrationSample` values and the ORT quantization API
 - `resolve_ort_providers(...)`
 - `iter_calibration_texts(...)`
 - `iter_calibration_files(...)`
@@ -84,21 +84,21 @@ Class/ham chinh:
 
 ### `presets.py`
 
-Vai tro:
-- chua preset cho punctuation static/dynamic quantization
-- map pattern exclusion -> `QuantizationPlan`
+Role:
+- contains presets for punctuation static/dynamic quantization
+- maps exclusion patterns into `QuantizationPlan`
 
-Ham chinh:
+Main functions:
 - `list_supported_presets()`
 - `get_preset_spec(preset)`
 - `build_quantization_plan(node_names, preset, extra_exclude_patterns=None)`
 
 ### `runner.py`
 
-Vai tro:
-- chua generic quantization runner cho static va dynamic path
+Role:
+- contains the generic quantization runners for static and dynamic paths
 
-Ham chinh:
+Main functions:
 - `resolve_calibration_method(...)`
 - `run_static_quantization(...)`
 - `_run_static_quantization_chunked(...)`
@@ -109,100 +109,100 @@ Ham chinh:
 
 ### `qnn.py`
 
-Vai tro:
-- helper rieng cho QNN-targeted static quantization
-- dung `qnn_preprocess_model` va `get_qnn_qdq_config`
+Role:
+- helper module for QNN-targeted static quantization
+- wraps `qnn_preprocess_model` and `get_qnn_qdq_config`
 
-Ham chinh:
+Main functions:
 - `resolve_quant_type(...)`
 - `resolve_safe_stride(...)`
 - `run_qnn_static_quantization(...)`
 
 ### `fixed_shapes.py`
 
-Vai tro:
-- dong bang input shape cua ONNX model truoc khi quantize
-- rat quan trong cho Zipformer vi NPU/QNN khong thich dynamic shape
+Role:
+- freezes ONNX input shapes before quantization
+- especially important for Zipformer because NPU/QNN flows prefer fixed shapes over dynamic ones
 
-Ham chinh:
+Main function:
 - `freeze_model_inputs(model_path, output_path, input_shapes)`
 
 ### `evaluate.py`
 
-Vai tro:
-- bridge nho giua quantize va `model_bundle.verifier`
-- de quantize phase co the goi verify ma khong duplicate logic
+Role:
+- thin bridge between quantization and `model_bundle.verifier`
+- lets the quantize phase call verification without duplicating bundle logic
 
-Ham chinh:
+Main functions:
 - `evaluate_bundle_against_model_dir(...)`
 - `evaluate_candidate_bundle(...)`
 
 ### `reports.py`
 
-Vai tro:
-- dinh nghia report schema de ghi ket qua quantization ra JSON
+Role:
+- defines the JSON report schema used to persist quantization results
 
-Class chinh:
+Main classes:
 - `ComponentQuantizationReport`
 - `QuantizationReport`
 
 ### `model_introspection.py`
 
-Vai tro:
-- doc named nodes tu ONNX graph
-- sinh preview text cho dry-run
+Role:
+- reads named nodes from ONNX graphs
+- generates dry-run summaries
 
-Ham chinh:
+Main functions:
 - `load_model_node_names(path)`
 - `summarize_quantization_plan(plan, node_names)`
 
 ### `runtime.py`
 
-Vai tro:
-- workaround cho temp directory va hardlink/copy model input tren Windows
-- giup ORT quantization chay on dinh hon trong workspace hien tai
+Role:
+- works around temporary-directory and hardlink/copy issues on Windows
+- helps ORT quantization run more reliably in the current workspace
 
-Class/ham chinh:
+Main classes and functions:
 - `ManualTemporaryDirectory`
 - `isolated_model_input(...)`
 - `temporary_workspace_tempdir(...)`
 
 ## Project adapters
 
-Chi tiet nam o `quantize/projects/README.md`, nhung tom tat:
+Details are documented in `quantize/projects/README.md`, but in short:
 
 - `projects/vpcd.py`
-  - route punctuation quantization theo preset
+  - routes punctuation quantization through presets
 - `projects/zipformer.py`
-  - collect audio calibration
-  - freeze shape cho encoder/decoder/joiner
-  - quantize tung component
-  - export candidate bundle
-  - ghi `quantization_report.json` va `evaluation_report.json`
+  - collects audio calibration data
+  - freezes shapes for encoder / decoder / joiner
+  - quantizes each component
+  - exports the candidate bundle
+  - writes `quantization_report.json` and `evaluation_report.json`
 
-## Flow tong quat cua quantize
+## High-level quantization flows
 
 ### VPCD
 
 `python -m quantize --project vpcd`
 -> load FP32 ONNX
--> build preset plan
--> calibration text / dynamic path
+-> build the preset plan
+-> run text calibration or dynamic quantization
 -> quantize
--> in size budget + goi y
+-> print size-budget guidance and next steps
 
 ### Zipformer
 
 `python -m quantize --project zipformer`
 -> load audio fixtures
--> trace encoder/decoder/joiner records
+-> trace encoder / decoder / joiner calibration records
 -> freeze fixed shapes
--> QNN PTQ + QDQ tung component
--> export candidate bundle `qnn_u16u8`
--> verify candidate voi reference bundle
--> ghi report
+-> run QNN PTQ + QDQ on each component
+-> export the `qnn_u16u8` candidate bundle
+-> verify the candidate against the reference bundle
+-> write reports
 
-## Ghi chu trung thuc
+## Honest status note
 
-- candidate `zipformer/qnn_u16u8` hien da runnable
-- no chua exact-match 100% voi FP32 reference tren bo sample hien tai
+- the `zipformer/qnn_u16u8` candidate bundle is runnable today
+- it still does not exact-match the FP32 reference on the current sample set

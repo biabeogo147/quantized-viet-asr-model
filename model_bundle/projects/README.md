@@ -1,6 +1,6 @@
-﻿# Model Bundle Project Adapters
+# Model Bundle Project Adapters
 
-Thu muc `model_bundle/projects/` chua logic dac thu tung model family. Shared core khong biet chi tiet tokenizer hay RNNT; no chi biet adapter.
+`model_bundle/projects/` contains model-family-specific logic. The shared core does not know tokenizer details or RNNT details. It only knows how to call adapters.
 
 ## File map
 
@@ -15,113 +15,113 @@ python-model-test/model_bundle/projects/
 
 ## `__init__.py`
 
-Vai tro:
-- registry project adapter
-- noi `model_bundle` core voi adapter cu the
+Role:
+- project adapter registry
+- connection point between the `model_bundle` core and concrete adapters
 
-Ham chinh:
+Main functions:
 - `resolve_bundle_project(name)`
 - `list_bundle_projects()`
 
 ## `vpcd.py`
 
-Vai tro:
-- adapter punctuation model `tourmii/vietnamese-punc-cap-denorm-v1`
-- export punctuation bundle
-- verify tokenizer parity encode/decode
+Role:
+- adapter for the `tourmii/vietnamese-punc-cap-denorm-v1` punctuation model
+- exports punctuation bundles
+- verifies tokenizer encode/decode parity
 
-Ham chinh:
+Main functions:
 - `export_bundle(...)`
-  - copy `model.mobile.onnx`
-  - goi tokenizer exporter
-  - sinh `golden_samples.jsonl`
-  - ghi manifest
+  - copies `model.mobile.onnx`
+  - calls the tokenizer exporter
+  - generates `golden_samples.jsonl`
+  - writes the manifest
 - `iter_golden_samples(bundle_dir)`
-  - doc fixture punctuation
+  - reads punctuation fixtures
 - `verify_bundle(model_dir, bundle_dir)`
-  - load tokenizer ONNX graphs
-  - load 2 bridge json
-  - compare encode/decode voi Hugging Face tokenizer
+  - loads tokenizer ONNX graphs
+  - loads the two bridge JSON files
+  - compares encode/decode behavior against the Hugging Face tokenizer
 
-Object quan trong:
+Important object:
 - `ADAPTER`
-  - `BundleProjectAdapter` cho project `vpcd`
+  - the `BundleProjectAdapter` for project `vpcd`
 
 ## `_vpcd_support.py`
 
-Vai tro:
-- chua toan bo helper chi danh rieng cho punctuation
-- tach khoi `vpcd.py` de file adapter chinh gon hon
+Role:
+- contains helpers that are specific to the punctuation pipeline
+- keeps `vpcd.py` smaller and easier to read
 
-Class chinh:
+Main classes:
 - `TokenizerExportArtifacts`
-  - ten file tokenizer artifacts sau khi export
+  - names the tokenizer export files
 - `TokenizerIdBridge`
-  - chua 2 dense id map:
+  - stores two dense ID maps:
     - tokenizer -> model
     - model -> tokenizer
-  - method `write_files(...)` de ghi json
+  - method `write_files(...)` writes the JSON files
 - `BundleOnnxRuntime`
-  - runtime bundle-only cho punctuation
-  - dung trong smoke runner `test_punctuation_model_onnx.py`
+  - bundle-only punctuation runtime
+  - used by the smoke runner in `test_punctuation_model_onnx.py`
 
-Ham chinh:
+Main functions:
 - `ensure_local_vendor_path()`
-  - dua `_vendor` vao `sys.path` neu can
+  - adds `_vendor` to `sys.path` when needed
 - `resolve_variant_onnx_path(model_dir, model_variant)`
-  - tim file ONNX variant
+  - finds the ONNX file for the selected variant
 - `bartpho_tokenizer_ortx_alias(tokenizer)`
-  - context manager de ORT Extensions chap nhan tokenizer alias
+  - context manager that makes ORT Extensions accept the tokenizer alias
 - `build_ort_tokenizer_id_bridge(tokenizer)`
-  - sinh 2 dense id map giua tokenizer graph ids va model ids
+  - generates the two dense ID maps between tokenizer-graph IDs and model IDs
 - `default_tokenizer_exporter(model_dir, bundle_dir)`
-  - export `tokenizer.encode.onnx`, `tokenizer.decode.onnx`, va 2 bridge json
+  - exports `tokenizer.encode.onnx`, `tokenizer.decode.onnx`, and the two bridge JSON files
 - `default_golden_sample_builder(...)`
-  - chay reference runtime de sinh fixture punctuation
+  - runs the reference runtime to build punctuation fixtures
 
 ## `zipformer.py`
 
-Vai tro:
-- adapter RNNT cho acoustic model Zipformer
-- export bundle FP32 reference
-- load bundle runtime tu manifest
-- verify transcript giua model-dir mode, reference bundle, va candidate bundle
+Role:
+- RNNT adapter for the Zipformer acoustic model
+- exports the FP32 reference bundle
+- constructs bundle runtimes from a manifest
+- verifies transcripts across model-dir mode, reference bundles, and candidate bundles
 
-Class chinh:
+Main classes:
 - `ZipformerRuntimeBase`
-  - helper chung cho loading features, token table, va decode token ids
+  - shared helper for feature loading, token-table loading, and token decoding
 - `ModelDirAcousticRuntime`
-  - runtime doc truc tiep tu `assets/zipformer`
+  - runtime that reads directly from `assets/zipformer`
 - `BundleAcousticRuntime`
-  - runtime doc tu `bundle_manifest.json`
+  - runtime that reads from `bundle_manifest.json`
 
-Ham chinh:
+Main functions:
 - `prepare_encoder_inputs(features, fixed_encoder_frames=None)`
-  - pad/truncate input cho encoder
+  - pads or trims encoder inputs
 - `trim_encoder_frames(encoder_frames, encoder_out_lens)`
-  - trim frame hop le sau encoder
+  - trims valid frames after the encoder stage
 - `resolve_fixed_encoder_frames(metadata)`
-  - doc metadata fixed-shape trong manifest
+  - reads fixed-shape metadata from the manifest
 - `export_bundle(...)`
-  - copy `encoder/decoder/joiner/tokens`
-  - sinh `sample_manifest.jsonl`
-  - sinh `expected_outputs.jsonl`
-  - ghi manifest
+  - copies `encoder`, `decoder`, `joiner`, and `tokens`
+  - generates `sample_manifest.jsonl`
+  - generates `expected_outputs.jsonl`
+  - writes the manifest
 - `verify_bundle(...)`
-  - mode 1: so `model_dir` voi `bundle_dir`
-  - mode 2: so `reference_bundle` voi `candidate_bundle`
+  - mode 1: compare `model_dir` with `bundle_dir`
+  - mode 2: compare `reference_bundle` with `candidate_bundle`
 
-Object quan trong:
+Important object:
 - `ADAPTER`
-  - `BundleProjectAdapter` cho project `zipformer`
+  - the `BundleProjectAdapter` for project `zipformer`
 
-## Cach nghi ve adapter
+## How to think about adapters
 
-- Shared core giai quyet:
-  - registry
-  - manifest
+- The shared core handles:
+  - the registry
+  - the manifest type
   - generic dispatch
-- Adapter giai quyet:
-  - artifact nao duoc xuat
-  - runtime nao duoc tao
-  - verify parity theo tieu chi nao
+- Each adapter handles:
+  - which artifacts are exported
+  - which runtime gets constructed
+  - which parity criteria must hold during verification
