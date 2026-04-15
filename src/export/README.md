@@ -20,16 +20,7 @@ python-model-test/src/export/
 
 ## Command setup
 
-Commands below assume one of these is true:
-
-- the repo is installed in editable mode, or
-- the current shell has `PYTHONPATH` pointing to `src/`
-
-Example from `python-model-test/`:
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-```
+Examples below assume you run commands from `python-model-test/`.
 
 ## What each script is responsible for
 
@@ -88,31 +79,40 @@ Main functions:
 
 ### Export a punctuation bundle
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m export.model_bundle `
-  --project vpcd `
-  --model-dir D:\DS-AI\BKMeeting-Research\python-model-test\assets\vietnamese-punc-cap-denorm-v1 `
-  --output-dir D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\vpcd\fp32
+```bash
+python -m export.model_bundle \
+  --project vpcd \
+  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
+  --output-dir build/model_bundle/vpcd/fp32
 ```
 
 ### Export a Zipformer FP32 reference bundle
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m export.model_bundle `
-  --project zipformer `
-  --model-dir D:\DS-AI\BKMeeting-Research\python-model-test\assets\zipformer `
-  --output-dir D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\zipformer\fp32
+```bash
+python -m export.model_bundle \
+  --project zipformer \
+  --model-dir assets/zipformer \
+  --output-dir build/model_bundle/zipformer/fp32
 ```
 
 ### Export source ONNX for punctuation
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m export.punctuation_onnx `
-  --model-dir D:\DS-AI\BKMeeting-Research\python-model-test\assets\vietnamese-punc-cap-denorm-v1 `
-  --output-dir D:\DS-AI\BKMeeting-Research\python-model-test\assets\vietnamese-punc-cap-denorm-v1\onnx
+```bash
+python -m export.punctuation_onnx \
+  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
+  --output-dir assets/vietnamese-punc-cap-denorm-v1/onnx
 ```
 
 ## Relationship to other modules
 
 - `export/model_bundle.py` calls the shared core in `model_bundle/exporter.py`
 - `export/punctuation_onnx.py` is a standalone helper and is not part of the shared bundle contract
+
+## Android handoff status
+
+- `vpcd`
+  - the exported bundle layout is already consumed by `bkmeeting`
+  - after export, copy the bundle files into `bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd`
+- `zipformer`
+  - the exported bundle is the canonical Python-side verification artifact
+  - the current Android ASR runtime still consumes raw component files instead of `bundle_manifest.json`

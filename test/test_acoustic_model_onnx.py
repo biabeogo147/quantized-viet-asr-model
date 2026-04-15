@@ -4,16 +4,13 @@ import time
 from pathlib import Path
 from typing import List, Protocol
 
-from model_bundle.fixtures import AudioSampleFixture
-from model_bundle.projects.zipformer import BundleAcousticRuntime, ModelDirAcousticRuntime
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL_DIR = PROJECT_ROOT / 'assets' / 'zipformer'
-DEFAULT_AUDIO_FIXTURES = [
-    AudioSampleFixture(sample_id='sample-1', audio_path='assets/speech/sample-1.mp3'),
-    AudioSampleFixture(sample_id='sample-2', audio_path='assets/speech/sample-2.wav'),
-]
+from model_bundle.projects.zipformer import (
+    BundleAcousticRuntime,
+    DEFAULT_AUDIO_FIXTURES,
+    DEFAULT_MODEL_DIR,
+    ModelDirAcousticRuntime,
+)
+from tools.paths import resolve_repo_path
 
 
 class AcousticRuntime(Protocol):
@@ -42,7 +39,7 @@ def load_inputs(args: argparse.Namespace) -> List[Path]:
     if args.audio_manifest:
         manifest_path = Path(args.audio_manifest)
         return [Path(line.strip()) for line in manifest_path.read_text(encoding='utf-8').splitlines() if line.strip()]
-    return [PROJECT_ROOT / fixture.audio_path for fixture in DEFAULT_AUDIO_FIXTURES]
+    return [resolve_repo_path(fixture.audio_path, anchor=__file__) for fixture in DEFAULT_AUDIO_FIXTURES]
 
 
 def create_runtime(args: argparse.Namespace) -> AcousticRuntime:

@@ -111,3 +111,14 @@ def test_legacy_repo_root_package_files_are_removed():
 
     for legacy_path in legacy_paths:
         assert not legacy_path.exists()
+
+
+def test_legacy_wrappers_and_reference_scripts_are_removed():
+    legacy_paths = [
+        REPO_ROOT / "convert_bpe2token.py",
+        REPO_ROOT / "test" / "test_punctuation_model.py",
+        REPO_ROOT / "test" / "test_vietasr.py",
+    ]
+
+    for legacy_path in legacy_paths:
+        assert not legacy_path.exists()

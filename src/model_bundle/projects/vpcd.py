@@ -13,12 +13,15 @@ from model_bundle.layout import resolve_bundle_dir
 from model_bundle.manifest import ModelBundleManifest
 from model_bundle.projects._vpcd_support import (
     DEFAULT_ASSET_NAMESPACE,
+    DEFAULT_TEXTS,
     DEFAULT_MODEL_VARIANT,
     GOLDEN_SAMPLES_FILE_NAME,
     MODEL_FILE_NAME,
     BundleOnnxRuntime,
+    ModelDirOnnxRuntime,
     TokenizerExportArtifacts,
     TokenizerIdBridge,
+    VietnamesePuncCapDenormOnnx,
     bartpho_tokenizer_ortx_alias,
     build_ort_tokenizer_id_bridge,
     default_golden_sample_builder,

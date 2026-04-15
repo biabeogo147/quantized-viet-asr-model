@@ -36,16 +36,7 @@ python-model-test/src/quantize/
 
 ## Command setup
 
-Commands below assume one of these is true:
-
-- the repo is installed in editable mode, or
-- the current shell has `PYTHONPATH` pointing to `src/`
-
-Example from `python-model-test/`:
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-```
+Examples below assume you run commands from `python-model-test/`.
 
 ## What each script is responsible for
 
@@ -204,6 +195,23 @@ Details are documented in `src/quantize/projects/README.md`, but in short:
 
 ## High-level quantization flows
 
+### Recommended dataset prep for balanced experiments
+
+When you want the same external calibration source to drive both projects:
+
+1. extract a deterministic VLSP subset
+2. use the emitted audio manifest for `zipformer`
+3. use the emitted transcription file for `vpcd`
+
+Example:
+
+```bash
+python -m tools.extract_vlsp2020_calibration_subset \
+  --dataset-root <vlsp_dataset_root> \
+  --max-samples 24 \
+  --output-dir build/calibration/vlsp2020
+```
+
 ### VPCD
 
 `python -m quantize --project vpcd`
@@ -215,13 +223,23 @@ Details are documented in `src/quantize/projects/README.md`, but in short:
 
 Smoke command used successfully:
 
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-& D:\Anaconda\envs\speech2text\python.exe -m quantize `
-  --project vpcd `
-  --calibration-text .\build\quantize_smoke\vpcd\calibration.txt `
-  --max-calibration-samples 1 `
-  --output .\build\quantize_smoke\vpcd\model.qnn.qdq.onnx
+```bash
+python -m quantize \
+  --project vpcd \
+  --calibration-text build/quantize_smoke/vpcd/calibration.txt \
+  --max-calibration-samples 1 \
+  --output build/quantize_smoke/vpcd/model.qnn.qdq.onnx
+```
+
+Balanced command used successfully:
+
+```bash
+python -m quantize \
+  --project vpcd \
+  --preset sd8g2_balanced \
+  --calibration-text build/calibration/vlsp2020/vpcd_transcriptions.txt \
+  --max-calibration-samples 24 \
+  --output build/vpcd/vpcd_balanced.onnx
 ```
 
 ### Zipformer
@@ -237,15 +255,27 @@ $env:PYTHONPATH = (Resolve-Path .\src).Path
 
 Smoke command used successfully:
 
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-& D:\Anaconda\envs\speech2text\python.exe -m quantize `
-  --project zipformer `
-  --audio-manifest .\build\quantize_smoke\zipformer\audio_manifest.txt `
-  --output-root .\build\quantize_smoke\zipformer\output `
-  --bundle-output-dir .\build\quantize_smoke\zipformer\bundle `
-  --reference-bundle-dir .\build\quantize_smoke\zipformer\reference `
+```bash
+python -m quantize \
+  --project zipformer \
+  --audio-manifest build/quantize_smoke/zipformer/audio_manifest.txt \
+  --output-root build/quantize_smoke/zipformer/output \
+  --bundle-output-dir build/quantize_smoke/zipformer/bundle \
+  --reference-bundle-dir build/quantize_smoke/zipformer/reference \
   --calibration-chunk-size 1
+```
+
+Balanced command used successfully:
+
+```bash
+python -m quantize \
+  --project zipformer \
+  --preset zipformer_sd8g2_balanced \
+  --audio-manifest build/calibration/vlsp2020/zipformer_audio_manifest.txt \
+  --output-root build/zipformer/artifacts \
+  --bundle-output-dir build/zipformer \
+  --reference-bundle-dir build/zipformer/reference_fp32 \
+  --calibration-chunk-size 4
 ```
 
 ## Honest status note

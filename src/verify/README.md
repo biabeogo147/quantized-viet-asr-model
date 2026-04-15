@@ -19,16 +19,7 @@ python-model-test/src/verify/
 
 ## Command setup
 
-Commands below assume one of these is true:
-
-- the repo is installed in editable mode, or
-- the current shell has `PYTHONPATH` pointing to `src/`
-
-Example from `python-model-test/`:
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-```
+Examples below assume you run commands from `python-model-test/`.
 
 ## What each script is responsible for
 
@@ -72,29 +63,29 @@ Main functions:
 
 ### Verify a punctuation bundle
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m verify.model_bundle `
-  --project vpcd `
-  --model-dir D:\DS-AI\BKMeeting-Research\python-model-test\assets\vietnamese-punc-cap-denorm-v1 `
-  --bundle-dir D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\vpcd\fp32
+```bash
+python -m verify.model_bundle \
+  --project vpcd \
+  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
+  --bundle-dir build/model_bundle/vpcd/fp32
 ```
 
 ### Verify a Zipformer FP32 bundle against `model-dir`
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m verify.model_bundle `
-  --project zipformer `
-  --model-dir D:\DS-AI\BKMeeting-Research\python-model-test\assets\zipformer `
-  --bundle-dir D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\zipformer\fp32
+```bash
+python -m verify.model_bundle \
+  --project zipformer \
+  --model-dir assets/zipformer \
+  --bundle-dir build/model_bundle/zipformer/fp32
 ```
 
 ### Verify a Zipformer quantized candidate against the FP32 reference bundle
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m verify.model_bundle `
-  --project zipformer `
-  --reference-bundle D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\zipformer\fp32 `
-  --candidate-bundle D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\zipformer\qnn_u16u8
+```bash
+python -m verify.model_bundle \
+  --project zipformer \
+  --reference-bundle build/model_bundle/zipformer/fp32 \
+  --candidate-bundle build/model_bundle/zipformer/qnn_u16u8
 ```
 
 ## Relationship to other modules

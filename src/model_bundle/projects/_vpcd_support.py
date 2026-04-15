@@ -23,6 +23,10 @@ TOKENIZER_TO_MODEL_ID_MAP_FILE_NAME = 'tokenizer.to_model_id_map.json'
 MODEL_TO_TOKENIZER_ID_MAP_FILE_NAME = 'tokenizer.from_model_id_map.json'
 GOLDEN_SAMPLES_FILE_NAME = 'golden_samples.jsonl'
 UNK_TOKEN_ID = 3
+DEFAULT_TEXTS = [
+    'hom nay la buoi nham chuc cua toi phuoc thanh',
+    'chao cac ban hom nay chung ta cung nhau den voi bai hoc deep learning phan so muoi ba',
+]
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,55 @@ def ensure_local_vendor_path() -> None:
 def resolve_variant_onnx_path(model_dir: str | Path, model_variant: str) -> Path:
     variant_file = model_variant if str(model_variant).endswith('.onnx') else f'{model_variant}.onnx'
     return Path(model_dir) / 'onnx' / variant_file
+
+
+class ModelDirOnnxRuntime:
+    def __init__(self, *, model_dir: str, onnx_path: str, provider: str = 'CPUExecutionProvider'):
+        import onnxruntime as ort
+        from transformers import AutoTokenizer
+
+        self.model_dir = model_dir
+        self.onnx_path = onnx_path
+        self.tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
+        self.session = ort.InferenceSession(onnx_path, providers=[provider])
+
+        self.pad_token_id = self.tokenizer.pad_token_id
+        self.eos_token_id = self.tokenizer.eos_token_id
+        self.decoder_start_token_id = self.tokenizer.eos_token_id
+
+        generation_config_path = Path(model_dir) / 'generation_config.json'
+        if generation_config_path.exists():
+            generation_config = json.loads(generation_config_path.read_text(encoding='utf-8'))
+            self.decoder_start_token_id = generation_config.get('decoder_start_token_id', self.decoder_start_token_id)
+
+    def restore(self, text: str, max_length: int = 128) -> str:
+        encoded = self.tokenizer(text, return_tensors='np', truncation=True, max_length=512)
+        input_ids = encoded['input_ids'].astype(np.int64)
+        attention_mask = encoded['attention_mask'].astype(np.int64)
+        decoder_input_ids = np.array([[self.decoder_start_token_id]], dtype=np.int64)
+
+        for _ in range(max_length):
+            decoder_attention_mask = np.ones_like(decoder_input_ids, dtype=np.int64)
+            outputs = self.session.run(
+                None,
+                {
+                    'input_ids': input_ids,
+                    'attention_mask': attention_mask,
+                    'decoder_input_ids': decoder_input_ids,
+                    'decoder_attention_mask': decoder_attention_mask,
+                },
+            )
+            logits = outputs[0]
+            next_token_id = int(np.argmax(logits[:, -1, :], axis=-1)[0])
+            decoder_input_ids = np.concatenate([decoder_input_ids, np.array([[next_token_id]], dtype=np.int64)], axis=1)
+            if next_token_id == self.eos_token_id:
+                break
+
+        generated_ids = decoder_input_ids[0, 1:]
+        return self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+
+VietnamesePuncCapDenormOnnx = ModelDirOnnxRuntime
 
 
 @contextmanager
@@ -171,8 +224,6 @@ def default_golden_sample_builder(
     onnx_path: str,
     max_decode_length: int,
 ) -> list[TextGoldenSample]:
-    from test.test_punctuation_model_onnx import DEFAULT_TEXTS, VietnamesePuncCapDenormOnnx
-
     model = VietnamesePuncCapDenormOnnx(model_dir=model_dir, onnx_path=onnx_path)
     samples: list[TextGoldenSample] = []
     for text in DEFAULT_TEXTS:

@@ -46,7 +46,6 @@ python-model-test/
     verify/             # verification CLIs
     tools/              # small helper scripts
   test/                  # smoke runners + pytest suites
-  convert_bpe2token.py   # helper that generates tokens.txt from bpe.model
 ```
 
 ## What each module does
@@ -102,6 +101,9 @@ Important shared helper:
   - resolves the repo root from any module under `src/`
   - converts repo-relative fixture paths such as `assets/speech/sample-1.mp3` into stable absolute paths
   - avoids fragile `Path(__file__).parents[...]` assumptions after refactors
+- `src/tools/extract_vlsp2020_calibration_subset.py`
+  - reads VLSP 2020 parquet shards
+  - emits a deterministic audio subset for Zipformer and a matching transcription subset for VPCD
 
 See `src/tools/README.md` for details.
 
@@ -110,7 +112,6 @@ See `src/tools/README.md` for details.
 Contains:
 - canonical smoke runners
 - pytest suites that lock the contract
-- legacy reference scripts used for behavior comparison
 
 See `test/README.md` for details.
 
@@ -118,15 +119,7 @@ See `test/README.md` for details.
 
 Command setup:
 - `pytest` works from `python-model-test/` because `test/conftest.py` prepends `src/`.
-- CLI and smoke-runner commands below assume either:
-  - you installed the repo in editable mode, or
-  - you set `PYTHONPATH` to `src/` in the current shell
-
-Example PowerShell setup from `python-model-test/`:
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-```
+- CLI and smoke-runner examples below assume you run commands from `python-model-test/`.
 
 Why this matters:
 - code under `src/` now resolves repo-relative assets through the shared helper in `src/tools/paths.py`
@@ -163,6 +156,20 @@ For Zipformer:
 For VPCD:
 - `python -m quantize --project vpcd ...`
 
+Recommended shared calibration prep:
+
+```bash
+python -m tools.extract_vlsp2020_calibration_subset \
+  --dataset-root <vlsp_dataset_root> \
+  --max-samples 24 \
+  --output-dir build/calibration/vlsp2020
+```
+
+This produces:
+- `build/calibration/vlsp2020/zipformer_audio_manifest.txt`
+- `build/calibration/vlsp2020/vpcd_transcriptions.txt`
+- `build/calibration/vlsp2020/subset_manifest.json`
+
 The internal pipeline:
 - collect calibration audio
 - freeze fixed shapes
@@ -193,9 +200,35 @@ Tiny smoke runs already exercised in this repo:
 
 ### 5. Hand off to Android
 
-Once a reference or candidate bundle is ready:
-- sync the bundle into `bkmeeting/modelassets`
-- Android consumes the same `bundle_manifest.json` and exported layout produced by Python
+`vpcd` and `zipformer` do not hand off in the same way today:
+
+- `vpcd`
+  - Android already consumes the shared Python bundle format
+  - export or refresh the punctuation bundle in `python-model-test`
+  - copy the bundle files into `bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd`
+- `zipformer`
+  - Python can export a bundle for verification and quantization work
+  - the current Android ASR runtime still consumes raw `encoder` / `decoder` / `joiner` / `tokens.txt` assets, not `bundle_manifest.json`
+  - sync those raw component files into `bkmeeting/modelassets/src/main/assets/models/asr/zipformer/<variant>`
+
+Canonical punctuation handoff:
+
+```bash
+python -m export.model_bundle \
+  --project vpcd \
+  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
+  --output-dir build/model_bundle/vpcd/fp32 \
+  --asset-namespace models/punctuation/vpcd \
+  --model-variant vpcd_balanced
+
+cp -R build/model_bundle/vpcd/fp32/. \
+  ../bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd/
+```
+
+After the copy:
+- `bkmeeting` reads `models/punctuation/vpcd/bundle_manifest.json`
+- the Android runtime copies the files into app-local storage and loads them through the manifest contract
+- `bkmeeting/modelassets/README.md` is the canonical Android-side handoff document
 
 ## Concrete pipelines
 
@@ -217,6 +250,7 @@ Once a reference or candidate bundle is ready:
 -> exported candidate bundle
 -> candidate-vs-reference verification
 -> smoke run of the quantized bundle
+-> optional Android handoff of raw ASR component files
 
 ## Important build artifacts
 
@@ -261,9 +295,9 @@ build/model_bundle/zipformer/qnn_u16u8/
   evaluation_report.json
 ```
 
-## Small helper at repo root
+## Small helper in `src/tools`
 
-### `convert_bpe2token.py`
+### `src/tools/convert_bpe2token.py`
 
 Role:
 - reads `assets/zipformer/bpe.model`

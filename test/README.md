@@ -1,23 +1,16 @@
 # Test Module
 
-`test/` contains three different groups of scripts:
+`test/` now contains only two things:
 
-- smoke runners that execute real models
-- pytest suites that lock down the bundle and quantization contracts
-- a few legacy reference scripts used for behavior comparison
+- canonical smoke runners that execute real models
+- pytest suites that lock down the shared `src/` contracts
+
+Legacy standalone comparison scripts have been removed so the repo keeps a single canonical path.
 
 ## Import setup
 
 - `pytest` from `python-model-test/` works without extra shell setup because `test/conftest.py` prepends `src/` to `sys.path`.
-- Direct smoke-runner commands still need one of these:
-  - editable install, or
-  - `PYTHONPATH=src`
-
-Example from `python-model-test/`:
-
-```powershell
-$env:PYTHONPATH = (Resolve-Path .\src).Path
-```
+- Examples below assume you run commands from `python-model-test/`.
 
 ## Main file map
 
@@ -25,14 +18,14 @@ $env:PYTHONPATH = (Resolve-Path .\src).Path
 python-model-test/test/
   test_punctuation_model_onnx.py
   test_acoustic_model_onnx.py
-  test_punctuation_model.py
-  test_vietasr.py
   test_model_bundle_core.py
   test_vpcd_bundle.py
   test_zipformer_bundle.py
   test_quantize_projects.py
   test_zipformer_quantize.py
+  test_extract_vlsp2020_calibration_subset.py
   test_export_verify_modules.py
+  test_src_layout_bootstrap.py
   README.md
 ```
 
@@ -49,8 +42,6 @@ Role:
 Main classes and functions:
 - `PunctuationRuntime`
   - protocol for punctuation runtimes
-- `ModelDirOnnxRuntime`
-  - reference runtime built from the Hugging Face tokenizer + ONNX model
 - `build_argument_parser()`
 - `load_inputs(args)`
 - `create_runtime(args)`
@@ -72,34 +63,6 @@ Main classes and functions:
 - `load_inputs(args)`
 - `create_runtime(args)`
   - chooses `ModelDirAcousticRuntime` or `BundleAcousticRuntime`
-- `main()`
-
-## Legacy reference scripts that still have value
-
-### `test_punctuation_model.py`
-
-Role:
-- compares two punctuation/capitalization models at the reference level
-- not part of the newer shared bundle pipeline
-
-Main classes and functions:
-- `VietnamesePuncCapDenormModel`
-- `VibertCapuModel`
-- `patch_vibert_capu_runtime(model_dir)`
-- `load_inputs(args)`
-- `print_result_block(...)`
-- `main()`
-
-### `test_vietasr.py`
-
-Role:
-- older ASR reference script for Zipformer/VietASR
-- includes its own beam-search implementation
-- still useful for quick benchmarking outside the shared bundle pipeline
-
-Main classes and functions:
-- `ZipformerASR`
-- `ZipformerASRWithBeamSearch`
 - `main()`
 
 ## Pytest suite
@@ -138,44 +101,51 @@ Locks quantize CLI dispatch by `--project`.
 
 Locks the fixed-shape helper and Zipformer fixed-encoder-frames metadata.
 
+### `test_extract_vlsp2020_calibration_subset.py`
+
+Locks the deterministic VLSP calibration-subset extractor:
+- source-order preservation
+- emitted manifest/file layout
+
 ### `test_export_verify_modules.py`
 
 Locks the two package entrypoints:
 - `export.model_bundle`
 - `verify.model_bundle`
 
+### `test_src_layout_bootstrap.py`
+
+Locks the `src/` layout assumptions:
+- imports resolve from `src/`
+- legacy repo-root wrappers are gone
+- deleted reference scripts are not reintroduced by accident
+
 ## How to use it
 
 ### Run the punctuation smoke test
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m test.test_punctuation_model_onnx `
-  --bundle-manifest D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\vpcd\fp32\bundle_manifest.json `
+```bash
+python -m test.test_punctuation_model_onnx \
+  --bundle-manifest build/model_bundle/vpcd/fp32/bundle_manifest.json \
   --text "hom nay la buoi nham chuc cua toi phuoc thanh"
 ```
 
 ### Run the Zipformer quantized-bundle smoke test
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m test.test_acoustic_model_onnx `
-  --bundle-manifest D:\DS-AI\BKMeeting-Research\python-model-test\build\model_bundle\zipformer\qnn_u16u8\bundle_manifest.json `
-  --audio-file D:\DS-AI\BKMeeting-Research\python-model-test\assets\speech\sample-2.wav
+```bash
+python -m test.test_acoustic_model_onnx \
+  --bundle-manifest build/model_bundle/zipformer/qnn_u16u8/bundle_manifest.json \
+  --audio-file assets/speech/sample-2.wav
 ```
 
 ### Run the core pytest suite
 
-```powershell
-& D:\Anaconda\envs\speech2text\python.exe -m pytest `
-  D:\DS-AI\BKMeeting-Research\python-model-test\test\test_model_bundle_core.py `
-  D:\DS-AI\BKMeeting-Research\python-model-test\test\test_vpcd_bundle.py `
-  D:\DS-AI\BKMeeting-Research\python-model-test\test\test_zipformer_bundle.py `
-  D:\DS-AI\BKMeeting-Research\python-model-test\test\test_quantize_projects.py `
-  D:\DS-AI\BKMeeting-Research\python-model-test\test\test_zipformer_quantize.py `
-  D:\DS-AI\BKMeeting-Research\python-model-test\test\test_export_verify_modules.py -q
+```bash
+python -m pytest test -q -p no:cacheprovider
 ```
 
 ## How to think about `test/`
 
 - if you want to run a real model, use the smoke runners
 - if you want to lock the contract and refactor safely, use the pytest suite
-- if you want to inspect older behavior, read `test_punctuation_model.py` and `test_vietasr.py`
+- if you need a new experiment, build it on top of the canonical `src/` runtimes instead of adding a parallel legacy script

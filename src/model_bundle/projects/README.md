@@ -64,6 +64,9 @@ Main classes:
 - `BundleOnnxRuntime`
   - bundle-only punctuation runtime
   - used by the smoke runner in `test_punctuation_model_onnx.py`
+- `ModelDirOnnxRuntime`
+  - shared reference runtime for punctuation ONNX
+  - used by both bundle export fixture generation and the smoke runner
 
 Main functions:
 - `ensure_local_vendor_path()`
@@ -80,7 +83,9 @@ Main functions:
   - runs the reference runtime to build punctuation fixtures
 
 Note:
-- `_vpcd_support.py` now resolves optional repo-local dependencies through `tools.paths.resolve_repo_path(...)` instead of assuming a fixed directory depth under `src/`
+- `_vpcd_support.py` now keeps the shared reference runtime and default smoke texts inside `src/`
+- `src/` no longer imports helper state from files under `test/`
+- optional repo-local dependencies are resolved through `tools.paths.resolve_repo_path(...)` instead of assuming a fixed directory depth under `src/`
 
 ## `zipformer.py`
 
