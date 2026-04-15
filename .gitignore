@@ -3,3 +3,4 @@ _tmp
 __pycache__
 .idea
 /build/
+/.tmp/

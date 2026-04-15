@@ -1,6 +1,6 @@
 # Model Bundle Module
 
-`model_bundle/` is the shared core for the Python-side export, verification, and bundle-consumption flow.
+`src/model_bundle/` is the shared core for the Python-side export, verification, and bundle-consumption flow.
 
 ## Goals
 
@@ -11,7 +11,7 @@
 ## File map
 
 ```text
-python-model-test/model_bundle/
+python-model-test/src/model_bundle/
   __init__.py
   contracts.py
   exporter.py
@@ -137,7 +137,7 @@ Main functions:
 - `projects/zipformer.py`
   - adapter for RNNT acoustic bundles
 
-Adapter details are documented in `model_bundle/projects/README.md`.
+Adapter details are documented in `src/model_bundle/projects/README.md`.
 
 ## Shared flow
 
@@ -155,6 +155,15 @@ Adapter details are documented in `model_bundle/projects/README.md`.
 -> `model_bundle.verifier.verify_model_bundle(...)`
 -> `resolve_bundle_project(project)`
 -> `adapter.verify_bundle(...)`
+
+## Shared dependency from `src/tools/`
+
+Project adapters can keep fixture rows repo-relative, for example `assets/speech/sample-1.mp3`.
+
+They resolve those rows through `tools.paths.resolve_repo_path(...)`, which means:
+- bundle verification does not depend on fragile `Path(__file__).parents[...]` assumptions
+- refactors inside `src/` do not break fixture lookup
+- the same manifest rows stay portable across reference and candidate bundle flows
 
 ## Standard bundle layout
 

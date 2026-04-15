@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from model_bundle.manifest import ModelBundleManifest
+from model_bundle.fixtures import AudioSampleFixture
 
 TEST_TMP_ROOT = Path(__file__).resolve().parent / '_tmp' / 'zipformer_quantize'
 
@@ -72,3 +73,58 @@ def test_bundle_runtime_reads_fixed_encoder_frames_from_manifest(tmp_case_dir, m
 
     assert isinstance(runtime, BundleAcousticRuntime)
     assert seen['fixed_encoder_frames'] == 128
+
+
+def test_load_audio_fixtures_supports_utf8_bom_manifest(tmp_case_dir):
+    from quantize.projects.zipformer import _load_audio_fixtures
+
+    manifest_path = tmp_case_dir / 'audio_manifest.txt'
+    manifest_path.write_text('\ufeffassets/speech/sample-1.mp3\n', encoding='utf-8')
+
+    fixtures = _load_audio_fixtures(str(manifest_path))
+
+    assert fixtures == [AudioSampleFixture(sample_id='audio-1', audio_path='assets/speech/sample-1.mp3')]
+
+
+def test_collect_component_records_resolves_audio_paths_from_repo_root(monkeypatch):
+    from quantize.projects.zipformer import _collect_component_records
+
+    repo_root = Path(__file__).resolve().parent.parent
+    seen = {}
+
+    class FakeEncoderSession:
+        def run(self, _, inputs):
+            return [
+                np.zeros((1, 1, 4), dtype=np.float32),
+                np.asarray([1], dtype=np.int64),
+            ]
+
+    class FakeDecoderSession:
+        def run(self, _, inputs):
+            return [np.zeros((1, 4), dtype=np.float32)]
+
+    class FakeJoinerSession:
+        def run(self, _, inputs):
+            return [np.asarray([[1.0, 0.0]], dtype=np.float32)]
+
+    class FakeRuntime:
+        sample_rate = 16000
+        feature_dim = 80
+        blank_id = 0
+        context_size = 2
+        encoder_sess = FakeEncoderSession()
+        decoder_sess = FakeDecoderSession()
+        joiner_sess = FakeJoinerSession()
+
+        def _load_features(self, audio_path, sample_rate=16000, feature_dim=80):
+            seen['audio_path'] = Path(audio_path)
+            return np.zeros((2, feature_dim), dtype=np.float32)
+
+    records, stats = _collect_component_records(
+        FakeRuntime(),
+        [AudioSampleFixture(sample_id='sample-1', audio_path='assets/speech/sample-1.mp3')],
+    )
+
+    assert seen['audio_path'] == repo_root / 'assets' / 'speech' / 'sample-1.mp3'
+    assert len(records['encoder']) == 1
+    assert stats['sample_count'] == 1

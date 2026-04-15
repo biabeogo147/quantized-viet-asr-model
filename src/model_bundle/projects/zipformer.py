@@ -11,6 +11,7 @@ from model_bundle.contracts import BundleProjectAdapter
 from model_bundle.fixtures import AudioExpectedOutput, AudioSampleFixture, read_jsonl, serialize_jsonl
 from model_bundle.layout import resolve_bundle_dir
 from model_bundle.manifest import ModelBundleManifest
+from tools.paths import resolve_repo_path
 
 DEFAULT_MODEL_DIR = Path('assets') / 'zipformer'
 DEFAULT_OUTPUT_DIR = resolve_bundle_dir('zipformer', 'fp32')
@@ -243,7 +244,7 @@ def export_bundle(
             'joiner': source_joiner,
             'tokens': source_tokens,
         })
-        expected = _build_expected_outputs(runtime, fixtures, Path(__file__).resolve().parents[2])
+        expected = _build_expected_outputs(runtime, fixtures, resolve_repo_path('.', anchor=__file__))
 
     sample_manifest_path = output_dir / 'sample_manifest.jsonl'
     expected_outputs_path = output_dir / 'expected_outputs.jsonl'
@@ -292,7 +293,7 @@ def verify_bundle(*, model_dir: Path | None = None, bundle_dir: Path | None = No
         expected_rows = {row['sample_id']: AudioExpectedOutput.from_dict(row) for row in read_jsonl(reference_bundle / reference_manifest.fixtures['expected_outputs'])}
         reference_runtime = BundleAcousticRuntime.from_manifest_path(reference_bundle / 'bundle_manifest.json', provider=provider)
         candidate_runtime = BundleAcousticRuntime.from_manifest_path(candidate_bundle / 'bundle_manifest.json', provider=provider)
-        workspace_root = Path(__file__).resolve().parents[2]
+        workspace_root = resolve_repo_path('.', anchor=__file__)
         for fixture in sample_rows:
             audio_path = workspace_root / fixture.audio_path
             reference_text = reference_runtime.transcribe(audio_path)['text']
@@ -321,7 +322,7 @@ def verify_bundle(*, model_dir: Path | None = None, bundle_dir: Path | None = No
     expected_rows = {row['sample_id']: AudioExpectedOutput.from_dict(row) for row in read_jsonl(bundle_dir / manifest.fixtures['expected_outputs'])}
     model_runtime = ModelDirAcousticRuntime(model_dir=model_dir, provider=provider)
     bundle_runtime = BundleAcousticRuntime.from_manifest_path(bundle_dir / 'bundle_manifest.json', provider=provider)
-    workspace_root = Path(__file__).resolve().parents[2]
+    workspace_root = resolve_repo_path('.', anchor=__file__)
     for fixture in sample_rows:
         audio_path = workspace_root / fixture.audio_path
         model_text = model_runtime.transcribe(audio_path)['text']

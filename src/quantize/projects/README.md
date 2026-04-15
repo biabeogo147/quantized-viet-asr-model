@@ -1,11 +1,11 @@
 # Quantize Project Adapters
 
-`quantize/projects/` contains project-specific logic for the `python -m quantize` CLI.
+`src/quantize/projects/` contains project-specific logic for the `python -m quantize` CLI.
 
 ## File map
 
 ```text
-python-model-test/quantize/projects/
+python-model-test/src/quantize/projects/
   __init__.py
   vpcd.py
   zipformer.py
@@ -59,11 +59,13 @@ Main functions:
   - validates preset support
 - `_load_audio_fixtures(manifest_path)`
   - reads the audio set used for calibration and evaluation
+  - accepts UTF-8 BOM manifests
 - `_collect_component_records(runtime, fixtures)`
   - traces calibration records for:
     - encoder
     - decoder
     - joiner
+  - resolves repo-relative audio paths through `tools.paths.resolve_repo_path(...)`
 - `_fixed_shape_paths(model_dir, output_root, stats)`
   - creates fixed-shape ONNX files
 - `_fixed_input_shapes(stats)`
@@ -90,3 +92,4 @@ Main functions:
   - component-wise quantization
   - audio-based calibration
   - fixed-shape preparation and candidate-bundle staging
+  - stable repo-root fixture resolution after the `src/` refactor

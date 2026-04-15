@@ -1,6 +1,6 @@
 # Quantize Module
 
-`quantize/` contains the shared multi-project quantization framework. It currently serves two use cases:
+`src/quantize/` contains the shared multi-project quantization framework. It currently serves two use cases:
 
 - quantizing the punctuation model `vpcd`
 - quantizing Zipformer to produce the `qnn_u16u8` candidate bundle
@@ -14,7 +14,7 @@
 ## File map
 
 ```text
-python-model-test/quantize/
+python-model-test/src/quantize/
   cli.py
   calibration.py
   config.py
@@ -32,6 +32,19 @@ python-model-test/quantize/
     vpcd.py
     zipformer.py
   README.md
+```
+
+## Command setup
+
+Commands below assume one of these is true:
+
+- the repo is installed in editable mode, or
+- the current shell has `PYTHONPATH` pointing to `src/`
+
+Example from `python-model-test/`:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
 ```
 
 ## What each script is responsible for
@@ -167,9 +180,16 @@ Main classes and functions:
 - `isolated_model_input(...)`
 - `temporary_workspace_tempdir(...)`
 
+## Shared dependency from `src/tools/`
+
+`quantize/projects/zipformer.py` relies on `tools.paths.resolve_repo_path(...)` so that:
+- audio manifests can keep repo-relative entries such as `assets/speech/sample-1.mp3`
+- UTF-8 BOM text manifests still load correctly
+- moving modules inside `src/` does not silently break calibration fixture lookup
+
 ## Project adapters
 
-Details are documented in `quantize/projects/README.md`, but in short:
+Details are documented in `src/quantize/projects/README.md`, but in short:
 
 - `projects/vpcd.py`
   - routes punctuation quantization through presets
@@ -191,6 +211,17 @@ Details are documented in `quantize/projects/README.md`, but in short:
 -> quantize
 -> print size-budget guidance and next steps
 
+Smoke command used successfully:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+& D:\Anaconda\envs\speech2text\python.exe -m quantize `
+  --project vpcd `
+  --calibration-text .\build\quantize_smoke\vpcd\calibration.txt `
+  --max-calibration-samples 1 `
+  --output .\build\quantize_smoke\vpcd\model.qnn.qdq.onnx
+```
+
 ### Zipformer
 
 `python -m quantize --project zipformer`
@@ -202,7 +233,21 @@ Details are documented in `quantize/projects/README.md`, but in short:
 -> verify the candidate against the reference bundle
 -> write reports
 
+Smoke command used successfully:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+& D:\Anaconda\envs\speech2text\python.exe -m quantize `
+  --project zipformer `
+  --audio-manifest .\build\quantize_smoke\zipformer\audio_manifest.txt `
+  --output-root .\build\quantize_smoke\zipformer\output `
+  --bundle-output-dir .\build\quantize_smoke\zipformer\bundle `
+  --reference-bundle-dir .\build\quantize_smoke\zipformer\reference `
+  --calibration-chunk-size 1
+```
+
 ## Honest status note
 
 - the `zipformer/qnn_u16u8` candidate bundle is runnable today
-- it still does not exact-match the FP32 reference on the current sample set
+- a tiny 1-sample smoke run exact-matched the FP32 reference bundle
+- broader tuning still needs larger calibration and evaluation sets before we treat parity as settled

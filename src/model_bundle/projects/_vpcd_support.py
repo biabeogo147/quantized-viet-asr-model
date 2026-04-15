@@ -12,6 +12,7 @@ import numpy as np
 
 from model_bundle.fixtures import TextGoldenSample, serialize_jsonl
 from model_bundle.manifest import ModelBundleManifest
+from tools.paths import resolve_repo_path
 
 DEFAULT_ASSET_NAMESPACE = 'models/punctuation/vpcd'
 DEFAULT_MODEL_VARIANT = 'vpcd_balanced'
@@ -61,7 +62,7 @@ GoldenSampleBuilder = Callable[..., list[TextGoldenSample]]
 
 
 def ensure_local_vendor_path() -> None:
-    vendor_dir = Path(__file__).resolve().parents[2] / '_vendor'
+    vendor_dir = resolve_repo_path('_vendor', anchor=__file__)
     if vendor_dir.exists():
         vendor_path = str(vendor_dir)
         if vendor_path not in sys.path:

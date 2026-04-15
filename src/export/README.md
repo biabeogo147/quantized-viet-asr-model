@@ -1,6 +1,6 @@
 # Export Module
 
-`export/` contains the CLIs used to create input artifacts for verification, smoke tests, quantization, and Android sync.
+`src/export/` contains the CLIs used to create input artifacts for verification, smoke tests, quantization, and Android sync.
 
 ## Goals
 
@@ -11,11 +11,24 @@
 ## File map
 
 ```text
-python-model-test/export/
+python-model-test/src/export/
   __init__.py
   model_bundle.py
   punctuation_onnx.py
   README.md
+```
+
+## Command setup
+
+Commands below assume one of these is true:
+
+- the repo is installed in editable mode, or
+- the current shell has `PYTHONPATH` pointing to `src/`
+
+Example from `python-model-test/`:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
 ```
 
 ## What each script is responsible for

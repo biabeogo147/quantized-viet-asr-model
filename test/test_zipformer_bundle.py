@@ -169,6 +169,7 @@ def test_verify_exported_bundle_matches_model_dir_mode(monkeypatch, tmp_case_dir
 
     bundle_dir = tmp_case_dir / 'bundle'
     bundle_dir.mkdir()
+    repo_root = Path(__file__).resolve().parent.parent
 
     manifest = ModelBundleManifest(
         bundle_version=1,
@@ -189,18 +190,24 @@ def test_verify_exported_bundle_matches_model_dir_mode(monkeypatch, tmp_case_dir
     class FakeRuntime:
         def __init__(self, text):
             self.text = text
+            self.audio_paths = []
 
         def transcribe(self, audio_path):
+            self.audio_paths.append(Path(audio_path))
             return {'text': self.text, 'audio_path': str(audio_path)}
 
-    monkeypatch.setattr('model_bundle.projects.zipformer.ModelDirAcousticRuntime', lambda **kwargs: FakeRuntime('xin chao'))
+    model_runtime = FakeRuntime('xin chao')
+    bundle_runtime = FakeRuntime('xin chao')
+    monkeypatch.setattr('model_bundle.projects.zipformer.ModelDirAcousticRuntime', lambda **kwargs: model_runtime)
     monkeypatch.setattr(
         'model_bundle.projects.zipformer.BundleAcousticRuntime',
-        type('FakeBundleRuntime', (), {'from_manifest_path': classmethod(lambda cls, manifest_path, provider='CPUExecutionProvider': FakeRuntime('xin chao'))}),
+        type('FakeBundleRuntime', (), {'from_manifest_path': classmethod(lambda cls, manifest_path, provider='CPUExecutionProvider': bundle_runtime)}),
     )
 
     report = verify_bundle(model_dir=tmp_case_dir / 'model', bundle_dir=bundle_dir)
 
     assert report['passed'] is True
     assert report['checked_samples'] == 1
+    assert model_runtime.audio_paths == [repo_root / 'assets' / 'speech' / 'sample-1.mp3']
+    assert bundle_runtime.audio_paths == [repo_root / 'assets' / 'speech' / 'sample-1.mp3']
 

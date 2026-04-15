@@ -16,6 +16,7 @@ from quantize.qnn import run_qnn_static_quantization
 from quantize.reports import ComponentQuantizationReport, QuantizationReport
 from quantize.runner import file_size_mb
 from quantize.types import CalibrationSample, QuantizationPlan
+from tools.paths import resolve_repo_path
 
 NAME = 'zipformer'
 DEFAULT_MODEL_DIR = Path('assets') / 'zipformer'
@@ -48,7 +49,7 @@ def _load_audio_fixtures(manifest_path: str | None) -> list[AudioSampleFixture]:
         return list(DEFAULT_AUDIO_FIXTURES)
     path = Path(manifest_path)
     fixtures: list[AudioSampleFixture] = []
-    for index, line in enumerate(path.read_text(encoding='utf-8').splitlines(), start=1):
+    for index, line in enumerate(path.read_text(encoding='utf-8-sig').splitlines(), start=1):
         audio_path = line.strip()
         if audio_path:
             fixtures.append(AudioSampleFixture(sample_id=f'audio-{index}', audio_path=audio_path))
@@ -67,7 +68,6 @@ def _pad_encoder_records(records: Sequence[CalibrationSample], max_t: int, featu
 
 
 def _collect_component_records(runtime: ModelDirAcousticRuntime, fixtures: Sequence[AudioSampleFixture]) -> tuple[dict[str, list[CalibrationSample]], dict[str, int]]:
-    workspace_root = Path(__file__).resolve().parents[2]
     encoder_records: list[CalibrationSample] = []
     decoder_records: list[CalibrationSample] = []
     joiner_records: list[CalibrationSample] = []
@@ -75,7 +75,7 @@ def _collect_component_records(runtime: ModelDirAcousticRuntime, fixtures: Seque
     trace_records = 0
 
     for fixture in fixtures:
-        audio_path = workspace_root / fixture.audio_path
+        audio_path = resolve_repo_path(fixture.audio_path, anchor=__file__)
         features = runtime._load_features(audio_path, sample_rate=runtime.sample_rate, feature_dim=runtime.feature_dim)
         x = features[None, ...].astype(np.float32)
         x_lens = np.array([features.shape[0]], dtype=np.int64)

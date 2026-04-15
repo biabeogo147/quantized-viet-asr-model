@@ -19,16 +19,18 @@ The repo currently focuses on two main model families:
   - RNNT acoustic model
   - output is a transcript
 
-Instead of maintaining one-off scripts per model, the repo is organized around four shared blocks:
+Instead of maintaining one-off scripts per model, the repo is organized around five shared blocks:
 
-- `export/`
+- `src/export/`
   - entrypoints that create artifacts
-- `verify/`
+- `src/verify/`
   - entrypoints that check parity and report mismatches
-- `model_bundle/`
+- `src/model_bundle/`
   - the shared bundle contract
-- `quantize/`
+- `src/quantize/`
   - the shared multi-project quantization framework
+- `src/tools/`
+  - small reusable CLI helpers and shared path utilities
 
 ## Repository layout
 
@@ -37,34 +39,36 @@ python-model-test/
   assets/                # source models, audio/text fixtures
   build/                 # generated artifacts from export/quantize
   docs/                  # implementation plans and design notes
-  export/                # export CLIs
-  model_bundle/          # shared bundle contract
-  quantize/              # quantization framework
+  src/
+    export/             # export CLIs
+    model_bundle/       # shared bundle contract
+    quantize/           # quantization framework
+    verify/             # verification CLIs
+    tools/              # small helper scripts
   test/                  # smoke runners + pytest suites
-  verify/                # verification CLIs
   convert_bpe2token.py   # helper that generates tokens.txt from bpe.model
 ```
 
 ## What each module does
 
-### `export/`
+### `src/export/`
 
 Creates input artifacts:
 - shared bundles for `vpcd` and `zipformer`
 - source ONNX for punctuation
 
-See `export/README.md` for details.
+See `src/export/README.md` for details.
 
-### `verify/`
+### `src/verify/`
 
 Checks bundles:
 - punctuation encode/decode parity
 - Zipformer reference-vs-bundle parity
 - Zipformer reference-vs-candidate parity
 
-See `verify/README.md` for details.
+See `src/verify/README.md` for details.
 
-### `model_bundle/`
+### `src/model_bundle/`
 
 Shared core for:
 - manifests
@@ -73,10 +77,10 @@ Shared core for:
 - project adapters
 
 See:
-- `model_bundle/README.md`
-- `model_bundle/projects/README.md`
+- `src/model_bundle/README.md`
+- `src/model_bundle/projects/README.md`
 
-### `quantize/`
+### `src/quantize/`
 
 Shared quantization framework:
 - calibration
@@ -86,8 +90,20 @@ Shared quantization framework:
 - project adapters for `vpcd` and `zipformer`
 
 See:
-- `quantize/README.md`
-- `quantize/projects/README.md`
+- `src/quantize/README.md`
+- `src/quantize/projects/README.md`
+
+### `src/tools/`
+
+Contains small helper scripts that are useful across model workflows.
+
+Important shared helper:
+- `src/tools/paths.py`
+  - resolves the repo root from any module under `src/`
+  - converts repo-relative fixture paths such as `assets/speech/sample-1.mp3` into stable absolute paths
+  - avoids fragile `Path(__file__).parents[...]` assumptions after refactors
+
+See `src/tools/README.md` for details.
 
 ### `test/`
 
@@ -99,6 +115,22 @@ Contains:
 See `test/README.md` for details.
 
 ## End-to-end pipeline
+
+Command setup:
+- `pytest` works from `python-model-test/` because `test/conftest.py` prepends `src/`.
+- CLI and smoke-runner commands below assume either:
+  - you installed the repo in editable mode, or
+  - you set `PYTHONPATH` to `src/` in the current shell
+
+Example PowerShell setup from `python-model-test/`:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+```
+
+Why this matters:
+- code under `src/` now resolves repo-relative assets through the shared helper in `src/tools/paths.py`
+- moving packages around inside `src/` should no longer break audio/text fixture resolution
 
 ### 1. Export source artifacts
 
@@ -128,6 +160,9 @@ Goal:
 For Zipformer:
 - `python -m quantize --project zipformer ...`
 
+For VPCD:
+- `python -m quantize --project vpcd ...`
+
 The internal pipeline:
 - collect calibration audio
 - freeze fixed shapes
@@ -146,6 +181,15 @@ Zipformer:
 
 Goal:
 - confirm the artifact really runs end to end
+
+Tiny smoke runs already exercised in this repo:
+- `vpcd`
+  - quantized with `1` calibration text sample
+  - quantized ONNX output matched the FP32 output on the smoke text
+- `zipformer`
+  - quantized with `1` calibration audio sample
+  - exported candidate bundle ran successfully in `--bundle-manifest` mode
+  - candidate bundle exact-matched the FP32 reference on the smoke audio
 
 ### 5. Hand off to Android
 
@@ -233,5 +277,6 @@ Use it when:
 
 - the shared bundle contract is now used by both `vpcd` and `zipformer`
 - quantization supports both projects
-- the `zipformer/qnn_u16u8` candidate bundle is runnable
-- that candidate still does not exact-match the FP32 reference on the current sample set, so more tuning is still needed if strict parity is the goal
+- repo-relative asset resolution no longer depends on hardcoded parent-directory depth inside `src/`
+- a tiny smoke quantize run has been verified for both `vpcd` and `zipformer`
+- broader quality and parity still need larger calibration and evaluation sets than the current smoke run

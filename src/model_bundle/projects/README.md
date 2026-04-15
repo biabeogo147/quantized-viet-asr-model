@@ -1,11 +1,11 @@
 # Model Bundle Project Adapters
 
-`model_bundle/projects/` contains model-family-specific logic. The shared core does not know tokenizer details or RNNT details. It only knows how to call adapters.
+`src/model_bundle/projects/` contains model-family-specific logic. The shared core does not know tokenizer details or RNNT details. It only knows how to call adapters.
 
 ## File map
 
 ```text
-python-model-test/model_bundle/projects/
+python-model-test/src/model_bundle/projects/
   __init__.py
   vpcd.py
   zipformer.py
@@ -79,6 +79,9 @@ Main functions:
 - `default_golden_sample_builder(...)`
   - runs the reference runtime to build punctuation fixtures
 
+Note:
+- `_vpcd_support.py` now resolves optional repo-local dependencies through `tools.paths.resolve_repo_path(...)` instead of assuming a fixed directory depth under `src/`
+
 ## `zipformer.py`
 
 Role:
@@ -110,6 +113,11 @@ Main functions:
 - `verify_bundle(...)`
   - mode 1: compare `model_dir` with `bundle_dir`
   - mode 2: compare `reference_bundle` with `candidate_bundle`
+
+Important behavior:
+- audio fixtures stay repo-relative in manifests, for example `assets/speech/sample-1.mp3`
+- `zipformer.py` resolves those paths through `tools.paths.resolve_repo_path(...)`
+- this keeps export and verify flows stable after the move to `src/`
 
 Important object:
 - `ADAPTER`

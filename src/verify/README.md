@@ -1,6 +1,6 @@
 # Verify Module
 
-`verify/` contains the CLIs used to check whether exported artifacts still match the expected contract and quality gates.
+`src/verify/` contains the CLIs used to check whether exported artifacts still match the expected contract and quality gates.
 
 ## Goals
 
@@ -11,10 +11,23 @@
 ## File map
 
 ```text
-python-model-test/verify/
+python-model-test/src/verify/
   __init__.py
   model_bundle.py
   README.md
+```
+
+## Command setup
+
+Commands below assume one of these is true:
+
+- the repo is installed in editable mode, or
+- the current shell has `PYTHONPATH` pointing to `src/`
+
+Example from `python-model-test/`:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
 ```
 
 ## What each script is responsible for

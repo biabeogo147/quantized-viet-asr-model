@@ -6,6 +6,19 @@
 - pytest suites that lock down the bundle and quantization contracts
 - a few legacy reference scripts used for behavior comparison
 
+## Import setup
+
+- `pytest` from `python-model-test/` works without extra shell setup because `test/conftest.py` prepends `src/` to `sys.path`.
+- Direct smoke-runner commands still need one of these:
+  - editable install, or
+  - `PYTHONPATH=src`
+
+Example from `python-model-test/`:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .\src).Path
+```
+
 ## Main file map
 
 ```text
