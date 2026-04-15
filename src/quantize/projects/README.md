@@ -51,6 +51,9 @@ This adapter calls generic helpers from:
 Role:
 - project adapter for Zipformer fixed-shape PTQ + QDQ
 - solves the component-wise quantization workflow
+- accepts:
+  - `zipformer_sd8g2_balanced`
+  - legacy alias `zipformer_sd8g2_qnn_u16u8`
 
 Main functions:
 - `apply_default_arguments(parser)`

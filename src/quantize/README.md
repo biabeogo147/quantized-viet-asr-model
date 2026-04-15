@@ -199,6 +199,8 @@ Details are documented in `src/quantize/projects/README.md`, but in short:
   - quantizes each component
   - exports the candidate bundle
   - writes `quantization_report.json` and `evaluation_report.json`
+  - accepts the canonical preset name `zipformer_sd8g2_balanced`
+  - still accepts the legacy alias `zipformer_sd8g2_qnn_u16u8`
 
 ## High-level quantization flows
 

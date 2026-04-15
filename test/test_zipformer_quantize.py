@@ -128,3 +128,15 @@ def test_collect_component_records_resolves_audio_paths_from_repo_root(monkeypat
     assert seen['audio_path'] == repo_root / 'assets' / 'speech' / 'sample-1.mp3'
     assert len(records['encoder']) == 1
     assert stats['sample_count'] == 1
+
+
+def test_zipformer_validate_args_accepts_balanced_preset():
+    from quantize.projects.zipformer import apply_default_arguments, validate_args
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    apply_default_arguments(parser)
+
+    args = parser.parse_args(['--preset', 'zipformer_sd8g2_balanced'])
+
+    validate_args(args)

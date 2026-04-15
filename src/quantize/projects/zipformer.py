@@ -24,7 +24,8 @@ DEFAULT_OUTPUT_ROOT = Path('build') / 'quantize' / 'zipformer' / 'qnn_u16u8'
 DEFAULT_BUNDLE_OUTPUT_DIR = Path('build') / 'model_bundle' / 'zipformer' / 'qnn_u16u8'
 DEFAULT_REFERENCE_BUNDLE_DIR = Path('build') / 'model_bundle' / 'zipformer' / 'fp32'
 DEFAULT_PRESET = 'zipformer_sd8g2_qnn_u16u8'
-SUPPORTED_PRESETS = (DEFAULT_PRESET,)
+BALANCED_PRESET = 'zipformer_sd8g2_balanced'
+SUPPORTED_PRESETS = (DEFAULT_PRESET, BALANCED_PRESET)
 
 
 def apply_default_arguments(parser) -> None:
