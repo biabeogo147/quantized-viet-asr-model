@@ -86,6 +86,7 @@ def export_bundle(
             'decoder_start_token_id': 2,
             'max_source_length': 1024,
             'max_decode_length': max_decode_length,
+            'input_text_case': 'lower',
         },
     )
     manifest.write_json(output_dir / 'bundle_manifest.json')

@@ -258,6 +258,17 @@ def _extract_string(value: object) -> str:
     return '' if flattened.size == 0 else str(flattened[0])
 
 
+def _normalize_input_text(text: str | None, metadata: dict[str, object]) -> str:
+    normalized = '' if text is None else text.strip()
+    if not normalized:
+        return ''
+
+    input_text_case = str(metadata.get('input_text_case', '') or '').strip().lower()
+    if input_text_case == 'lower':
+        return normalized.lower()
+    return normalized
+
+
 class BundleOnnxRuntime:
     def __init__(
         self,
@@ -306,7 +317,7 @@ class BundleOnnxRuntime:
         )
 
     def restore(self, text: str, max_length: int = 128) -> str:
-        normalized = '' if text is None else text.strip()
+        normalized = _normalize_input_text(text, self.metadata)
         if not normalized:
             return ''
 

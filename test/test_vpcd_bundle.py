@@ -57,6 +57,7 @@ def test_manifest_schema_is_stable_for_vpcd_bundle_contract():
             'decoder_start_token_id': 2,
             'max_source_length': 1024,
             'max_decode_length': 128,
+            'input_text_case': 'lower',
         },
     )
 
@@ -65,6 +66,7 @@ def test_manifest_schema_is_stable_for_vpcd_bundle_contract():
     assert payload['project'] == 'vpcd'
     assert payload['artifacts']['model'] == 'model.mobile.onnx'
     assert payload['fixtures']['golden_samples'] == 'golden_samples.jsonl'
+    assert payload['metadata']['input_text_case'] == 'lower'
 
 
 def test_text_golden_samples_serialize_to_jsonl():
@@ -214,6 +216,66 @@ def test_bundle_runtime_restores_text_using_only_bundle_artifacts():
     assert decode_session.inputs[0]['ids'].tolist() == [5, 2]
 
 
+def test_bundle_runtime_lowercases_input_when_bundle_requests_it():
+    manifest = ModelBundleManifest(
+        bundle_version=1,
+        project='vpcd',
+        model_family='bartpho-seq2seq',
+        model_name='tourmii/vietnamese-punc-cap-denorm-v1',
+        model_variant='vpcd_balanced',
+        asset_namespace='models/punctuation/vpcd',
+        runtime_kind='text_seq2seq',
+        artifacts={
+            'model': 'model.mobile.onnx',
+            'tokenizer_encode': 'tokenizer.encode.onnx',
+            'tokenizer_decode': 'tokenizer.decode.onnx',
+            'tokenizer_to_model_id_map': 'tokenizer.to_model_id_map.json',
+            'model_to_tokenizer_id_map': 'tokenizer.from_model_id_map.json',
+        },
+        fixtures={'golden_samples': 'golden_samples.jsonl'},
+        metadata={
+            'pad_token_id': 1,
+            'eos_token_id': 2,
+            'decoder_start_token_id': 2,
+            'max_source_length': 8,
+            'max_decode_length': 4,
+            'input_text_case': 'lower',
+        },
+    )
+
+    class FakeSession:
+        def __init__(self, responses: list[object]):
+            self.responses = list(responses)
+            self.inputs: list[dict[str, object]] = []
+
+        def run(self, _outputs: object, feeds: dict[str, object]) -> list[object]:
+            self.inputs.append(feeds)
+            return [self.responses.pop(0)]
+
+    encode_session = FakeSession([np.asarray([[0, 4, 5, 2]], dtype=np.int64)])
+    model_session = FakeSession(
+        [
+            np.asarray([[[0.0, 0.0, 0.0, 0.0, 0.0, 8.0, 0.0]]], dtype=np.float32),
+            np.asarray([[[0.0, 0.0, 9.0, 0.0, 0.0, 0.0, 0.0]]], dtype=np.float32),
+        ]
+    )
+    decode_session = FakeSession([np.asarray(['xin chao.'], dtype=object)])
+
+    runtime = BundleOnnxRuntime(
+        manifest=manifest,
+        model_session=model_session,
+        encode_session=encode_session,
+        decode_session=decode_session,
+        tokenizer_to_model_ids=np.asarray([0, 1, 2, 3, 11, 12], dtype=np.int64),
+        model_to_tokenizer_ids=np.asarray([0, 1, 2, 3, 4, 5, 5], dtype=np.int64),
+    )
+
+    restored = runtime.restore('XIN CHAO', max_length=4)
+
+    assert restored == 'xin chao.'
+    assert encode_session.inputs[0]['inputs'].tolist() == ['xin chao']
+
+
 def test_export_vpcd_bundle_writes_standardized_layout(tmp_case_dir):
     model_dir = tmp_case_dir / 'model'
     output_dir = tmp_case_dir / 'output'
@@ -258,3 +320,4 @@ def test_export_vpcd_bundle_writes_standardized_layout(tmp_case_dir):
     assert (output_dir / 'tokenizer.to_model_id_map.json').exists()
     assert (output_dir / 'tokenizer.from_model_id_map.json').exists()
     assert (output_dir / 'golden_samples.jsonl').exists()
+    assert manifest.metadata['input_text_case'] == 'lower'

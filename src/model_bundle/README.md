@@ -195,3 +195,12 @@ build/model_bundle/zipformer/qnn_u16u8/
   quantization_report.json
   evaluation_report.json
 ```
+
+## VPCD-specific metadata
+
+`vpcd` bundles now carry one behavior flag in `metadata`:
+
+- `input_text_case: "lower"`
+  - tells bundle consumers to lowercase incoming text before running the exported tokenizer graph
+  - keeps Python bundle-manifest mode aligned with the Android runtime
+  - prevents ASR-style uppercase transcripts from drifting away from the punctuation model's expected input distribution
