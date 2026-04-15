@@ -83,7 +83,7 @@ Main functions:
 python -m export.model_bundle \
   --project vpcd \
   --model-dir assets/vietnamese-punc-cap-denorm-v1 \
-  --output-dir build/model_bundle/vpcd/fp32
+  --output-dir build/model_bundle/vpcd/vpcd_balanced
 ```
 
 ### Export a Zipformer FP32 reference bundle
@@ -115,4 +115,5 @@ python -m export.punctuation_onnx \
   - after export, copy the bundle files into `bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd`
 - `zipformer`
   - the exported bundle is the canonical Python-side verification artifact
+  - stage it under `bkmeeting/modelassets/src/main/assets/models/asr/zipformer/bundle-fp32` for Android migration work
   - the current Android ASR runtime still consumes raw component files instead of `bundle_manifest.json`

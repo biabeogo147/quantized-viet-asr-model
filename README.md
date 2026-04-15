@@ -207,9 +207,10 @@ Tiny smoke runs already exercised in this repo:
   - export or refresh the punctuation bundle in `python-model-test`
   - copy the bundle files into `bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd`
 - `zipformer`
-  - Python can export a bundle for verification and quantization work
+  - Python can export a shared bundle for verification and Android migration work
   - the current Android ASR runtime still consumes raw `encoder` / `decoder` / `joiner` / `tokens.txt` assets, not `bundle_manifest.json`
-  - sync those raw component files into `bkmeeting/modelassets/src/main/assets/models/asr/zipformer/<variant>`
+  - stage the shared bundle under `bkmeeting/modelassets/src/main/assets/models/asr/zipformer/bundle-fp32`
+  - keep the checked-in runtime paths `models/asr/zipformer/fp32` and `models/asr/zipformer/int8` unchanged until the Android ASR runtime migrates to the bundle contract
 
 Canonical punctuation handoff:
 
@@ -217,11 +218,11 @@ Canonical punctuation handoff:
 python -m export.model_bundle \
   --project vpcd \
   --model-dir assets/vietnamese-punc-cap-denorm-v1 \
-  --output-dir build/model_bundle/vpcd/fp32 \
+  --output-dir build/model_bundle/vpcd/vpcd_balanced \
   --asset-namespace models/punctuation/vpcd \
   --model-variant vpcd_balanced
 
-cp -R build/model_bundle/vpcd/fp32/. \
+cp -R build/model_bundle/vpcd/vpcd_balanced/. \
   ../bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd/
 ```
 
@@ -229,6 +230,30 @@ After the copy:
 - `bkmeeting` reads `models/punctuation/vpcd/bundle_manifest.json`
 - the Android runtime copies the files into app-local storage and loads them through the manifest contract
 - `bkmeeting/modelassets/README.md` is the canonical Android-side handoff document
+
+Canonical Zipformer staging handoff:
+
+```bash
+python -m export.model_bundle \
+  --project zipformer \
+  --model-dir assets/zipformer \
+  --output-dir build/model_bundle/zipformer/bundle-fp32 \
+  --asset-namespace models/asr/zipformer/bundle-fp32 \
+  --model-variant bundle-fp32
+
+python -m verify.model_bundle \
+  --project zipformer \
+  --model-dir assets/zipformer \
+  --bundle-dir build/model_bundle/zipformer/bundle-fp32
+
+cp -R build/model_bundle/zipformer/bundle-fp32/. \
+  ../bkmeeting/modelassets/src/main/assets/models/asr/zipformer/bundle-fp32/
+```
+
+After that:
+- `bkmeeting/modelassets/src/main/assets/models/asr/zipformer/bundle-fp32` holds a verified shared bundle
+- the current Android ASR runtime still ignores that folder
+- this staging path exists so Android bundle-runtime work can start without mutating the production raw-ASR namespace first
 
 ## Concrete pipelines
 
