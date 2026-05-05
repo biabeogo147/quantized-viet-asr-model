@@ -1,36 +1,36 @@
 # Python Model Test Repo
 
-`python-model-test/` is the Python workspace for:
+`python-model-test/` is the Python workspace for exporting, verifying, quantizing, and smoke-testing the ONNX models that are later handed off to BKMeeting.
 
-- exporting ONNX from source models
-- packaging model bundles against a shared contract
-- verifying parity between reference runtimes and bundle runtimes
-- quantizing models for later deployment
-- smoke-testing artifacts before they are handed off to Android
+## What this repo does today
 
-## What this repo is for
-
-The repo currently focuses on two main model families:
+The repo currently supports two model families:
 
 - `vpcd`
-  - punctuation / capitalization / denormalization seq2seq model
-  - output is restored, formatted text
+  - punctuation / capitalization / denormalization
+  - bundle-backed runtime already used by BKMeeting Android
 - `zipformer`
   - RNNT acoustic model
-  - output is a transcript
+  - FP32 and quantized bundle flows are implemented
+  - bundle-backed runtime is already used by BKMeeting Android
+  - Qualcomm QNN / NPU offload is not wired yet
 
-Instead of maintaining one-off scripts per model, the repo is organized around five shared blocks:
+What is already working in this repo:
 
-- `src/export/`
-  - entrypoints that create artifacts
-- `src/verify/`
-  - entrypoints that check parity and report mismatches
-- `src/model_bundle/`
-  - the shared bundle contract
-- `src/quantize/`
-  - the shared multi-project quantization framework
-- `src/tools/`
-  - small reusable CLI helpers and shared path utilities
+- export shared model bundles for `vpcd` and `zipformer`
+- verify bundle behavior against the Python reference runtime
+- quantize `vpcd`
+- quantize `zipformer` into a `qnn_u16u8` candidate bundle
+- smoke-test both projects in `--bundle-manifest` mode
+- hand off bundles into `BKMeeting/modelassets`
+
+Current Android-facing status:
+
+- `vpcd` bundle handoff is working
+- `zipformer/fp32` bundle handoff is working
+- `zipformer/qnn_u16u8` bundle handoff is working
+- the Android runtime already honors fixed-shape metadata for `zipformer/qnn_u16u8`
+- actual Snapdragon HTP / NPU execution is a separate next phase
 
 ## Repository layout
 
@@ -44,245 +44,49 @@ python-model-test/
     model_bundle/       # shared bundle contract
     quantize/           # quantization framework
     verify/             # verification CLIs
-    tools/              # small helper scripts
+    tools/              # helper scripts
   test/                  # smoke runners + pytest suites
 ```
 
-## What each module does
+## Quick start
 
-### `src/export/`
-
-Creates input artifacts:
-- shared bundles for `vpcd` and `zipformer`
-- source ONNX for punctuation
-
-See `src/export/README.md` for details.
-
-### `src/verify/`
-
-Checks bundles:
-- punctuation encode/decode parity
-- Zipformer reference-vs-bundle parity
-- Zipformer reference-vs-candidate parity
-
-See `src/verify/README.md` for details.
-
-### `src/model_bundle/`
-
-Shared core for:
-- manifests
-- fixtures
-- generic exporting and verification
-- project adapters
-
-See:
-- `src/model_bundle/README.md`
-- `src/model_bundle/projects/README.md`
-
-### `src/quantize/`
-
-Shared quantization framework:
-- calibration
-- presets
-- QNN PTQ + QDQ helpers
-- reports
-- project adapters for `vpcd` and `zipformer`
-
-See:
-- `src/quantize/README.md`
-- `src/quantize/projects/README.md`
-
-### `src/tools/`
-
-Contains small helper scripts that are useful across model workflows.
-
-Important shared helper:
-- `src/tools/paths.py`
-  - resolves the repo root from any module under `src/`
-  - converts repo-relative fixture paths such as `assets/speech/sample-1.mp3` into stable absolute paths
-  - avoids fragile `Path(__file__).parents[...]` assumptions after refactors
-- `src/tools/extract_vlsp2020_calibration_subset.py`
-  - reads VLSP 2020 parquet shards
-  - emits a deterministic audio subset for Zipformer and a matching transcription subset for VPCD
-
-See `src/tools/README.md` for details.
-
-### `test/`
-
-Contains:
-- canonical smoke runners
-- pytest suites that lock the contract
-
-See `test/README.md` for details.
-
-## End-to-end pipeline
-
-Command setup:
-- `pytest` works from `python-model-test/` because `test/conftest.py` prepends `src/`.
-- CLI and smoke-runner examples below assume you run commands from `python-model-test/`.
-
-Why this matters:
-- code under `src/` now resolves repo-relative assets through the shared helper in `src/tools/paths.py`
-- moving packages around inside `src/` should no longer break audio/text fixture resolution
-
-### 1. Export source artifacts
-
-Punctuation:
-- if you need to rebuild source ONNX, run `python -m export.punctuation_onnx`
-
-Bundles:
-- run `python -m export.model_bundle --project <project>`
-
-Outputs:
-- `build/model_bundle/vpcd/...`
-- `build/model_bundle/zipformer/...`
-
-### 2. Verify reference bundles
-
-Punctuation:
-- `python -m verify.model_bundle --project vpcd --model-dir ... --bundle-dir ...`
-
-Zipformer FP32:
-- `python -m verify.model_bundle --project zipformer --model-dir ... --bundle-dir ...`
-
-Goal:
-- the bundle runtime must match the behavior of the reference runtime
-
-### 3. Quantize a candidate bundle
-
-For Zipformer:
-- `python -m quantize --project zipformer ...`
-
-For VPCD:
-- `python -m quantize --project vpcd ...`
-
-Recommended shared calibration prep:
+This repo uses a `src/` layout, so install it in editable mode before running the CLIs:
 
 ```bash
-python -m tools.extract_vlsp2020_calibration_subset \
-  --dataset-root <vlsp_dataset_root> \
-  --max-samples 24 \
-  --output-dir build/calibration/vlsp2020
+python -m pip install -e .
 ```
 
-This produces:
-- `build/calibration/vlsp2020/zipformer_audio_manifest.txt`
-- `build/calibration/vlsp2020/vpcd_transcriptions.txt`
-- `build/calibration/vlsp2020/subset_manifest.json`
+Run commands from `python-model-test/`.
 
-The internal pipeline:
-- collect calibration audio
-- freeze fixed shapes
-- run QNN PTQ + QDQ per component
-- export the `qnn_u16u8` candidate bundle
-- verify the candidate against the reference bundle
-- write `quantization_report.json` and `evaluation_report.json`
+## Main modules
 
-### 4. Smoke-test artifacts
+- `src/export/`
+  - exports source ONNX and shared model bundles
+- `src/model_bundle/`
+  - defines the shared manifest + artifact contract
+- `src/verify/`
+  - verifies bundle parity
+- `src/quantize/`
+  - quantizes `vpcd` and `zipformer`
+- `src/tools/`
+  - helper CLIs such as VLSP calibration-subset extraction
+- `test/`
+  - canonical smoke runners and pytest coverage
 
-Punctuation:
-- `python -m test.test_punctuation_model_onnx --bundle-manifest ...`
+See the per-module READMEs under `src/` and `test/` for file-by-file details.
 
-Zipformer:
-- `python -m test.test_acoustic_model_onnx --bundle-manifest ...`
+## Bundle contract
 
-Goal:
-- confirm the artifact really runs end to end
+Both supported projects use the same high-level bundle idea:
 
-Tiny smoke runs already exercised in this repo:
-- `vpcd`
-  - quantized with `1` calibration text sample
-  - quantized ONNX output matched the FP32 output on the smoke text
-- `zipformer`
-  - quantized with `1` calibration audio sample
-  - exported candidate bundle ran successfully in `--bundle-manifest` mode
-  - candidate bundle exact-matched the FP32 reference on the smoke audio
+- `bundle_manifest.json`
+- runtime artifacts listed under `artifacts`
+- optional fixtures listed under `fixtures`
 
-### 5. Hand off to Android
-
-`vpcd` and `zipformer` do not hand off in the same way today:
-
-- `vpcd`
-  - Android already consumes the shared Python bundle format
-  - export or refresh the punctuation bundle in `python-model-test`
-  - copy the bundle files into `bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd`
-- `zipformer`
-  - Python can export a shared bundle for verification and Android migration work
-  - the current Android ASR runtime still consumes raw `encoder` / `decoder` / `joiner` / `tokens.txt` assets, not `bundle_manifest.json`
-  - stage the shared bundle under `bkmeeting/modelassets/src/main/assets/models/asr/zipformer/bundle-fp32`
-  - keep the checked-in runtime paths `models/asr/zipformer/fp32` and `models/asr/zipformer/int8` unchanged until the Android ASR runtime migrates to the bundle contract
-
-Canonical punctuation handoff:
-
-```bash
-python -m export.model_bundle \
-  --project vpcd \
-  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
-  --output-dir build/model_bundle/vpcd/vpcd_balanced \
-  --asset-namespace models/punctuation/vpcd \
-  --model-variant vpcd_balanced
-
-cp -R build/model_bundle/vpcd/vpcd_balanced/. \
-  ../bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd/
-```
-
-After the copy:
-- `bkmeeting` reads `models/punctuation/vpcd/bundle_manifest.json`
-- the Android runtime copies the files into app-local storage and loads them through the manifest contract
-- `bkmeeting/modelassets/README.md` is the canonical Android-side handoff document
-
-Canonical Zipformer staging handoff:
-
-```bash
-python -m export.model_bundle \
-  --project zipformer \
-  --model-dir assets/zipformer \
-  --output-dir build/model_bundle/zipformer/bundle-fp32 \
-  --asset-namespace models/asr/zipformer/bundle-fp32 \
-  --model-variant bundle-fp32
-
-python -m verify.model_bundle \
-  --project zipformer \
-  --model-dir assets/zipformer \
-  --bundle-dir build/model_bundle/zipformer/bundle-fp32
-
-cp -R build/model_bundle/zipformer/bundle-fp32/. \
-  ../bkmeeting/modelassets/src/main/assets/models/asr/zipformer/bundle-fp32/
-```
-
-After that:
-- `bkmeeting/modelassets/src/main/assets/models/asr/zipformer/bundle-fp32` holds a verified shared bundle
-- the current Android ASR runtime still ignores that folder
-- this staging path exists so Android bundle-runtime work can start without mutating the production raw-ASR namespace first
-
-## Concrete pipelines
-
-### VPCD
-
-`model-dir`
--> Hugging Face tokenizer + ONNX model
--> exported tokenizer ONNX + bridge maps
--> `vpcd/fp32` bundle
--> encode/decode parity verification
--> bundle-only smoke run
-
-### Zipformer
-
-`model-dir`
--> exported FP32 reference bundle
--> bundle-vs-model-dir verification
--> component-wise quantization into `qnn_u16u8`
--> exported candidate bundle
--> candidate-vs-reference verification
--> smoke run of the quantized bundle
--> optional Android handoff of raw ASR component files
-
-## Important build artifacts
-
-### Punctuation
+### VPCD bundle layout
 
 ```text
-build/model_bundle/vpcd/fp32/
+build/model_bundle/vpcd/<variant>/
   bundle_manifest.json
   model.mobile.onnx
   tokenizer.encode.onnx
@@ -292,10 +96,10 @@ build/model_bundle/vpcd/fp32/
   golden_samples.jsonl
 ```
 
-### Zipformer reference
+### Zipformer bundle layout
 
 ```text
-build/model_bundle/zipformer/fp32/
+build/model_bundle/zipformer/<variant>/
   bundle_manifest.json
   encoder.onnx
   decoder.onnx
@@ -305,37 +109,292 @@ build/model_bundle/zipformer/fp32/
   expected_outputs.jsonl
 ```
 
-### Zipformer quantized candidate
+The quantized Zipformer candidate bundle also includes:
 
 ```text
-build/model_bundle/zipformer/qnn_u16u8/
-  bundle_manifest.json
-  encoder.onnx
-  decoder.onnx
-  joiner.onnx
-  tokens.txt
-  sample_manifest.jsonl
-  expected_outputs.jsonl
-  quantization_report.json
-  evaluation_report.json
+quantization_report.json
+evaluation_report.json
 ```
 
-## Small helper in `src/tools`
+## How to export models
 
-### `src/tools/convert_bpe2token.py`
+### 1. Export a VPCD bundle
 
-Role:
-- reads `assets/zipformer/bpe.model`
-- generates `assets/zipformer/tokens.txt`
+This is the canonical FP32 bundle export path for punctuation:
 
-Use it when:
-- the token table is missing
-- you need to regenerate `tokens.txt` from the SentencePiece model
+```bash
+python -m export.model_bundle \
+  --project vpcd \
+  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
+  --output-dir build/model_bundle/vpcd/vpcd_balanced \
+  --asset-namespace models/punctuation/vpcd \
+  --model-variant vpcd_balanced
+```
 
-## Current status
+This produces:
 
-- the shared bundle contract is now used by both `vpcd` and `zipformer`
-- quantization supports both projects
-- repo-relative asset resolution no longer depends on hardcoded parent-directory depth inside `src/`
-- a tiny smoke quantize run has been verified for both `vpcd` and `zipformer`
-- broader quality and parity still need larger calibration and evaluation sets than the current smoke run
+- `bundle_manifest.json`
+- `model.mobile.onnx`
+- tokenizer ONNX graphs
+- tokenizer ID bridge maps
+- `golden_samples.jsonl`
+
+If you need to rebuild the source punctuation ONNX before bundling:
+
+```bash
+python -m export.punctuation_onnx \
+  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
+  --output-dir assets/vietnamese-punc-cap-denorm-v1/onnx
+```
+
+### 2. Export a Zipformer FP32 bundle
+
+This is the canonical FP32 bundle export path for the acoustic model:
+
+```bash
+python -m export.model_bundle \
+  --project zipformer \
+  --model-dir assets/zipformer \
+  --output-dir build/model_bundle/zipformer/fp32 \
+  --asset-namespace models/asr/zipformer/fp32 \
+  --model-variant fp32
+```
+
+This produces:
+
+- `bundle_manifest.json`
+- `encoder.onnx`
+- `decoder.onnx`
+- `joiner.onnx`
+- `tokens.txt`
+- `sample_manifest.jsonl`
+- `expected_outputs.jsonl`
+
+## How to verify bundles
+
+### Verify a VPCD bundle against the source model
+
+```bash
+python -m verify.model_bundle \
+  --project vpcd \
+  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
+  --bundle-dir build/model_bundle/vpcd/vpcd_balanced
+```
+
+What this checks:
+
+- tokenizer encode parity
+- tokenizer decode parity
+- bundle contract correctness
+
+### Verify a Zipformer FP32 bundle against the source model
+
+```bash
+python -m verify.model_bundle \
+  --project zipformer \
+  --model-dir assets/zipformer \
+  --bundle-dir build/model_bundle/zipformer/fp32
+```
+
+What this checks:
+
+- reference transcript from `model-dir`
+- transcript from the exported bundle
+- per-sample mismatches if they diverge
+
+### Verify a Zipformer candidate bundle against the FP32 reference bundle
+
+```bash
+python -m verify.model_bundle \
+  --project zipformer \
+  --reference-bundle build/model_bundle/zipformer/fp32 \
+  --candidate-bundle build/model_bundle/zipformer/qnn_u16u8
+```
+
+## How to quantize models
+
+### 1. Prepare a shared calibration subset
+
+If you want one external dataset to feed both `vpcd` and `zipformer`:
+
+```bash
+python -m tools.extract_vlsp2020_calibration_subset \
+  --dataset-root <vlsp_dataset_root> \
+  --max-samples 24 \
+  --output-dir build/calibration/vlsp2020
+```
+
+This produces:
+
+- `build/calibration/vlsp2020/zipformer_audio_manifest.txt`
+- `build/calibration/vlsp2020/vpcd_transcriptions.txt`
+- `build/calibration/vlsp2020/subset_manifest.json`
+
+### 2. Quantize VPCD
+
+The current VPCD quantize flow produces a quantized ONNX artifact, not a full candidate bundle:
+
+```bash
+python -m quantize \
+  --project vpcd \
+  --preset sd8g2_balanced \
+  --calibration-text build/calibration/vlsp2020/vpcd_transcriptions.txt \
+  --max-calibration-samples 24 \
+  --output build/vpcd/vpcd_balanced.onnx
+```
+
+Current balanced outputs:
+
+- `build/vpcd/vpcd_balanced.onnx`
+- `build/vpcd/fp32_vs_balanced_report.json`
+
+### 3. Quantize Zipformer
+
+The current Zipformer quantize flow produces a quantized candidate bundle directly:
+
+```bash
+python -m quantize \
+  --project zipformer \
+  --preset zipformer_sd8g2_balanced \
+  --audio-manifest build/calibration/vlsp2020/zipformer_audio_manifest.txt \
+  --output-root build/zipformer/artifacts \
+  --bundle-output-dir build/model_bundle/zipformer/qnn_u16u8 \
+  --reference-bundle-dir build/model_bundle/zipformer/fp32 \
+  --calibration-chunk-size 4
+```
+
+What this flow does:
+
+- loads calibration audio
+- traces encoder / decoder / joiner calibration records
+- freezes fixed input shapes
+- runs QNN-style PTQ + QDQ per component
+- exports a `qnn_u16u8` bundle
+- verifies that candidate bundle against the FP32 reference bundle
+- writes quantization and evaluation reports
+
+## How to use a bundle
+
+There are two main ways to consume the bundles generated by this repo.
+
+### 1. Use the bundle directly in Python
+
+The canonical smoke runners both support `--bundle-manifest`.
+
+#### VPCD bundle smoke test
+
+```bash
+python -m test.test_punctuation_model_onnx \
+  --bundle-manifest build/model_bundle/vpcd/vpcd_balanced/bundle_manifest.json \
+  --text "hom nay la buoi nham chuc cua toi phuoc thanh"
+```
+
+#### Zipformer bundle smoke test
+
+```bash
+python -m test.test_acoustic_model_onnx \
+  --bundle-manifest build/model_bundle/zipformer/qnn_u16u8/bundle_manifest.json \
+  --audio-file assets/speech/sample-2.wav
+```
+
+In `--bundle-manifest` mode, the smoke tests exercise the same manifest-driven behavior that Android is expected to consume.
+
+### 2. Hand the bundle off to BKMeeting Android
+
+#### VPCD Android handoff
+
+```bash
+cp -R build/model_bundle/vpcd/vpcd_balanced/. \
+  ../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/
+```
+
+#### Zipformer FP32 Android handoff
+
+```bash
+cp -R build/model_bundle/zipformer/fp32/. \
+  ../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/fp32/
+```
+
+#### Zipformer QNN candidate Android handoff
+
+```bash
+cp -R build/model_bundle/zipformer/qnn_u16u8/. \
+  ../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/qnn_u16u8/
+```
+
+After the copy:
+
+- BKMeeting reads `bundle_manifest.json`
+- Android stages bundle files into local app storage
+- the runtime opens local staged artifact paths from the manifest
+
+Important current note:
+
+- `zipformer/qnn_u16u8` already runs as a manifest-driven Android bundle
+- Android already honors its fixed-shape encoder metadata
+- this does not yet mean the model is running on Snapdragon NPU
+- real QNN / HTP / NPU execution is still a separate integration step
+
+## Recommended end-to-end flows
+
+### Flow A: Export and verify a fresh FP32 bundle
+
+1. export the bundle
+2. verify the bundle against the source model
+3. run a smoke test in `--bundle-manifest` mode
+4. copy the bundle into `BKMeeting/modelassets`
+
+### Flow B: Build a quantized Zipformer candidate
+
+1. prepare calibration data
+2. export or refresh the FP32 reference bundle
+3. run `python -m quantize --project zipformer`
+4. verify the candidate bundle
+5. smoke-test the candidate bundle
+6. copy the candidate bundle into `BKMeeting/modelassets`
+
+## Tests
+
+### Run the smoke runners
+
+```bash
+python -m test.test_punctuation_model_onnx --help
+```
+
+```bash
+python -m test.test_acoustic_model_onnx --help
+```
+
+### Run the full pytest suite
+
+```bash
+python -m pytest test -q -p no:cacheprovider
+```
+
+## Important outputs
+
+### Export outputs
+
+- `build/model_bundle/vpcd/<variant>/...`
+- `build/model_bundle/zipformer/fp32/...`
+
+### Quantize outputs
+
+- `build/vpcd/vpcd_balanced.onnx`
+- `build/vpcd/fp32_vs_balanced_report.json`
+- `build/model_bundle/zipformer/qnn_u16u8/...`
+
+### Android handoff targets
+
+- `../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd`
+- `../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/fp32`
+- `../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/qnn_u16u8`
+
+## Related READMEs
+
+- `src/export/README.md`
+- `src/model_bundle/README.md`
+- `src/quantize/README.md`
+- `src/verify/README.md`
+- `src/tools/README.md`
+- `test/README.md`
