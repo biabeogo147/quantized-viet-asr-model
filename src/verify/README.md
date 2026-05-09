@@ -14,6 +14,7 @@
 python-model-test/src/verify/
   __init__.py
   model_bundle.py
+  qnn_preflight.py
   README.md
 ```
 
@@ -29,6 +30,7 @@ This is the canonical CLI for bundle verification.
 
 Problems it solves:
 - for `vpcd`, it verifies encode/decode parity between the bundle and the Hugging Face tokenizer
+- for `vpcd`, it can also compare a fixed-shape candidate bundle against the dynamic `vpcd_balanced` reference bundle
 - for `zipformer`, it verifies transcripts between the model-dir runtime and the bundle runtime, or between a reference bundle and a candidate bundle
 
 Main functions:
@@ -44,7 +46,21 @@ Main functions:
   - calls `verify_model_bundle(...)`
   - prints the summary:
     - encode/decode sample counts for `vpcd`
-    - checked samples, pass/fail, and mismatches for `zipformer`
+    - checked samples, pass/fail, and mismatches for candidate comparisons
+
+### `qnn_preflight.py`
+
+This CLI checks whether a bundle is ready for an Android QNN HTP attempt. It does not run HTP.
+
+For VPCD it checks:
+
+- manifest project and `artifacts.model`
+- `metadata.quantization` is QDQ with `quint16` activations and `quint8` weights
+- `metadata.quantization.fixed_shapes = true`
+- `metadata.qnn_readiness.fixed_shapes_ready = true`
+- tokenizer policy remains `cpu_only_first_slice`
+- ONNX graph has fixed input shapes matching `metadata.fixed_input_shapes.model`
+- ONNX graph contains QDQ nodes and `UINT16` / `UINT8` initializers
 
 ## How to read the output
 
@@ -57,7 +73,7 @@ Main functions:
   - `Checked samples: ...`
   - `Passed : True/False`
   - a `mismatches` list
-  then you are looking at transcript verification for `zipformer`.
+  then you are looking at candidate bundle verification.
 
 ## Common commands
 
@@ -86,6 +102,24 @@ python -m verify.model_bundle \
   --project zipformer \
   --reference-bundle build/model_bundle/zipformer/fp32 \
   --candidate-bundle build/model_bundle/zipformer/qnn_u16u8
+```
+
+### Verify a fixed-shape VPCD candidate against the dynamic reference bundle
+
+```bash
+python -m verify.model_bundle \
+  --project vpcd \
+  --reference-bundle build/model_bundle/vpcd/vpcd_balanced \
+  --candidate-bundle build/model_bundle/vpcd/qnn_fixed_1024x128
+```
+
+### Run QNN preflight for a fixed-shape VPCD candidate
+
+```bash
+python -m verify.qnn_preflight \
+  --project vpcd \
+  --bundle-dir build/model_bundle/vpcd/qnn_fixed_1024x128 \
+  --output build/model_bundle/vpcd/qnn_fixed_1024x128/qnn_preflight_report.json
 ```
 
 ## Relationship to other modules

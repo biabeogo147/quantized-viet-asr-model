@@ -34,6 +34,37 @@ DEFAULT_MODEL_DIR = Path('assets') / 'vietnamese-punc-cap-denorm-v1'
 DEFAULT_OUTPUT_DIR = resolve_bundle_dir('vpcd', 'fp32')
 
 
+def build_vpcd_metadata(*, model_variant: str, max_decode_length: int) -> dict[str, object]:
+    metadata: dict[str, object] = {
+        'pad_token_id': 1,
+        'eos_token_id': 2,
+        'decoder_start_token_id': 2,
+        'max_source_length': 1024,
+        'max_decode_length': max_decode_length,
+        'input_text_case': 'lower',
+    }
+
+    variant_name = Path(str(model_variant)).stem
+    if variant_name == DEFAULT_MODEL_VARIANT or 'qnn.qdq.uint16u8' in variant_name:
+        metadata['quantization'] = {
+            'format': 'QDQ',
+            'activation_type': 'quint16',
+            'weight_type': 'quint8',
+            'preset': 'sd8g2_balanced',
+            'fixed_shapes': False,
+        }
+        metadata['qnn_readiness'] = {
+            'target_backend': 'qnn_htp',
+            'model_session_candidate': True,
+            'tokenizer_policy': 'cpu_only_first_slice',
+            'requires_fixed_shapes': True,
+            'fixed_shapes_ready': False,
+            'fixed_shape_blocker': 'VPCD model inputs remain symbolic: input_ids[batch,encoder_sequence], attention_mask[batch,encoder_sequence], decoder_input_ids[batch,decoder_sequence], decoder_attention_mask[batch,decoder_sequence].',
+        }
+
+    return metadata
+
+
 def export_bundle(
     *,
     model_dir: Path,
@@ -80,14 +111,7 @@ def export_bundle(
             'model_to_tokenizer_id_map': tokenizer_artifacts.model_to_tokenizer_id_map_file_name,
         },
         fixtures={'golden_samples': golden_path.name},
-        metadata={
-            'pad_token_id': 1,
-            'eos_token_id': 2,
-            'decoder_start_token_id': 2,
-            'max_source_length': 1024,
-            'max_decode_length': max_decode_length,
-            'input_text_case': 'lower',
-        },
+        metadata=build_vpcd_metadata(model_variant=model_variant, max_decode_length=max_decode_length),
     )
     manifest.write_json(output_dir / 'bundle_manifest.json')
     return manifest
@@ -98,11 +122,61 @@ def iter_golden_samples(bundle_dir: str | Path) -> list[dict]:
     return read_jsonl(Path(bundle_dir) / manifest.fixtures['golden_samples'])
 
 
-def verify_bundle(*, model_dir: Path, bundle_dir: Path) -> tuple[int, int]:
+def _verify_candidate_bundle_parity(*, reference_bundle: Path, candidate_bundle: Path, provider: str) -> dict:
+    reference_runtime = BundleOnnxRuntime.from_manifest_path(reference_bundle / 'bundle_manifest.json', provider=provider)
+    candidate_runtime = BundleOnnxRuntime.from_manifest_path(candidate_bundle / 'bundle_manifest.json', provider=provider)
+    candidate_manifest = ModelBundleManifest.from_path(candidate_bundle / 'bundle_manifest.json')
+    samples = read_jsonl(candidate_bundle / candidate_manifest.fixtures['golden_samples'])
+
+    mismatches: list[dict[str, str]] = []
+    checked = 0
+    max_decode_length = int(candidate_manifest.metadata.get('max_decode_length', 128))
+    for sample in samples:
+        raw_text = str(sample['raw_text'])
+        reference_output = reference_runtime.restore(raw_text, max_length=max_decode_length).strip()
+        candidate_output = candidate_runtime.restore(raw_text, max_length=max_decode_length).strip()
+        checked += 1
+        if reference_output != candidate_output:
+            mismatches.append(
+                {
+                    'raw_text': raw_text,
+                    'reference_output': reference_output,
+                    'candidate_output': candidate_output,
+                }
+            )
+
+    return {
+        'checked_samples': checked,
+        'passed': not mismatches,
+        'mismatches': mismatches,
+    }
+
+
+def verify_bundle(
+    *,
+    model_dir: Path | None = None,
+    bundle_dir: Path | None = None,
+    reference_bundle: Path | None = None,
+    candidate_bundle: Path | None = None,
+    provider: str = 'CPUExecutionProvider',
+) -> tuple[int, int] | dict:
+    if reference_bundle is not None or candidate_bundle is not None:
+        if reference_bundle is None or candidate_bundle is None:
+            raise ValueError('Both reference_bundle and candidate_bundle are required for VPCD parity verification')
+        return _verify_candidate_bundle_parity(
+            reference_bundle=Path(reference_bundle),
+            candidate_bundle=Path(candidate_bundle),
+            provider=provider,
+        )
+    if model_dir is None or bundle_dir is None:
+        raise ValueError('model_dir and bundle_dir are required for VPCD bundle verification')
+
     ensure_local_vendor_path()
     import onnxruntime as ort
     from onnxruntime_extensions import get_library_path
 
+    model_dir = Path(model_dir)
+    bundle_dir = Path(bundle_dir)
     manifest = ModelBundleManifest.from_path(bundle_dir / 'bundle_manifest.json')
     tokenizer_to_model_ids = np.asarray(json.loads((bundle_dir / manifest.artifacts['tokenizer_to_model_id_map']).read_text(encoding='utf-8')), dtype=np.int64)
     model_to_tokenizer_ids = np.asarray(json.loads((bundle_dir / manifest.artifacts['model_to_tokenizer_id_map']).read_text(encoding='utf-8')), dtype=np.int64)

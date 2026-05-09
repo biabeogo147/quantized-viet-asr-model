@@ -120,7 +120,7 @@ evaluation_report.json
 
 ### 1. Export a VPCD bundle
 
-This is the canonical FP32 bundle export path for punctuation:
+This is the canonical shared bundle export path for punctuation. The current default `vpcd_balanced` variant is the QNN-targeted PTQ/QDQ artifact, not FP32.
 
 ```bash
 python -m export.model_bundle \
@@ -138,6 +138,37 @@ This produces:
 - tokenizer ONNX graphs
 - tokenizer ID bridge maps
 - `golden_samples.jsonl`
+
+For `vpcd_balanced`, the manifest also records:
+
+- `metadata.quantization.format = "QDQ"`
+- `metadata.quantization.activation_type = "quint16"`
+- `metadata.quantization.weight_type = "quint8"`
+- `metadata.quantization.fixed_shapes = false`
+- `metadata.qnn_readiness.tokenizer_policy = "cpu_only_first_slice"`
+
+`fixed_shapes = false` is intentional: the artifact is quantized QDQ, but VPCD still needs a fixed-shape export or session policy before strict QNN HTP validation.
+
+To prepare the fixed-shape VPCD candidate for Android QNN preflight:
+
+```bash
+python -m tools.prepare_vpcd_qnn_candidate \
+  --source-bundle build/model_bundle/vpcd/vpcd_balanced \
+  --output-dir build/model_bundle/vpcd/qnn_fixed_1024x128 \
+  --encoder-sequence 1024 \
+  --decoder-sequence 128
+```
+
+Then run the QNN preflight checker:
+
+```bash
+python -m verify.qnn_preflight \
+  --project vpcd \
+  --bundle-dir build/model_bundle/vpcd/qnn_fixed_1024x128 \
+  --output build/model_bundle/vpcd/qnn_fixed_1024x128/qnn_preflight_report.json
+```
+
+When this passes, the candidate has Python-verified QDQ metadata, fixed input shapes, and tokenizer CPU policy. It still does not prove physical Snapdragon HTP execution; that validation happens in BKMeeting's Android QNN runtime phase.
 
 If you need to rebuild the source punctuation ONNX before bundling:
 
@@ -211,6 +242,15 @@ python -m verify.model_bundle \
   --candidate-bundle build/model_bundle/zipformer/qnn_u16u8
 ```
 
+### Verify a fixed-shape VPCD candidate against the dynamic VPCD reference bundle
+
+```bash
+python -m verify.model_bundle \
+  --project vpcd \
+  --reference-bundle build/model_bundle/vpcd/vpcd_balanced \
+  --candidate-bundle build/model_bundle/vpcd/qnn_fixed_1024x128
+```
+
 ## How to quantize models
 
 ### 1. Prepare a shared calibration subset
@@ -232,7 +272,7 @@ This produces:
 
 ### 2. Quantize VPCD
 
-The current VPCD quantize flow produces a quantized ONNX artifact, not a full candidate bundle:
+The current VPCD quantize flow produces the quantized ONNX artifact used by the active `vpcd_balanced` bundle:
 
 ```bash
 python -m quantize \
@@ -247,6 +287,15 @@ Current balanced outputs:
 
 - `build/vpcd/vpcd_balanced.onnx`
 - `build/vpcd/fp32_vs_balanced_report.json`
+
+After refreshing the artifact, rerun the VPCD bundle export command so `build/model_bundle/vpcd/vpcd_balanced/bundle_manifest.json` carries the QDQ and QNN-readiness metadata.
+
+VPCD quantization and fixed-shape QNN preflight are separate steps:
+
+1. `quantize --project vpcd` refreshes the QDQ ONNX artifact.
+2. `export.model_bundle --project vpcd` packages the QDQ model with tokenizer artifacts.
+3. `tools.prepare_vpcd_qnn_candidate` freezes model input shapes and updates manifest metadata.
+4. `verify.qnn_preflight` confirms the candidate is ready for an Android QNN attempt.
 
 ### 3. Quantize Zipformer
 
@@ -307,6 +356,15 @@ In `--bundle-manifest` mode, the smoke tests exercise the same manifest-driven b
 cp -R build/model_bundle/vpcd/vpcd_balanced/. \
   ../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/
 ```
+
+For the fixed-shape QNN preflight candidate, use:
+
+```bash
+cp -R build/model_bundle/vpcd/qnn_fixed_1024x128/. \
+  ../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/
+```
+
+Only do this in the Android QNN branch after choosing whether the active namespace should point at the fixed-shape candidate. Tokenizer graphs still run on CPU in the first QNN slice.
 
 #### Zipformer FP32 Android handoff
 

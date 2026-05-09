@@ -9,6 +9,7 @@ python-model-test/src/tools/
   __init__.py
   convert_bpe2token.py
   extract_vlsp2020_calibration_subset.py
+  prepare_vpcd_qnn_candidate.py
   paths.py
   README.md
 ```
@@ -68,6 +69,24 @@ python -m tools.extract_vlsp2020_calibration_subset \
 The emitted artifacts can be fed directly into:
 - `python -m quantize --project zipformer --audio-manifest ...`
 - `python -m quantize --project vpcd --calibration-text ...`
+
+## `prepare_vpcd_qnn_candidate.py`
+
+Role:
+- copies an exported VPCD bundle
+- freezes `model.mobile.onnx` model input shapes
+- updates manifest `fixed_input_shapes`, `quantization.fixed_shapes`, and `qnn_readiness.fixed_shapes_ready`
+- keeps tokenizer graphs unchanged because they stay CPU-only in the first Android QNN slice
+
+Example command:
+
+```bash
+python -m tools.prepare_vpcd_qnn_candidate \
+  --source-bundle build/model_bundle/vpcd/vpcd_balanced \
+  --output-dir build/model_bundle/vpcd/qnn_fixed_1024x128 \
+  --encoder-sequence 1024 \
+  --decoder-sequence 128
+```
 
 ## `convert_bpe2token.py`
 

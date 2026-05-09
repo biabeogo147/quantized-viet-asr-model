@@ -185,6 +185,16 @@ build/model_bundle/vpcd/fp32/
   tokenizer.from_model_id_map.json
   golden_samples.jsonl
 
+build/model_bundle/vpcd/qnn_fixed_1024x128/
+  bundle_manifest.json
+  model.mobile.onnx
+  tokenizer.encode.onnx
+  tokenizer.decode.onnx
+  tokenizer.to_model_id_map.json
+  tokenizer.from_model_id_map.json
+  golden_samples.jsonl
+  qnn_preflight_report.json
+
 build/model_bundle/zipformer/qnn_u16u8/
   encoder.onnx
   decoder.onnx
@@ -198,9 +208,26 @@ build/model_bundle/zipformer/qnn_u16u8/
 
 ## VPCD-specific metadata
 
-`vpcd` bundles now carry one behavior flag in `metadata`:
+`vpcd` bundles carry runtime behavior and NPU-preflight metadata:
 
 - `input_text_case: "lower"`
   - tells bundle consumers to lowercase incoming text before running the exported tokenizer graph
   - keeps Python bundle-manifest mode aligned with the Android runtime
   - prevents ASR-style uppercase transcripts from drifting away from the punctuation model's expected input distribution
+- `quantization`
+  - present for the default `vpcd_balanced` variant
+  - declares `format: "QDQ"`, `activation_type: "quint16"`, `weight_type: "quint8"`, and `preset: "sd8g2_balanced"`
+  - intentionally declares `fixed_shapes: false` until a fixed-shape VPCD export or session override is validated
+- `qnn_readiness`
+  - marks `model.mobile.onnx` as the first QNN HTP candidate
+  - records that tokenizer graphs stay CPU-only in the first slice
+  - records the current blocker: the VPCD model inputs still use symbolic sequence dimensions
+
+The fixed-shape candidate `qnn_fixed_1024x128` changes that blocker into explicit fixed-shape metadata:
+
+- `fixed_input_shapes.model.input_ids: [1, 1024]`
+- `fixed_input_shapes.model.attention_mask: [1, 1024]`
+- `fixed_input_shapes.model.decoder_input_ids: [1, 128]`
+- `fixed_input_shapes.model.decoder_attention_mask: [1, 128]`
+- `quantization.fixed_shapes: true`
+- `qnn_readiness.fixed_shapes_ready: true`

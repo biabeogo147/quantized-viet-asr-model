@@ -12,6 +12,11 @@ import numpy as np
 
 from model_bundle.fixtures import TextGoldenSample, serialize_jsonl
 from model_bundle.manifest import ModelBundleManifest
+from model_bundle.projects.vpcd_shapes import (
+    attention_mask_for_length,
+    pad_token_row,
+    resolve_vpcd_model_input_shapes,
+)
 from tools.paths import resolve_repo_path
 
 DEFAULT_ASSET_NAMESPACE = 'models/punctuation/vpcd'
@@ -287,6 +292,7 @@ class BundleOnnxRuntime:
         self.tokenizer_to_model_ids = tokenizer_to_model_ids
         self.model_to_tokenizer_ids = model_to_tokenizer_ids
         self.metadata = manifest.metadata
+        self.fixed_input_shapes = resolve_vpcd_model_input_shapes(self.metadata)
 
     @classmethod
     def from_manifest_path(cls, manifest_path: str | Path, provider: str = 'CPUExecutionProvider') -> 'BundleOnnxRuntime':
@@ -321,13 +327,35 @@ class BundleOnnxRuntime:
         if not normalized:
             return ''
 
-        input_ids = self._encode_to_model_ids(normalized).reshape(1, -1)
-        attention_mask = np.ones_like(input_ids, dtype=np.int64)
-        decoder_input_ids = np.asarray([[int(self.metadata['decoder_start_token_id'])]], dtype=np.int64)
+        model_ids = self._encode_to_model_ids(normalized)
+        if self.fixed_input_shapes is None:
+            input_ids = model_ids.reshape(1, -1)
+            attention_mask = np.ones_like(input_ids, dtype=np.int64)
+        else:
+            input_ids = pad_token_row(model_ids, target_length=self.fixed_input_shapes.encoder_sequence, pad_value=int(self.metadata['pad_token_id']))
+            attention_mask = attention_mask_for_length(actual_length=int(model_ids.size), target_length=self.fixed_input_shapes.encoder_sequence)
+
+        decoder_token_ids = np.asarray([int(self.metadata['decoder_start_token_id'])], dtype=np.int64)
         effective_max_length = max(1, min(max_length, int(self.metadata['max_decode_length'])))
 
         for _ in range(effective_max_length):
-            decoder_attention_mask = np.ones_like(decoder_input_ids, dtype=np.int64)
+            if self.fixed_input_shapes is None:
+                decoder_input_ids = decoder_token_ids.reshape(1, -1)
+                decoder_attention_mask = np.ones_like(decoder_input_ids, dtype=np.int64)
+                logits_position = None
+            else:
+                active_decoder_length = int(decoder_token_ids.size)
+                decoder_input_ids = pad_token_row(
+                    decoder_token_ids,
+                    target_length=self.fixed_input_shapes.decoder_sequence,
+                    pad_value=int(self.metadata['pad_token_id']),
+                )
+                decoder_attention_mask = attention_mask_for_length(
+                    actual_length=active_decoder_length,
+                    target_length=self.fixed_input_shapes.decoder_sequence,
+                )
+                logits_position = active_decoder_length - 1
+
             outputs = self.model_session.run(
                 None,
                 {
@@ -337,12 +365,12 @@ class BundleOnnxRuntime:
                     'decoder_attention_mask': decoder_attention_mask,
                 },
             )
-            next_token_id = self._argmax_last_token(outputs[0])
-            decoder_input_ids = np.concatenate([decoder_input_ids, np.asarray([[next_token_id]], dtype=np.int64)], axis=1)
+            next_token_id = self._argmax_token_at(outputs[0], logits_position)
+            decoder_token_ids = np.concatenate([decoder_token_ids, np.asarray([next_token_id], dtype=np.int64)])
             if next_token_id == int(self.metadata['eos_token_id']):
                 break
 
-        generated_ids = decoder_input_ids[0, 1:]
+        generated_ids = decoder_token_ids[1:]
         return self._decode_model_ids(generated_ids).strip()
 
     def _encode_to_model_ids(self, text: str) -> np.ndarray:
@@ -373,12 +401,18 @@ class BundleOnnxRuntime:
         return _extract_string(outputs[0])
 
     @staticmethod
-    def _argmax_last_token(logits: object) -> int:
+    def _argmax_token_at(logits: object, position: int | None = None) -> int:
         array = np.asarray(logits)
         if array.ndim == 3:
-            return int(np.argmax(array[:, -1, :], axis=-1)[0])
+            index = -1 if position is None else int(position)
+            return int(np.argmax(array[:, index, :], axis=-1)[0])
         if array.ndim == 2:
-            return int(np.argmax(array[-1]))
+            index = -1 if position is None else int(position)
+            return int(np.argmax(array[index]))
         if array.ndim == 1:
             return int(np.argmax(array))
         raise ValueError(f'Unsupported logits shape: {array.shape}')
+
+    @staticmethod
+    def _argmax_last_token(logits: object) -> int:
+        return BundleOnnxRuntime._argmax_token_at(logits)

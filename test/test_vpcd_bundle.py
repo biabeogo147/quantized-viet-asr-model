@@ -12,7 +12,14 @@ from model_bundle.projects.vpcd import (
     BundleOnnxRuntime,
     TokenizerExportArtifacts,
     TokenizerIdBridge,
+    build_vpcd_metadata,
     export_bundle,
+    verify_bundle,
+)
+from model_bundle.projects.vpcd_shapes import (
+    attention_mask_for_length,
+    pad_token_row,
+    resolve_vpcd_model_input_shapes,
 )
 from test.test_punctuation_model_onnx import (
     DEFAULT_MODEL_VARIANT,
@@ -67,6 +74,64 @@ def test_manifest_schema_is_stable_for_vpcd_bundle_contract():
     assert payload['artifacts']['model'] == 'model.mobile.onnx'
     assert payload['fixtures']['golden_samples'] == 'golden_samples.jsonl'
     assert payload['metadata']['input_text_case'] == 'lower'
+
+
+def test_vpcd_balanced_metadata_declares_qdq_but_not_fixed_shape_ready():
+    metadata = build_vpcd_metadata(model_variant='vpcd_balanced', max_decode_length=128)
+
+    assert metadata['input_text_case'] == 'lower'
+    assert metadata['quantization'] == {
+        'format': 'QDQ',
+        'activation_type': 'quint16',
+        'weight_type': 'quint8',
+        'preset': 'sd8g2_balanced',
+        'fixed_shapes': False,
+    }
+    assert metadata['qnn_readiness']['target_backend'] == 'qnn_htp'
+    assert metadata['qnn_readiness']['model_session_candidate'] is True
+    assert metadata['qnn_readiness']['tokenizer_policy'] == 'cpu_only_first_slice'
+    assert metadata['qnn_readiness']['requires_fixed_shapes'] is True
+    assert metadata['qnn_readiness']['fixed_shapes_ready'] is False
+
+
+def test_resolve_vpcd_model_input_shapes_reads_manifest_metadata():
+    metadata = {
+        'fixed_input_shapes': {
+            'model': {
+                'input_ids': [1, 1024],
+                'attention_mask': [1, 1024],
+                'decoder_input_ids': [1, 128],
+                'decoder_attention_mask': [1, 128],
+            }
+        }
+    }
+
+    shapes = resolve_vpcd_model_input_shapes(metadata)
+
+    assert shapes is not None
+    assert shapes.input_ids == (1, 1024)
+    assert shapes.attention_mask == (1, 1024)
+    assert shapes.decoder_input_ids == (1, 128)
+    assert shapes.decoder_attention_mask == (1, 128)
+    assert shapes.encoder_sequence == 1024
+    assert shapes.decoder_sequence == 128
+
+
+def test_resolve_vpcd_model_input_shapes_returns_none_without_metadata():
+    assert resolve_vpcd_model_input_shapes({}) is None
+
+
+def test_pad_token_row_pads_to_fixed_length():
+    assert pad_token_row([7, 8, 2], target_length=5, pad_value=1).tolist() == [[7, 8, 2, 1, 1]]
+
+
+def test_attention_mask_for_length_marks_padding_as_zero():
+    assert attention_mask_for_length(actual_length=3, target_length=5).tolist() == [[1, 1, 1, 0, 0]]
+
+
+def test_pad_token_row_rejects_values_longer_than_target():
+    with pytest.raises(ValueError, match='exceeds fixed target length'):
+        pad_token_row([1, 2, 3], target_length=2, pad_value=0)
 
 
 def test_text_golden_samples_serialize_to_jsonl():
@@ -276,6 +341,153 @@ def test_bundle_runtime_lowercases_input_when_bundle_requests_it():
     assert encode_session.inputs[0]['inputs'].tolist() == ['xin chao']
 
 
+def test_bundle_runtime_pads_fixed_shape_model_inputs():
+    manifest = ModelBundleManifest(
+        bundle_version=1,
+        project='vpcd',
+        model_family='bartpho-seq2seq',
+        model_name='tourmii/vietnamese-punc-cap-denorm-v1',
+        model_variant='vpcd_balanced_fixed_1024x128',
+        asset_namespace='models/punctuation/vpcd',
+        runtime_kind='text_seq2seq',
+        artifacts={
+            'model': 'model.mobile.onnx',
+            'tokenizer_encode': 'tokenizer.encode.onnx',
+            'tokenizer_decode': 'tokenizer.decode.onnx',
+            'tokenizer_to_model_id_map': 'tokenizer.to_model_id_map.json',
+            'model_to_tokenizer_id_map': 'tokenizer.from_model_id_map.json',
+        },
+        fixtures={'golden_samples': 'golden_samples.jsonl'},
+        metadata={
+            'pad_token_id': 1,
+            'eos_token_id': 2,
+            'decoder_start_token_id': 2,
+            'max_source_length': 1024,
+            'max_decode_length': 128,
+            'fixed_input_shapes': {
+                'model': {
+                    'input_ids': [1, 1024],
+                    'attention_mask': [1, 1024],
+                    'decoder_input_ids': [1, 128],
+                    'decoder_attention_mask': [1, 128],
+                }
+            },
+        },
+    )
+
+    class FakeSession:
+        def __init__(self, responses: list[object]):
+            self.responses = list(responses)
+            self.inputs: list[dict[str, object]] = []
+
+        def run(self, _outputs: object, feeds: dict[str, object]) -> list[object]:
+            self.inputs.append(feeds)
+            return [self.responses.pop(0)]
+
+    logits = np.zeros((1, 128, 7), dtype=np.float32)
+    logits[0, 0, 2] = 9.0
+    logits[0, 127, 5] = 99.0
+    encode_session = FakeSession([np.asarray([[0, 4, 5, 2]], dtype=np.int64)])
+    model_session = FakeSession([logits])
+    decode_session = FakeSession([np.asarray([''], dtype=object)])
+
+    runtime = BundleOnnxRuntime(
+        manifest=manifest,
+        model_session=model_session,
+        encode_session=encode_session,
+        decode_session=decode_session,
+        tokenizer_to_model_ids=np.asarray([0, 1, 2, 3, 11, 12], dtype=np.int64),
+        model_to_tokenizer_ids=np.asarray([0, 1, 2, 3, 4, 5, 6], dtype=np.int64),
+    )
+
+    runtime.restore('xin chao')
+
+    first_feed = model_session.inputs[0]
+    assert first_feed['input_ids'].shape == (1, 1024)
+    assert first_feed['attention_mask'].shape == (1, 1024)
+    assert first_feed['decoder_input_ids'].shape == (1, 128)
+    assert first_feed['decoder_attention_mask'].shape == (1, 128)
+    assert first_feed['input_ids'][0, :4].tolist() == [0, 11, 12, 2]
+    assert first_feed['input_ids'][0, 4] == 1
+    assert first_feed['attention_mask'][0, :4].tolist() == [1, 1, 1, 1]
+    assert first_feed['attention_mask'][0, 4] == 0
+    assert first_feed['decoder_input_ids'][0, :2].tolist() == [2, 1]
+    assert first_feed['decoder_attention_mask'][0, :2].tolist() == [1, 0]
+
+
+def test_bundle_runtime_reads_fixed_decoder_logits_at_active_position():
+    manifest = ModelBundleManifest(
+        bundle_version=1,
+        project='vpcd',
+        model_family='bartpho-seq2seq',
+        model_name='tourmii/vietnamese-punc-cap-denorm-v1',
+        model_variant='vpcd_balanced_fixed_8x4',
+        asset_namespace='models/punctuation/vpcd',
+        runtime_kind='text_seq2seq',
+        artifacts={
+            'model': 'model.mobile.onnx',
+            'tokenizer_encode': 'tokenizer.encode.onnx',
+            'tokenizer_decode': 'tokenizer.decode.onnx',
+            'tokenizer_to_model_id_map': 'tokenizer.to_model_id_map.json',
+            'model_to_tokenizer_id_map': 'tokenizer.from_model_id_map.json',
+        },
+        fixtures={'golden_samples': 'golden_samples.jsonl'},
+        metadata={
+            'pad_token_id': 1,
+            'eos_token_id': 2,
+            'decoder_start_token_id': 2,
+            'max_source_length': 8,
+            'max_decode_length': 4,
+            'fixed_input_shapes': {
+                'model': {
+                    'input_ids': [1, 8],
+                    'attention_mask': [1, 8],
+                    'decoder_input_ids': [1, 4],
+                    'decoder_attention_mask': [1, 4],
+                }
+            },
+        },
+    )
+
+    class FakeSession:
+        def __init__(self, responses: list[object]):
+            self.responses = list(responses)
+            self.inputs: list[dict[str, object]] = []
+
+        def run(self, _outputs: object, feeds: dict[str, object]) -> list[object]:
+            self.inputs.append(feeds)
+            return [self.responses.pop(0)]
+
+    first_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    first_logits[0, 0, 5] = 9.0
+    first_logits[0, 3, 6] = 99.0
+    second_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    second_logits[0, 1, 2] = 9.0
+    second_logits[0, 3, 6] = 99.0
+
+    encode_session = FakeSession([np.asarray([[0, 4, 2]], dtype=np.int64)])
+    model_session = FakeSession([first_logits, second_logits])
+    decode_session = FakeSession([np.asarray(['xin chao.'], dtype=object)])
+
+    runtime = BundleOnnxRuntime(
+        manifest=manifest,
+        model_session=model_session,
+        encode_session=encode_session,
+        decode_session=decode_session,
+        tokenizer_to_model_ids=np.asarray([0, 1, 2, 3, 11], dtype=np.int64),
+        model_to_tokenizer_ids=np.asarray([0, 1, 2, 3, 4, 5, 6], dtype=np.int64),
+    )
+
+    restored = runtime.restore('xin chao', max_length=4)
+
+    assert restored == 'xin chao.'
+    assert model_session.inputs[0]['decoder_input_ids'][0, :4].tolist() == [2, 1, 1, 1]
+    assert model_session.inputs[0]['decoder_attention_mask'][0, :4].tolist() == [1, 0, 0, 0]
+    assert model_session.inputs[1]['decoder_input_ids'][0, :4].tolist() == [2, 5, 1, 1]
+    assert model_session.inputs[1]['decoder_attention_mask'][0, :4].tolist() == [1, 1, 0, 0]
+    assert decode_session.inputs[0]['ids'].tolist() == [5, 2]
+
+
 def test_export_vpcd_bundle_writes_standardized_layout(tmp_case_dir):
     model_dir = tmp_case_dir / 'model'
     output_dir = tmp_case_dir / 'output'
@@ -321,3 +533,123 @@ def test_export_vpcd_bundle_writes_standardized_layout(tmp_case_dir):
     assert (output_dir / 'tokenizer.from_model_id_map.json').exists()
     assert (output_dir / 'golden_samples.jsonl').exists()
     assert manifest.metadata['input_text_case'] == 'lower'
+    assert manifest.metadata['quantization']['format'] == 'QDQ'
+    assert manifest.metadata['quantization']['activation_type'] == 'quint16'
+    assert manifest.metadata['quantization']['weight_type'] == 'quint8'
+    assert manifest.metadata['qnn_readiness']['fixed_shapes_ready'] is False
+
+
+def test_verify_vpcd_candidate_bundle_matches_reference(monkeypatch, tmp_case_dir):
+    reference_bundle = tmp_case_dir / 'reference'
+    candidate_bundle = tmp_case_dir / 'candidate'
+    reference_bundle.mkdir()
+    candidate_bundle.mkdir()
+    samples = [
+        TextGoldenSample(
+            raw_text='xin chao',
+            input_ids=[0, 12, 2],
+            expected_output='Xin chao.',
+        )
+    ]
+    (candidate_bundle / 'golden_samples.jsonl').write_text(serialize_jsonl(samples), encoding='utf-8')
+
+    for bundle_dir, variant in ((reference_bundle, 'vpcd_balanced'), (candidate_bundle, 'vpcd_balanced_fixed_1024x128')):
+        manifest = ModelBundleManifest(
+            bundle_version=1,
+            project='vpcd',
+            model_family='bartpho-seq2seq',
+            model_name='tourmii/vietnamese-punc-cap-denorm-v1',
+            model_variant=variant,
+            asset_namespace='models/punctuation/vpcd',
+            runtime_kind='text_seq2seq',
+            artifacts={
+                'model': 'model.mobile.onnx',
+                'tokenizer_encode': 'tokenizer.encode.onnx',
+                'tokenizer_decode': 'tokenizer.decode.onnx',
+                'tokenizer_to_model_id_map': 'tokenizer.to_model_id_map.json',
+                'model_to_tokenizer_id_map': 'tokenizer.from_model_id_map.json',
+            },
+            fixtures={'golden_samples': 'golden_samples.jsonl'},
+            metadata={
+                'pad_token_id': 1,
+                'eos_token_id': 2,
+                'decoder_start_token_id': 2,
+                'max_source_length': 1024,
+                'max_decode_length': 128,
+            },
+        )
+        manifest.write_json(bundle_dir / 'bundle_manifest.json')
+
+    class FakeRuntime:
+        @classmethod
+        def from_manifest_path(cls, manifest_path: str | Path, provider: str = 'CPUExecutionProvider'):
+            return cls()
+
+        def restore(self, text: str, max_length: int = 128) -> str:
+            return 'Xin chao.'
+
+    monkeypatch.setattr('model_bundle.projects.vpcd.BundleOnnxRuntime', FakeRuntime)
+
+    report = verify_bundle(reference_bundle=reference_bundle, candidate_bundle=candidate_bundle)
+
+    assert report == {
+        'checked_samples': 1,
+        'passed': True,
+        'mismatches': [],
+    }
+
+
+def test_verify_vpcd_candidate_bundle_reports_mismatches(monkeypatch, tmp_case_dir):
+    reference_bundle = tmp_case_dir / 'reference'
+    candidate_bundle = tmp_case_dir / 'candidate'
+    reference_bundle.mkdir()
+    candidate_bundle.mkdir()
+    samples = [
+        TextGoldenSample(
+            raw_text='xin chao',
+            input_ids=[0, 12, 2],
+            expected_output='Xin chao.',
+        )
+    ]
+    (candidate_bundle / 'golden_samples.jsonl').write_text(serialize_jsonl(samples), encoding='utf-8')
+
+    for bundle_dir in (reference_bundle, candidate_bundle):
+        manifest = ModelBundleManifest(
+            bundle_version=1,
+            project='vpcd',
+            model_family='bartpho-seq2seq',
+            model_name='tourmii/vietnamese-punc-cap-denorm-v1',
+            model_variant='vpcd_balanced',
+            asset_namespace='models/punctuation/vpcd',
+            runtime_kind='text_seq2seq',
+            artifacts={'model': 'model.mobile.onnx'},
+            fixtures={'golden_samples': 'golden_samples.jsonl'},
+            metadata={'max_decode_length': 128},
+        )
+        manifest.write_json(bundle_dir / 'bundle_manifest.json')
+
+    class FakeRuntime:
+        def __init__(self, label: str):
+            self.label = label
+
+        @classmethod
+        def from_manifest_path(cls, manifest_path: str | Path, provider: str = 'CPUExecutionProvider'):
+            label = 'candidate' if 'candidate' in str(manifest_path) else 'reference'
+            return cls(label)
+
+        def restore(self, text: str, max_length: int = 128) -> str:
+            return 'Xin chao?' if self.label == 'candidate' else 'Xin chao.'
+
+    monkeypatch.setattr('model_bundle.projects.vpcd.BundleOnnxRuntime', FakeRuntime)
+
+    report = verify_bundle(reference_bundle=reference_bundle, candidate_bundle=candidate_bundle)
+
+    assert report['checked_samples'] == 1
+    assert report['passed'] is False
+    assert report['mismatches'] == [
+        {
+            'raw_text': 'xin chao',
+            'reference_output': 'Xin chao.',
+            'candidate_output': 'Xin chao?',
+        }
+    ]

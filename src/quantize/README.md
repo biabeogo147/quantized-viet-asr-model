@@ -221,6 +221,20 @@ python -m tools.extract_vlsp2020_calibration_subset \
 -> quantize
 -> print size-budget guidance and next steps
 
+VPCD fixed-shape QNN preflight is intentionally a separate packaging step after quantization and bundle export:
+
+```bash
+python -m tools.prepare_vpcd_qnn_candidate \
+  --source-bundle build/model_bundle/vpcd/vpcd_balanced \
+  --output-dir build/model_bundle/vpcd/qnn_fixed_1024x128
+
+python -m verify.qnn_preflight \
+  --project vpcd \
+  --bundle-dir build/model_bundle/vpcd/qnn_fixed_1024x128
+```
+
+This keeps the quantization flow focused on QDQ quality and lets the fixed-shape candidate fail independently if decoder padding or shape freezing needs more work.
+
 Smoke command used successfully:
 
 ```bash
