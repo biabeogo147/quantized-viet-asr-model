@@ -11,6 +11,7 @@ python-model-test/src/tools/
   extract_vlsp2020_calibration_subset.py
   prepare_vpcd_qnn_candidate.py
   paths.py
+  sync_android_bundle.py
   README.md
 ```
 
@@ -86,6 +87,38 @@ python -m tools.prepare_vpcd_qnn_candidate \
   --output-dir build/model_bundle/vpcd/qnn_fixed_1024x128 \
   --encoder-sequence 1024 \
   --decoder-sequence 128
+```
+
+## `sync_android_bundle.py`
+
+Role:
+- copies a verified Python model bundle into the correct BKMeeting Android asset pack
+- rewrites `bundle_manifest.json` handoff fields so `asset_namespace`, Zipformer `model_name`, and canonical variants match Android
+- keeps the fixed-shape VPCD QNN candidate in `qnnvalidationassets` instead of baseline `modelassets`
+
+Supported targets:
+- `zipformer/fp32` -> `BKMeeting/modelassets/src/main/assets/models/asr/zipformer/fp32`
+- `zipformer/qnn_u16u8` -> `BKMeeting/modelassets/src/main/assets/models/asr/zipformer/qnn_u16u8`
+- `vpcd/vpcd_balanced` -> `BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd`
+- `vpcd/qnn_fixed_1024x128` -> `BKMeeting/qnnvalidationassets/src/main/assets/models/punctuation/vpcd/qnn_fixed_1024x128`
+
+Example commands:
+
+```bash
+python -m tools.sync_android_bundle \
+  --project zipformer \
+  --variant fp32 \
+  --bkmeeting-root ../BKMeeting \
+  --overwrite
+```
+
+```bash
+python -m tools.sync_android_bundle \
+  --project vpcd \
+  --variant qnn_fixed_1024x128 \
+  --bkmeeting-root ../BKMeeting \
+  --qnn-validation-assets \
+  --overwrite
 ```
 
 ## `convert_bpe2token.py`

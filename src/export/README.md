@@ -112,8 +112,8 @@ python -m export.punctuation_onnx \
 
 - `vpcd`
   - the exported bundle layout is already consumed by `bkmeeting`
-  - after export, copy the bundle files into `bkmeeting/modelassets/src/main/assets/models/punctuation/vpcd`
+  - after export, use `python -m tools.sync_android_bundle --project vpcd --variant vpcd_balanced --bkmeeting-root ../BKMeeting --overwrite`
 - `zipformer`
   - the exported bundle is the canonical Python-side verification artifact
-  - stage it under `bkmeeting/modelassets/src/main/assets/models/asr/zipformer/bundle-fp32` for Android migration work
-  - the current Android ASR runtime still consumes raw component files instead of `bundle_manifest.json`
+  - after export, use `python -m tools.sync_android_bundle --project zipformer --variant fp32 --bkmeeting-root ../BKMeeting --overwrite`
+  - the current Android ASR runtime consumes `bundle_manifest.json` through the shared bundle resolver

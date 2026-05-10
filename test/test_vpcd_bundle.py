@@ -170,7 +170,7 @@ def test_create_runtime_defaults_to_model_dir_mode():
 
 def test_create_runtime_uses_bundle_manifest_mode_without_model_dir():
     parser = build_argument_parser()
-    args = parser.parse_args(['--bundle-manifest', 'build/model_bundle/vpcd/fp32/bundle_manifest.json'])
+    args = parser.parse_args(['--bundle-manifest', 'build/model_bundle/vpcd/vpcd_balanced/bundle_manifest.json'])
     captured: dict[str, object] = {}
 
     class FakeBundleOnnxRuntime:
@@ -185,7 +185,7 @@ def test_create_runtime_uses_bundle_manifest_mode_without_model_dir():
 
     assert runtime is not None
     assert captured == {
-        'manifest_path': 'build/model_bundle/vpcd/fp32/bundle_manifest.json',
+        'manifest_path': 'build/model_bundle/vpcd/vpcd_balanced/bundle_manifest.json',
         'provider': 'CPUExecutionProvider',
     }
 
@@ -199,7 +199,7 @@ def test_argument_parser_rejects_model_dir_and_bundle_manifest_together():
                 '--model-dir',
                 'assets/vietnamese-punc-cap-denorm-v1',
                 '--bundle-manifest',
-                'build/model_bundle/vpcd/fp32/bundle_manifest.json',
+                'build/model_bundle/vpcd/vpcd_balanced/bundle_manifest.json',
             ]
         )
 

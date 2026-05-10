@@ -39,19 +39,22 @@ build/model_bundle/vpcd/qnn_fixed_1024x128/
 
 ## Android handoff
 
-- Copy candidate bundle contents into BKMeeting modelassets only after the Android QNN branch chooses the production namespace.
+- Sync candidate bundle contents into BKMeeting `qnnvalidationassets`; do not place the 800MB fixed-shape candidate in baseline `modelassets`.
 - Recommended first Android QNN target: the fixed-shape `model.mobile.onnx` from `qnn_fixed_1024x128`, not the dynamic-shape `vpcd_balanced` reference.
-- Keep the current dynamic `models/punctuation/vpcd` namespace as the CPU-safe baseline until the Android branch deliberately swaps or stages a fixed-shape namespace.
+- Keep the current dynamic `models/punctuation/vpcd` namespace as the CPU-safe baseline until the Android branch deliberately promotes a fixed-shape production namespace.
 - Keep VPCD tokenizer sessions on CPU.
 - In strict QNN mode, disable ORT CPU fallback for the VPCD model session.
 - If HTP rejects the graph, preserve CPU fallback and attach the HTP error to `BKMeeting/docs/qnn-device-validation.md`.
 
-Suggested copy command after the Android namespace decision:
+Suggested sync command:
 
 ```powershell
-Copy-Item -Path build\model_bundle\vpcd\qnn_fixed_1024x128\* `
-  -Destination ..\BKMeeting\modelassets\src\main\assets\models\punctuation\vpcd `
-  -Recurse -Force
+python -m tools.sync_android_bundle `
+  --project vpcd `
+  --variant qnn_fixed_1024x128 `
+  --bkmeeting-root ../BKMeeting `
+  --qnn-validation-assets `
+  --overwrite
 ```
 
-After copying, rerun `verify.qnn_preflight` in `python-model-test` and the Android bundle tests in `BKMeeting` before enabling `QNN_HTP_STRICT`.
+After syncing, rerun `verify.qnn_preflight` in `python-model-test` and the Android bundle tests in `BKMeeting` before enabling `QNN_HTP_STRICT`.

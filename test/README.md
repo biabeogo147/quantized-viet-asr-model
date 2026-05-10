@@ -126,7 +126,7 @@ Locks the `src/` layout assumptions:
 
 ```bash
 python -m test.test_punctuation_model_onnx \
-  --bundle-manifest build/model_bundle/vpcd/fp32/bundle_manifest.json \
+  --bundle-manifest build/model_bundle/vpcd/vpcd_balanced/bundle_manifest.json \
   --text "hom nay la buoi nham chuc cua toi phuoc thanh"
 ```
 

@@ -22,7 +22,7 @@ What is already working in this repo:
 - quantize `vpcd`
 - quantize `zipformer` into a `qnn_u16u8` candidate bundle
 - smoke-test both projects in `--bundle-manifest` mode
-- hand off bundles into `BKMeeting/modelassets`
+- hand off bundles into BKMeeting Android asset packs
 
 Current Android-facing status:
 
@@ -306,7 +306,7 @@ python -m quantize \
   --project zipformer \
   --preset zipformer_sd8g2_balanced \
   --audio-manifest build/calibration/vlsp2020/zipformer_audio_manifest.txt \
-  --output-root build/zipformer/artifacts \
+  --output-root build/quantize/zipformer/qnn_u16u8 \
   --bundle-output-dir build/model_bundle/zipformer/qnn_u16u8 \
   --reference-bundle-dir build/model_bundle/zipformer/fp32 \
   --calibration-chunk-size 4
@@ -353,34 +353,47 @@ In `--bundle-manifest` mode, the smoke tests exercise the same manifest-driven b
 #### VPCD Android handoff
 
 ```bash
-cp -R build/model_bundle/vpcd/vpcd_balanced/. \
-  ../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/
+python -m tools.sync_android_bundle \
+  --project vpcd \
+  --variant vpcd_balanced \
+  --bkmeeting-root ../BKMeeting \
+  --overwrite
 ```
 
-For the fixed-shape QNN preflight candidate, use:
+For the fixed-shape QNN preflight candidate, use the optional validation asset pack:
 
 ```bash
-cp -R build/model_bundle/vpcd/qnn_fixed_1024x128/. \
-  ../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/
+python -m tools.sync_android_bundle \
+  --project vpcd \
+  --variant qnn_fixed_1024x128 \
+  --bkmeeting-root ../BKMeeting \
+  --qnn-validation-assets \
+  --overwrite
 ```
 
-Only do this in the Android QNN branch after choosing whether the active namespace should point at the fixed-shape candidate. Tokenizer graphs still run on CPU in the first QNN slice.
+This keeps the 800MB fixed-shape candidate out of the baseline `modelassets` pack. Tokenizer graphs still run on CPU in the first QNN slice.
 
 #### Zipformer FP32 Android handoff
 
 ```bash
-cp -R build/model_bundle/zipformer/fp32/. \
-  ../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/fp32/
+python -m tools.sync_android_bundle \
+  --project zipformer \
+  --variant fp32 \
+  --bkmeeting-root ../BKMeeting \
+  --overwrite
 ```
 
 #### Zipformer QNN candidate Android handoff
 
 ```bash
-cp -R build/model_bundle/zipformer/qnn_u16u8/. \
-  ../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/qnn_u16u8/
+python -m tools.sync_android_bundle \
+  --project zipformer \
+  --variant qnn_u16u8 \
+  --bkmeeting-root ../BKMeeting \
+  --overwrite
 ```
 
-After the copy:
+After the sync:
 
 - BKMeeting reads `bundle_manifest.json`
 - Android stages bundle files into local app storage
@@ -400,7 +413,7 @@ Important current note:
 1. export the bundle
 2. verify the bundle against the source model
 3. run a smoke test in `--bundle-manifest` mode
-4. copy the bundle into `BKMeeting/modelassets`
+4. sync the bundle into BKMeeting with `tools.sync_android_bundle`
 
 ### Flow B: Build a quantized Zipformer candidate
 
@@ -409,7 +422,7 @@ Important current note:
 3. run `python -m quantize --project zipformer`
 4. verify the candidate bundle
 5. smoke-test the candidate bundle
-6. copy the candidate bundle into `BKMeeting/modelassets`
+6. sync the candidate bundle into BKMeeting with `tools.sync_android_bundle`
 
 ## Tests
 
@@ -445,6 +458,7 @@ python -m pytest test -q -p no:cacheprovider
 ### Android handoff targets
 
 - `../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd`
+- `../BKMeeting/qnnvalidationassets/src/main/assets/models/punctuation/vpcd/qnn_fixed_1024x128`
 - `../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/fp32`
 - `../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/qnn_u16u8`
 

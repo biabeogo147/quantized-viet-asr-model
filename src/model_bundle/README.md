@@ -177,7 +177,7 @@ build/model_bundle/<project>/<variant>/
 Examples:
 
 ```text
-build/model_bundle/vpcd/fp32/
+build/model_bundle/vpcd/vpcd_balanced/
   model.mobile.onnx
   tokenizer.encode.onnx
   tokenizer.decode.onnx

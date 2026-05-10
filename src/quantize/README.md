@@ -286,14 +286,14 @@ python -m quantize \
   --project zipformer \
   --preset zipformer_sd8g2_balanced \
   --audio-manifest build/calibration/vlsp2020/zipformer_audio_manifest.txt \
-  --output-root build/zipformer/artifacts \
-  --bundle-output-dir build/zipformer \
-  --reference-bundle-dir build/zipformer/reference_fp32 \
+  --output-root build/quantize/zipformer/qnn_u16u8 \
+  --bundle-output-dir build/model_bundle/zipformer/qnn_u16u8 \
+  --reference-bundle-dir build/model_bundle/zipformer/fp32 \
   --calibration-chunk-size 4
 ```
 
 ## Honest status note
 
 - the `zipformer/qnn_u16u8` candidate bundle is runnable today
-- a tiny 1-sample smoke run exact-matched the FP32 reference bundle
-- broader tuning still needs larger calibration and evaluation sets before we treat parity as settled
+- exact transcript parity with the FP32 reference is not a strict gate for the quantized runtime candidate
+- broader tuning still needs larger calibration, device-side HTP proof, and benchmark data before any production promotion

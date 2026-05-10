@@ -83,7 +83,7 @@ For VPCD it checks:
 python -m verify.model_bundle \
   --project vpcd \
   --model-dir assets/vietnamese-punc-cap-denorm-v1 \
-  --bundle-dir build/model_bundle/vpcd/fp32
+  --bundle-dir build/model_bundle/vpcd/vpcd_balanced
 ```
 
 ### Verify a Zipformer FP32 bundle against `model-dir`
