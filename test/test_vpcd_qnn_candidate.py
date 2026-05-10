@@ -49,7 +49,7 @@ def _write_source_bundle(bundle_dir: Path, *, project: str = 'vpcd', quantizatio
         model_family='bartpho-seq2seq',
         model_name='tourmii/vietnamese-punc-cap-denorm-v1',
         model_variant='vpcd_balanced',
-        asset_namespace='models/punctuation/vpcd',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
         runtime_kind='text_seq2seq',
         artifacts={
             'model': 'model.mobile.onnx',

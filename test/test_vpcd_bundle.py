@@ -1,4 +1,4 @@
-﻿import json
+import json
 import shutil
 from pathlib import Path
 from unittest.mock import patch
@@ -48,7 +48,7 @@ def test_manifest_schema_is_stable_for_vpcd_bundle_contract():
         model_family='bartpho-seq2seq',
         model_name='tourmii/vietnamese-punc-cap-denorm-v1',
         model_variant='vpcd_balanced',
-        asset_namespace='models/punctuation/vpcd',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
         runtime_kind='text_seq2seq',
         artifacts={
             'model': 'model.mobile.onnx',
@@ -228,7 +228,7 @@ def test_bundle_runtime_restores_text_using_only_bundle_artifacts():
         model_family='bartpho-seq2seq',
         model_name='tourmii/vietnamese-punc-cap-denorm-v1',
         model_variant='vpcd_balanced',
-        asset_namespace='models/punctuation/vpcd',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
         runtime_kind='text_seq2seq',
         artifacts={
             'model': 'model.mobile.onnx',
@@ -288,7 +288,7 @@ def test_bundle_runtime_lowercases_input_when_bundle_requests_it():
         model_family='bartpho-seq2seq',
         model_name='tourmii/vietnamese-punc-cap-denorm-v1',
         model_variant='vpcd_balanced',
-        asset_namespace='models/punctuation/vpcd',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
         runtime_kind='text_seq2seq',
         artifacts={
             'model': 'model.mobile.onnx',
@@ -348,7 +348,7 @@ def test_bundle_runtime_pads_fixed_shape_model_inputs():
         model_family='bartpho-seq2seq',
         model_name='tourmii/vietnamese-punc-cap-denorm-v1',
         model_variant='vpcd_balanced_fixed_1024x128',
-        asset_namespace='models/punctuation/vpcd',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
         runtime_kind='text_seq2seq',
         artifacts={
             'model': 'model.mobile.onnx',
@@ -422,7 +422,7 @@ def test_bundle_runtime_reads_fixed_decoder_logits_at_active_position():
         model_family='bartpho-seq2seq',
         model_name='tourmii/vietnamese-punc-cap-denorm-v1',
         model_variant='vpcd_balanced_fixed_8x4',
-        asset_namespace='models/punctuation/vpcd',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
         runtime_kind='text_seq2seq',
         artifacts={
             'model': 'model.mobile.onnx',
@@ -560,7 +560,7 @@ def test_verify_vpcd_candidate_bundle_matches_reference(monkeypatch, tmp_case_di
             model_family='bartpho-seq2seq',
             model_name='tourmii/vietnamese-punc-cap-denorm-v1',
             model_variant=variant,
-            asset_namespace='models/punctuation/vpcd',
+            asset_namespace='models/punctuation/vpcd/vpcd_balanced',
             runtime_kind='text_seq2seq',
             artifacts={
                 'model': 'model.mobile.onnx',
@@ -620,7 +620,7 @@ def test_verify_vpcd_candidate_bundle_reports_mismatches(monkeypatch, tmp_case_d
             model_family='bartpho-seq2seq',
             model_name='tourmii/vietnamese-punc-cap-denorm-v1',
             model_variant='vpcd_balanced',
-            asset_namespace='models/punctuation/vpcd',
+            asset_namespace='models/punctuation/vpcd/vpcd_balanced',
             runtime_kind='text_seq2seq',
             artifacts={'model': 'model.mobile.onnx'},
             fixtures={'golden_samples': 'golden_samples.jsonl'},

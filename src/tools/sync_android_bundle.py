@@ -19,7 +19,6 @@ class AndroidBundleTarget:
     asset_namespace: str
     manifest_model_name: str | None = None
     manifest_model_variant: str | None = None
-    requires_qnn_validation_assets: bool = False
 
 
 @dataclass(frozen=True)
@@ -52,15 +51,14 @@ _TARGETS: dict[tuple[str, str], AndroidBundleTarget] = {
         project='vpcd',
         variant='vpcd_balanced',
         asset_pack='modelassets',
-        asset_namespace='models/punctuation/vpcd',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
         manifest_model_variant='vpcd_balanced',
     ),
     ('vpcd', 'qnn_fixed_1024x128'): AndroidBundleTarget(
         project='vpcd',
         variant='qnn_fixed_1024x128',
-        asset_pack='qnnvalidationassets',
+        asset_pack='modelassets',
         asset_namespace='models/punctuation/vpcd/qnn_fixed_1024x128',
-        requires_qnn_validation_assets=True,
     ),
 }
 
@@ -71,20 +69,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument('--variant', required=True)
     parser.add_argument('--source-bundle')
     parser.add_argument('--bkmeeting-root', default='../BKMeeting')
-    parser.add_argument('--qnn-validation-assets', action='store_true')
     parser.add_argument('--overwrite', action='store_true')
     return parser
 
 
-def _target_for(project: str, variant: str, *, qnn_validation_assets: bool) -> AndroidBundleTarget:
+def _target_for(project: str, variant: str) -> AndroidBundleTarget:
     key = (project, variant)
     if key not in _TARGETS:
         supported = ', '.join(f'{item_project}/{item_variant}' for item_project, item_variant in sorted(_TARGETS))
         raise ValueError(f'Unsupported Android bundle target {project}/{variant}. Supported targets: {supported}')
-    target = _TARGETS[key]
-    if target.requires_qnn_validation_assets and not qnn_validation_assets:
-        raise ValueError('VPCD fixed QNN bundle must sync to qnnvalidationassets; pass --qnn-validation-assets.')
-    return target
+    return _TARGETS[key]
 
 
 def _default_source_bundle(project: str, variant: str) -> Path:
@@ -147,10 +141,9 @@ def sync_android_bundle(
     variant: str,
     bkmeeting_root: str | Path,
     source_bundle: str | Path | None = None,
-    qnn_validation_assets: bool = False,
     overwrite: bool = False,
 ) -> SyncResult:
-    target = _target_for(project, variant, qnn_validation_assets=qnn_validation_assets)
+    target = _target_for(project, variant)
     source_dir = Path(source_bundle) if source_bundle else _default_source_bundle(project, variant)
     if not (source_dir / 'bundle_manifest.json').is_file():
         raise FileNotFoundError(f'Missing source bundle manifest: {source_dir / "bundle_manifest.json"}')
@@ -182,7 +175,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         variant=args.variant,
         source_bundle=args.source_bundle,
         bkmeeting_root=args.bkmeeting_root,
-        qnn_validation_assets=args.qnn_validation_assets,
         overwrite=args.overwrite,
     )
     print('Android bundle synced.')

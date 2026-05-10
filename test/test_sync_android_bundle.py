@@ -58,7 +58,7 @@ def test_sync_vpcd_qnn_fixed_to_bkmeeting_modelassets(tmp_path):
         source_bundle,
         project='vpcd',
         variant='vpcd_balanced_fixed_1024x128',
-        namespace='models/punctuation/vpcd',
+        namespace='models/punctuation/vpcd/vpcd_balanced',
     )
 
     result = sync_android_bundle(

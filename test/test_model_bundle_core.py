@@ -1,4 +1,4 @@
-﻿from model_bundle.manifest import ModelBundleManifest
+from model_bundle.manifest import ModelBundleManifest
 from model_bundle.projects import list_bundle_projects, resolve_bundle_project
 
 
@@ -9,7 +9,7 @@ def test_model_bundle_manifest_round_trips_generic_artifacts():
         model_family='bartpho-seq2seq',
         model_name='vpcd/fp32',
         model_variant='fp32',
-        asset_namespace='models/punctuation/vpcd',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
         runtime_kind='text_seq2seq',
         artifacts={'model': 'model.mobile.onnx', 'tokenizer_encode': 'tokenizer.encode.onnx'},
         fixtures={'golden_samples': 'golden_samples.jsonl'},

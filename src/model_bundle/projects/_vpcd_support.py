@@ -19,7 +19,7 @@ from model_bundle.projects.vpcd_shapes import (
 )
 from tools.paths import resolve_repo_path
 
-DEFAULT_ASSET_NAMESPACE = 'models/punctuation/vpcd'
+DEFAULT_ASSET_NAMESPACE = 'models/punctuation/vpcd/vpcd_balanced'
 DEFAULT_MODEL_VARIANT = 'vpcd_balanced'
 MODEL_FILE_NAME = 'model.mobile.onnx'
 TOKENIZER_ENCODE_FILE_NAME = 'tokenizer.encode.onnx'

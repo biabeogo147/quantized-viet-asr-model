@@ -127,7 +127,7 @@ python -m export.model_bundle \
   --project vpcd \
   --model-dir assets/vietnamese-punc-cap-denorm-v1 \
   --output-dir build/model_bundle/vpcd/vpcd_balanced \
-  --asset-namespace models/punctuation/vpcd \
+  --asset-namespace models/punctuation/vpcd/vpcd_balanced \
   --model-variant vpcd_balanced
 ```
 
@@ -360,18 +360,17 @@ python -m tools.sync_android_bundle \
   --overwrite
 ```
 
-For the fixed-shape QNN preflight candidate, use the optional validation asset pack:
+For the fixed-shape QNN preflight candidate:
 
 ```bash
 python -m tools.sync_android_bundle \
   --project vpcd \
   --variant qnn_fixed_1024x128 \
   --bkmeeting-root ../BKMeeting \
-  --qnn-validation-assets \
   --overwrite
 ```
 
-This keeps the 800MB fixed-shape candidate out of the baseline `modelassets` pack. Tokenizer graphs still run on CPU in the first QNN slice.
+This syncs the candidate to `../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/qnn_fixed_1024x128`. Tokenizer graphs still run on CPU in the first QNN slice.
 
 #### Zipformer FP32 Android handoff
 
@@ -457,8 +456,8 @@ python -m pytest test -q -p no:cacheprovider
 
 ### Android handoff targets
 
-- `../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd`
-- `../BKMeeting/qnnvalidationassets/src/main/assets/models/punctuation/vpcd/qnn_fixed_1024x128`
+- `../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/vpcd_balanced`
+- `../BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/qnn_fixed_1024x128`
 - `../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/fp32`
 - `../BKMeeting/modelassets/src/main/assets/models/asr/zipformer/qnn_u16u8`
 
