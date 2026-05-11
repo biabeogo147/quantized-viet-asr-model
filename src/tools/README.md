@@ -2,6 +2,11 @@
 
 `src/tools/` contains small reusable helper scripts that do not belong to the main export, bundle, quantize, or verify flows.
 
+For the canonical repo-wide workflows that call these helpers, use:
+
+- `docs/workflows/quantize-qnn-candidates.md`
+- `docs/workflows/android-handoff.md`
+
 ## File map
 
 ```text
@@ -108,7 +113,7 @@ Example commands:
 python -m tools.sync_android_bundle \
   --project zipformer \
   --variant fp32 \
-  --bkmeeting-root ../BKMeeting \
+  --bkmeeting-root <BKMEETING_ROOT> \
   --overwrite
 ```
 
@@ -116,7 +121,7 @@ python -m tools.sync_android_bundle \
 python -m tools.sync_android_bundle \
   --project vpcd \
   --variant qnn_fixed_1024x128 \
-  --bkmeeting-root ../BKMeeting \
+  --bkmeeting-root <BKMEETING_ROOT> \
   --overwrite
 ```
 

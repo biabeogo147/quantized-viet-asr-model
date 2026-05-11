@@ -2,6 +2,11 @@
 
 `src/export/` contains the CLIs used to create input artifacts for verification, smoke tests, quantization, and Android sync.
 
+For the canonical repo-wide export and handoff flow, use:
+
+- `docs/workflows/export-verify-smoke.md`
+- `docs/workflows/android-handoff.md`
+
 ## Goals
 
 - provide clear entrypoints for exporting bundles through the shared contract
@@ -108,12 +113,6 @@ python -m export.punctuation_onnx \
 - `export/model_bundle.py` calls the shared core in `model_bundle/exporter.py`
 - `export/punctuation_onnx.py` is a standalone helper and is not part of the shared bundle contract
 
-## Android handoff status
+Android handoff is documented centrally in:
 
-- `vpcd`
-  - the exported bundle layout is already consumed by `bkmeeting`
-  - after export, use `python -m tools.sync_android_bundle --project vpcd --variant vpcd_balanced --bkmeeting-root ../BKMeeting --overwrite`
-- `zipformer`
-  - the exported bundle is the canonical Python-side verification artifact
-  - after export, use `python -m tools.sync_android_bundle --project zipformer --variant fp32 --bkmeeting-root ../BKMeeting --overwrite`
-  - the current Android ASR runtime consumes `bundle_manifest.json` through the shared bundle resolver
+- `docs/workflows/android-handoff.md`

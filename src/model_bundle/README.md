@@ -2,6 +2,10 @@
 
 `src/model_bundle/` is the shared core for the Python-side export, verification, and bundle-consumption flow.
 
+For the canonical high-level bundle contract, use:
+
+- `docs/architecture/bundle-contract.md`
+
 ## Goals
 
 - define one shared bundle contract for multiple model families

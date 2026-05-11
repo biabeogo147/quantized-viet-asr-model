@@ -5,6 +5,11 @@
 - quantizing the punctuation model `vpcd`
 - quantizing Zipformer to produce the `qnn_u16u8` candidate bundle
 
+For the canonical repo-wide quantization and candidate-prep workflow, use:
+
+- `docs/workflows/quantize-qnn-candidates.md`
+- `docs/qnn/preflight.md`
+
 ## Goals
 
 - clearly separate generic logic from project-specific logic

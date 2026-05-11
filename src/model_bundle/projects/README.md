@@ -2,6 +2,11 @@
 
 `src/model_bundle/projects/` contains model-family-specific logic. The shared core does not know tokenizer details or RNNT details. It only knows how to call adapters.
 
+For the canonical repo-wide architecture and workflow docs, use:
+
+- `docs/architecture/overview.md`
+- `docs/architecture/bundle-contract.md`
+
 ## File map
 
 ```text

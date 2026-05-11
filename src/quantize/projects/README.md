@@ -2,6 +2,10 @@
 
 `src/quantize/projects/` contains project-specific logic for the `python -m quantize` CLI.
 
+For the canonical repo-wide candidate-building workflow, use:
+
+- `docs/workflows/quantize-qnn-candidates.md`
+
 ## File map
 
 ```text

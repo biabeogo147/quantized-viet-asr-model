@@ -5,6 +5,10 @@
 - canonical smoke runners that execute real models
 - pytest suites that lock down the shared `src/` contracts
 
+For the canonical repo-wide smoke-test workflow, use:
+
+- `docs/workflows/export-verify-smoke.md`
+
 Legacy standalone comparison scripts have been removed so the repo keeps a single canonical path.
 
 ## Import setup

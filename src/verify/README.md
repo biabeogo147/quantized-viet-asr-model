@@ -2,6 +2,12 @@
 
 `src/verify/` contains the CLIs used to check whether exported artifacts still match the expected contract and quality gates.
 
+For the canonical repo-wide verification and QNN preflight flow, use:
+
+- `docs/workflows/export-verify-smoke.md`
+- `docs/workflows/quantize-qnn-candidates.md`
+- `docs/qnn/preflight.md`
+
 ## Goals
 
 - provide a single verification entrypoint per `project`
