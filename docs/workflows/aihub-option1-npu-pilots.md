@@ -1,6 +1,6 @@
 # AI Hub Option 1 NPU Pilots
 
-This workflow is the Python-side entry point for validating the BKMeeting model candidates on Qualcomm AI Hub before any Android packaging work.
+This workflow is the Python-side pilot entry point for validating the BKMeeting model candidates on Qualcomm AI Hub before any Android packaging work.
 
 Use this workflow when you want to prove:
 
@@ -10,7 +10,9 @@ Use this workflow when you want to prove:
 - the compiled artifact can return valid inference tensors on device.
 
 Use `On_device_Ai.ipynb` as the minimal Qualcomm sample reference.
-Use `On_device_Ai_option1_pilots.ipynb` as the repo-specific notebook for BKMeeting pilots.
+Use `On_device_Ai_option1_pilots.ipynb` for the day-to-day `Phase 2 + Phase 3` pilot flow.
+Use `On_device_Ai_option1_phase4_gate.ipynb` for benchmark and recommendation reruns.
+Use `On_device_Ai_option1_phase5_contract.ipynb` for package creation only.
 Use `docs/plans/active/2026-05-11-aihub-option1-npu-pilots.md` for the execution plan behind this workflow.
 
 ## Why This Workflow Exists
@@ -60,10 +62,7 @@ You need:
 - a valid Qualcomm AI Hub API token
 - access to at least one Snapdragon device family visible in `qai-hub list-devices`
 
-The notebook includes bootstrap cells for:
-
-- `qai-hub configure`
-- `qai-hub list-devices`
+The pilot notebook resolves the API token from `.env` or the shell environment and uses the Python API directly.
 
 Recommended local secret setup:
 
@@ -164,6 +163,51 @@ The Phase 2 records are the minimum handoff artifacts for every pilot run.
   - compile/profile/inference job ids and URLs when available
   - output tensor names, shapes, and dtypes
 
+## Operator Flow
+
+Run this workflow from:
+
+- [On_device_Ai_option1_pilots.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_pilots.ipynb)
+
+Two normal modes are supported:
+
+### Compile From Scratch
+
+Use this when no compile record exists yet for the chosen `RUN_LABEL`.
+
+Run, per enabled pilot:
+
+1. `Prepare`
+2. `Compile Only`
+3. `Resolve Existing Compiled Target`
+4. `Run And Compare Against The Compiled Target`
+5. optional `Output Inspection (Debug Only)`
+6. `Hybrid E2E Run`
+7. `Final Compare`
+
+### Reuse An Existing Compiled Target
+
+Use this when you only want to rerun inference and correctness checks.
+
+Keep the same `RUN_LABEL`, or set an explicit `*_TARGET_MODEL_ID`, then run:
+
+1. `Prepare`
+2. `Resolve Existing Compiled Target`
+3. `Run And Compare Against The Compiled Target`
+4. optional `Output Inspection (Debug Only)`
+5. `Hybrid E2E Run`
+6. `Final Compare`
+
+Recommended config defaults:
+
+- `ENABLE_PROFILE_DURING_RUN = False`
+- `ENABLE_DEBUG_OUTPUT_INSPECTION = False`
+
+Operator note:
+
+- environment setup belongs outside the normal notebook execution path
+- the pilot notebook no longer includes the old mandatory `pip install` cell
+
 ## Notebook Outputs To Preserve
 
 For each pilot, record:
@@ -180,6 +224,7 @@ For each pilot, record:
 - live run record path
 - output tensor names and shapes
 - downloaded target model path if you save it locally
+- hybrid record path
 
 ## What Counts As Success
 

@@ -97,7 +97,36 @@ def resolve_vpcd_aihub_quantize_dtype_names(*, preset: str = DEFAULT_PRESET) -> 
     }
 
 
-def calibration_records_to_aihub_dataset(records: Sequence[CalibrationSample]) -> dict[str, list[np.ndarray]]:
+def _pad_array_to_target_shape(
+    values: np.ndarray,
+    target_shape: Sequence[int],
+    pad_value: int,
+) -> np.ndarray:
+    array = np.asarray(values)
+    normalized_target_shape = tuple(int(dimension) for dimension in target_shape)
+    if array.ndim != len(normalized_target_shape):
+        raise ValueError(
+            f"Expected array with rank {len(normalized_target_shape)}, got shape {tuple(array.shape)}."
+        )
+    if any(current > target for current, target in zip(array.shape, normalized_target_shape)):
+        raise ValueError(
+            f"Input shape {tuple(array.shape)} exceeds fixed target shape {normalized_target_shape}."
+        )
+    if tuple(array.shape) == normalized_target_shape:
+        return array
+
+    padded = np.full(normalized_target_shape, pad_value, dtype=array.dtype)
+    slices = tuple(slice(0, int(dimension)) for dimension in array.shape)
+    padded[slices] = array
+    return padded
+
+
+def calibration_records_to_aihub_dataset(
+    records: Sequence[CalibrationSample],
+    *,
+    fixed_input_shapes: dict[str, Sequence[int]] | None = None,
+    pad_values: dict[str, int] | None = None,
+) -> dict[str, list[np.ndarray]]:
     normalized_records = list(records)
     if not normalized_records:
         raise ValueError("records must not be empty.")
@@ -112,7 +141,14 @@ def calibration_records_to_aihub_dataset(records: Sequence[CalibrationSample]) -
                 f"Expected {input_names}, got {current_input_names}."
             )
         for name in input_names:
-            dataset[name].append(np.asarray(record.inputs[name]))
+            value = np.asarray(record.inputs[name])
+            if fixed_input_shapes and name in fixed_input_shapes:
+                value = _pad_array_to_target_shape(
+                    value,
+                    fixed_input_shapes[name],
+                    0 if pad_values is None else int(pad_values.get(name, 0)),
+                )
+            dataset[name].append(value)
     return dataset
 
 
@@ -125,6 +161,8 @@ def build_vpcd_aihub_quantize_recipe(
     max_calibration_samples: int = DEFAULT_MAX_CALIBRATION_SAMPLES,
     max_generation_length: int = DEFAULT_MAX_GENERATION_LENGTH,
     ort_provider: str = DEFAULT_ORT_PROVIDER,
+    fixed_input_shapes: dict[str, Sequence[int]] | None = None,
+    pad_token_id: int = 1,
 ) -> AiHubQuantizeRecipe:
     records, stats = build_calibration_records(
         model_dir=Path(model_dir),
@@ -149,7 +187,16 @@ def build_vpcd_aihub_quantize_recipe(
         weight_type=spec.weight_type,
         activations_dtype_name=dtype_names["activations_dtype_name"],
         weights_dtype_name=dtype_names["weights_dtype_name"],
-        calibration_dataset=calibration_records_to_aihub_dataset(records),
+        calibration_dataset=calibration_records_to_aihub_dataset(
+            records,
+            fixed_input_shapes=fixed_input_shapes,
+            pad_values={
+                "input_ids": int(pad_token_id),
+                "attention_mask": 0,
+                "decoder_input_ids": int(pad_token_id),
+                "decoder_attention_mask": 0,
+            },
+        ),
         calibration_stats=recipe_stats,
     )
 

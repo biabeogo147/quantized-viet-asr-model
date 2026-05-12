@@ -1,6 +1,6 @@
 # AI Hub Option 1 Phase 4 Gate Workflow
 
-This document describes the `Phase 4` quality and performance gate for the shared `Option 1` notebook.
+This document describes the dedicated `Phase 4` quality and performance gate notebook for `Option 1`.
 
 Scope:
 
@@ -27,7 +27,7 @@ The notebook writes the new gate records to:
 
 Phase 4 runs inside:
 
-- [On_device_Ai_option1_pilots.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_pilots.ipynb)
+- [On_device_Ai_option1_phase4_gate.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_phase4_gate.ipynb)
 
 Run these sections after Phase 3 hybrid evidence exists:
 
@@ -64,6 +64,7 @@ Each Phase 4 run:
 ## Operator Rules
 
 - Do not rerun compile just to run Phase 4.
+- Do not use this notebook for normal pilot compile or run-and-compare work.
 - Keep `RUN_LABEL` stable when you want to gate the same compiled target again.
 - If you already know the target model id, you may keep using:
   - `ZIPFORMER_TARGET_MODEL_ID`

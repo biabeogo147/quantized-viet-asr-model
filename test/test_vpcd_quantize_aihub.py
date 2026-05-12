@@ -83,6 +83,13 @@ def test_build_vpcd_aihub_quantize_recipe_uses_autoregressive_records(monkeypatc
         max_calibration_samples=16,
         max_generation_length=32,
         ort_provider="cpu",
+        fixed_input_shapes={
+            "input_ids": (1, 8),
+            "attention_mask": (1, 8),
+            "decoder_input_ids": (1, 4),
+            "decoder_attention_mask": (1, 4),
+        },
+        pad_token_id=1,
     )
 
     assert Path(seen["model_dir"]) == tmp_path / "assets" / "vpcd"
@@ -103,3 +110,19 @@ def test_build_vpcd_aihub_quantize_recipe_uses_autoregressive_records(monkeypatc
         "decoder_input_ids",
         "decoder_attention_mask",
     ]
+    assert recipe.calibration_dataset["input_ids"][0].shape == (1, 8)
+    assert recipe.calibration_dataset["attention_mask"][0].shape == (1, 8)
+    assert recipe.calibration_dataset["decoder_input_ids"][0].shape == (1, 4)
+    assert recipe.calibration_dataset["decoder_attention_mask"][0].shape == (1, 4)
+    np.testing.assert_array_equal(
+        recipe.calibration_dataset["input_ids"][0][0, :3],
+        np.asarray([7, 8, 2], dtype=np.int64),
+    )
+    np.testing.assert_array_equal(
+        recipe.calibration_dataset["input_ids"][0][0, 3:],
+        np.asarray([1, 1, 1, 1, 1], dtype=np.int64),
+    )
+    np.testing.assert_array_equal(
+        recipe.calibration_dataset["attention_mask"][0][0, 3:],
+        np.asarray([0, 0, 0, 0, 0], dtype=np.int64),
+    )

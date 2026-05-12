@@ -623,6 +623,13 @@ def build_vpcd_autoregressive_calibration_entries(
                 max_calibration_samples=max(0, int(max_samples)) if max_samples is not None else 128,
                 max_generation_length=max(1, int(max_generation_length or source.decoder_sequence)),
                 ort_provider=ort_provider,
+                fixed_input_shapes={
+                    "input_ids": (1, int(source.encoder_sequence)),
+                    "attention_mask": (1, int(source.encoder_sequence)),
+                    "decoder_input_ids": (1, int(source.decoder_sequence)),
+                    "decoder_attention_mask": (1, int(source.decoder_sequence)),
+                },
+                pad_token_id=int(source.pad_token_id),
             )
             return recipe.calibration_dataset, dict(recipe.calibration_stats)
 

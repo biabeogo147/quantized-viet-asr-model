@@ -1,6 +1,6 @@
 # AI Hub Option 1 Phase 5 Contract Packaging Workflow
 
-This document describes the `Phase 5` packaging flow for `Option 1`.
+This document describes the dedicated `Phase 5` packaging notebook for `Option 1`.
 
 Scope:
 
@@ -36,7 +36,7 @@ Each package contains:
 
 Phase 5 runs inside:
 
-- [On_device_Ai_option1_pilots.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_pilots.ipynb)
+- [On_device_Ai_option1_phase5_contract.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_phase5_contract.ipynb)
 
 Run these sections after Phase 4 records exist:
 
@@ -69,3 +69,7 @@ Start in this order:
 - Package creation is not proof of deployment readiness.
 - `research_only` packages are for debugging and follow-up experiments, not for Android promotion.
 - Phase 5 keeps compile skipping intact because it only reads records that already exist.
+- This notebook is package-only:
+  - no compile
+  - no profiling
+  - no hybrid rerun

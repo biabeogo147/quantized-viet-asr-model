@@ -4,7 +4,7 @@
 
 **Goal:** Move BKMeeting's Qualcomm AI Hub `Option 1` work from isolated NPU pilot wins to a reproducible, deployment-ready `precompiled_qnn_onnx` pipeline without leaving the ONNX Runtime + QNN lane.
 
-**Architecture:** Keep the work Python-first until the artifact contract is stable. Treat `src/tools/aihub_option1_pilots.py` plus `On_device_Ai_option1_pilots.ipynb` as the canonical preparation and execution lane for Zipformer encoder and VPCD. Harden the compile path first, then graduate to hybrid CPU/NPU Python pipelines, then artifact packaging, and only after that move to Android integration.
+**Architecture:** Keep the work Python-first until the artifact contract is stable. Treat the helper modules under `src/tools/` as the source of truth, with dedicated notebooks per operator intent: `On_device_Ai_option1_pilots.ipynb` for Phase 2 plus Phase 3, `On_device_Ai_option1_phase4_gate.ipynb` for gate reruns, and `On_device_Ai_option1_phase5_contract.ipynb` for packaging. Harden the compile path first, then graduate to hybrid CPU/NPU Python pipelines, then artifact packaging, and only after that move to Android integration.
 
 **Tech Stack:** Python 3.10+, NumPy, ONNX, ONNX Runtime, Qualcomm AI Hub (`qai-hub`), Jupyter notebook (`.ipynb`), existing `python-model-test` bundle helpers, SHA256/file metadata recording, JSON run records.
 
@@ -1140,12 +1140,12 @@ Phase 4 should be designed around the current evidence snapshot:
 
 ### Notebook Refactor Plan
 
-Phase 4 must stay inside:
+This original Phase 4 notebook plan was later superseded by `Phase 5.5`.
 
-- `On_device_Ai_option1_pilots.ipynb`
+Current rule:
 
-The notebook should remain the single operator entrypoint.
-Do not create a second benchmark notebook for the first implementation.
+- `On_device_Ai_option1_phase4_gate.ipynb` is the dedicated Phase 4 notebook
+- `On_device_Ai_option1_pilots.ipynb` remains the Phase 2 plus Phase 3 notebook
 
 Target cell layout after the current Phase 3 sections:
 
@@ -1551,17 +1551,14 @@ Expected: prints `ok`.
 ## Phase 4 Acceptance Criteria
 
 - a dedicated Phase 4 module exists and can consume Phase 2 and Phase 3 records without forcing recompilation
-- benchmark sweeps can rerun both pilots on the shared notebook with compile skipping intact
+- benchmark sweeps can rerun both pilots from the dedicated Phase 4 notebook with compile skipping intact
 - each pilot receives:
   - per-sample severity labels
   - latency summary
   - basic memory or footprint summary
   - one final recommendation
 - recommendation levels are deterministic and record-backed
-- the notebook remains the single operator entrypoint for:
-  - Phase 2
-  - Phase 3
-  - Phase 4
+- the dedicated Phase 4 notebook can rerun gate logic without recompilation
 - Phase 4 records are written under deterministic paths
 - focused and regression tests pass locally
 
@@ -1638,11 +1635,12 @@ The package should answer, without opening the notebook:
 
 ### Notebook Refactor Plan
 
-Phase 5 must stay inside:
+This original Phase 5 notebook plan was later superseded by `Phase 5.5`.
 
-- `On_device_Ai_option1_pilots.ipynb`
+Current rule:
 
-The notebook should remain the single operator entrypoint.
+- `On_device_Ai_option1_phase5_contract.ipynb` is the dedicated Phase 5 notebook
+- `On_device_Ai_option1_pilots.ipynb` remains the Phase 2 plus Phase 3 notebook
 
 Target new sections after the Phase 4 gate sections:
 
@@ -1992,11 +1990,7 @@ Expected: prints `ok`.
   - Phase 4 recommendation snapshot
 - `GO`, `WARN`, and `NO_GO` pilots can all be packaged
 - `NO_GO` pilots are always marked `research_only`
-- the notebook remains the single operator entrypoint for:
-  - Phase 2
-  - Phase 3
-  - Phase 4
-  - Phase 5
+- the dedicated Phase 5 notebook can rerun packaging without recompilation
 - focused and regression tests pass locally
 
 ## Decision Gates After Phase 5
@@ -2019,6 +2013,476 @@ Expected: prints `ok`.
 6. Implement `Task 6` to refactor `On_device_Ai_option1_pilots.ipynb` with Phase 5 sections.
 7. Run `Task 7` verification before calling Phase 5 complete.
 
+---
+
+## Phase 5.5 Scope
+
+Phase 5.5 is the notebook-refactor phase for `Option 1`.
+
+The purpose is to reduce `On_device_Ai_option1_pilots.ipynb` back to the operator flow that people actually use during model bring-up:
+
+- prepare
+- compile or reuse target
+- run on cloud device
+- inspect if needed
+- run hybrid e2e
+- compare with expected outputs
+
+Everything that is slower, more specialized, or more downstream should move out of that notebook:
+
+- Phase 4 benchmark and gate
+- Phase 5 contract packaging
+
+Phase 5.5 should explicitly replace the old “single operator entrypoint for all phases” rule from Phase 5.
+
+After Phase 5.5:
+
+- `On_device_Ai_option1_pilots.ipynb` becomes the day-to-day pilot notebook for Phase 2 and Phase 3 work
+- `On_device_Ai_option1_phase4_gate.ipynb` becomes the benchmark/gate notebook
+- `On_device_Ai_option1_phase5_contract.ipynb` becomes the packaging notebook
+
+### Phase 5.5 Non-Goals
+
+- changing any compiled artifact
+- changing Phase 4 gate vocabulary or Phase 5 package schema
+- moving logic out of Python helper modules if the notebook only needs a layout cleanup
+- rewriting the pilot helpers from scratch
+- changing the current `RUN_LABEL` and compile-record contract
+
+## Phase 5.5 File Structure
+
+**Notebook refactor**
+
+- Modify: `On_device_Ai_option1_pilots.ipynb`
+- Create: `On_device_Ai_option1_phase4_gate.ipynb`
+- Create: `On_device_Ai_option1_phase5_contract.ipynb`
+
+**Optional notebook support helpers**
+
+- Modify if needed: `src/tools/aihub_option1_pilots.py`
+- Modify if needed: `src/tools/aihub_option1_phase4_gate.py`
+- Modify if needed: `src/tools/aihub_option1_phase5_contract.py`
+
+**Docs**
+
+- Modify: `docs/workflows/aihub-option1-npu-pilots.md`
+- Modify: `docs/workflows/aihub-option1-phase4-gate.md`
+- Modify: `docs/workflows/aihub-option1-phase5-contract.md`
+- Modify: `docs/plans/active/2026-05-11-aihub-option1-npu-pilots.md`
+
+**Notebook structure verification**
+
+- Create: `test/test_option1_notebook_layout.py`
+
+## Phase 5.5 Notebook Responsibility Split
+
+### Notebook A: `On_device_Ai_option1_pilots.ipynb`
+
+This notebook should keep only:
+
+- environment bootstrap
+- setup notes instead of a mandatory `pip install` execution cell
+- shared config
+- pilot toggles
+- `Zipformer` prepare
+- `Zipformer` compile only
+- `Zipformer` resolve existing compiled target
+- `Zipformer` run and compare
+- optional `Zipformer` profile
+- optional `Zipformer` intermediate diagnostic
+- `Zipformer` hybrid e2e run
+- `Zipformer` final compare
+- `VPCD` prepare
+- `VPCD` compile only
+- `VPCD` resolve existing compiled target
+- `VPCD` run and compare
+- optional `VPCD` profile
+- optional `VPCD` intermediate diagnostic
+- `VPCD` hybrid e2e run
+- `VPCD` final compare
+- one short final summary
+
+This notebook should drop:
+
+- Phase 4 config
+- Phase 4 benchmark/gate sections
+- Phase 5 config
+- Phase 5 package sections
+
+Additional operator rules:
+
+- `profile` must not be coupled to `run and compare`
+- `VPCD` calibration data must be built lazily only inside `VPCD Compile Only`
+- `Output Inspection` must stay behind an explicit debug flag
+- the final summary must stay short and path-focused
+
+### Notebook B: `On_device_Ai_option1_phase4_gate.ipynb`
+
+This notebook should focus only on:
+
+- environment bootstrap
+- shared config
+- pilot include flags
+- `RUN_LABEL`
+- optional explicit target model ids
+- Phase 4 config
+- `Zipformer` gate run
+- `VPCD` gate run
+- one recommendation summary
+
+This notebook should never compile models.
+It should only consume existing records and compiled targets.
+
+### Notebook C: `On_device_Ai_option1_phase5_contract.ipynb`
+
+This notebook should focus only on:
+
+- environment bootstrap
+- shared config
+- include flags
+- package label override
+- output root override
+- `Zipformer` package creation
+- `VPCD` package creation
+- one packaging summary
+
+This notebook should never compile models.
+It should not rerun Phase 4 if gate records already exist.
+
+## Phase 5.5 Detailed Tasks
+
+### Task 1: Lock The Three-Notebook Responsibility Split
+
+**Files:**
+
+- Modify: `docs/plans/active/2026-05-11-aihub-option1-npu-pilots.md`
+- Modify: `docs/workflows/aihub-option1-npu-pilots.md`
+- Modify: `docs/workflows/aihub-option1-phase4-gate.md`
+- Modify: `docs/workflows/aihub-option1-phase5-contract.md`
+
+- [ ] **Step 1: Write the target responsibility table into the plan and workflow docs**
+
+Document:
+
+- which notebook owns compile/run/compare
+- which notebook owns gate
+- which notebook owns packaging
+- which notebooks are allowed to skip compile and reuse records
+
+- [ ] **Step 2: Re-read the docs for contradictions**
+
+Expected:
+
+- no doc still says `On_device_Ai_option1_pilots.ipynb` is the single entrypoint for every phase
+
+### Task 2: Add A Notebook Layout Verification Test
+
+**Files:**
+
+- Create: `test/test_option1_notebook_layout.py`
+
+- [ ] **Step 1: Write a failing notebook-layout test**
+
+Test behavior:
+
+- `On_device_Ai_option1_pilots.ipynb` exists and does not contain Phase 4 or Phase 5 headings
+- `On_device_Ai_option1_pilots.ipynb` does not contain a mandatory `!pip install qai-hub` execution cell
+- `On_device_Ai_option1_phase4_gate.ipynb` exists and contains Phase 4 headings
+- `On_device_Ai_option1_phase5_contract.ipynb` exists and contains Phase 5 headings
+
+- [ ] **Step 2: Run the notebook-layout test to confirm it fails**
+
+Run: `pytest test/test_option1_notebook_layout.py -v`
+
+Expected: fail because the new notebooks and layout split do not exist yet.
+
+### Task 3: Slim Down `On_device_Ai_option1_pilots.ipynb`
+
+**Files:**
+
+- Modify: `On_device_Ai_option1_pilots.ipynb`
+- Modify if needed: `src/tools/aihub_option1_pilots.py`
+
+- [ ] **Step 1: Remove Phase 4 sections from the main notebook**
+
+Delete:
+
+- `## Phase 4 Config`
+- `### Zipformer Phase 4 Benchmark And Gate`
+- `### VPCD Phase 4 Benchmark And Gate`
+- `## Phase 4 Recommendation Summary`
+
+- [ ] **Step 2: Remove Phase 5 sections from the main notebook**
+
+Delete:
+
+- `## Phase 5 Config`
+- `### Package Zipformer Phase 5 Contract`
+- `### Package VPCD Phase 5 Contract`
+- `## Phase 5 Packaging Summary`
+
+- [ ] **Step 3: Keep only one short final summary cell**
+
+The final cell should print:
+
+- prepared record path
+- compile record path
+- live record path
+- hybrid record path
+
+Do not print Phase 4 or Phase 5 paths in the pilot notebook anymore.
+
+- [ ] **Step 4: Split profile from run-and-compare**
+
+Recommended config addition:
+
+- `ENABLE_PROFILE_DURING_RUN = False`
+
+Expected behavior:
+
+- `Run And Compare` only submits inference by default
+- profiling becomes its own optional path or a gated sub-step
+- a normal “check output” rerun does not pay the profile cost
+
+- [ ] **Step 5: Build VPCD calibration only when compile really happens**
+
+Move this work:
+
+- `vpcd_calibration_data`
+- `vpcd_calibration_stats`
+
+out of `VPCD Prepare` and into `VPCD Compile Only`.
+
+Expected behavior:
+
+- reusing an existing compiled target does not spend time generating calibration inputs
+- the prepare cell stays lightweight and deterministic
+
+- [ ] **Step 6: Keep output inspection behind an explicit debug flag**
+
+Recommended config additions:
+
+- `ENABLE_DEBUG_OUTPUT_INSPECTION = False`
+
+Expected behavior:
+
+- normal run path does not force profile or deep tensor inspection
+- diagnostics remain available when debugging
+
+- [ ] **Step 7: Remove the mandatory package-install execution cell**
+
+Change:
+
+- remove `!pip install qai-hub "qai-hub[torch]"` from the normal execution flow
+
+Replace with one of:
+
+- a short setup note
+- or a tiny bootstrap notebook that is not part of daily pilot reruns
+
+Expected behavior:
+
+- the pilot notebook assumes the environment is already prepared
+- dependency installation is not retried on every operator run
+
+- [ ] **Step 8: Shorten the How-To and final summary output**
+
+Refactor:
+
+- compress repeated instructional comments in the config area
+- keep only the two operator workflows:
+  - compile from scratch
+  - reuse compiled target
+- keep the final summary to:
+  - prepared
+  - compile
+  - live
+  - hybrid
+
+Expected behavior:
+
+- the notebook reads like a runbook, not like a mixed runbook plus debug diary
+
+### Task 4: Create `On_device_Ai_option1_phase4_gate.ipynb`
+
+**Files:**
+
+- Create: `On_device_Ai_option1_phase4_gate.ipynb`
+- Modify if needed: `src/tools/aihub_option1_phase4_gate.py`
+
+- [ ] **Step 1: Create the notebook skeleton**
+
+Required sections:
+
+1. title and environment notes
+2. imports
+3. shared config
+4. include flags
+5. Phase 4 config
+6. `Zipformer` gate run
+7. `VPCD` gate run
+8. Phase 4 recommendation summary
+
+- [ ] **Step 2: Ensure the notebook only reuses existing targets and records**
+
+Expected behavior:
+
+- no compile cell exists
+- no quantize cell exists
+- no prepare-model cell exists
+
+- [ ] **Step 3: Keep the notebook operator-friendly**
+
+Print only:
+
+- gate record path
+- warmup summary
+- steady-state summary
+- severity counts
+- recommendation
+
+### Task 5: Create `On_device_Ai_option1_phase5_contract.ipynb`
+
+**Files:**
+
+- Create: `On_device_Ai_option1_phase5_contract.ipynb`
+- Modify if needed: `src/tools/aihub_option1_phase5_contract.py`
+
+- [ ] **Step 1: Create the notebook skeleton**
+
+Required sections:
+
+1. title and environment notes
+2. imports
+3. shared config
+4. include flags
+5. package config
+6. `Zipformer` package creation
+7. `VPCD` package creation
+8. Phase 5 packaging summary
+
+- [ ] **Step 2: Ensure the notebook is package-only**
+
+Expected behavior:
+
+- no compile cell exists
+- no profiling cell exists
+- no hybrid e2e cell exists
+
+- [ ] **Step 3: Keep the packaging summary concise**
+
+Print only:
+
+- package path
+- promotion status
+- warnings
+- reminder that packaging does not override gate verdict
+
+### Task 6: Update Workflow Docs For The New Notebook Map
+
+**Files:**
+
+- Modify: `docs/workflows/aihub-option1-npu-pilots.md`
+- Modify: `docs/workflows/aihub-option1-phase4-gate.md`
+- Modify: `docs/workflows/aihub-option1-phase5-contract.md`
+
+- [ ] **Step 1: Rewrite the pilot workflow doc as a Phase 2 plus Phase 3 operator guide**
+
+Document:
+
+- compile from scratch
+- skip compile and reuse target
+- optional profile path
+- run and compare
+- optional debug inspection
+- hybrid e2e compare
+- note that environment setup is outside the normal pilot-run path
+
+- [ ] **Step 2: Rewrite the Phase 4 doc as gate-only**
+
+Document:
+
+- prerequisites
+- which records it consumes
+- how to rerun gate without recompiling
+
+- [ ] **Step 3: Rewrite the Phase 5 doc as package-only**
+
+Document:
+
+- prerequisites
+- which records it consumes
+- how to rerun packaging without rerunning gate
+
+### Task 7: Run Full Notebook Refactor Verification
+
+**Files:**
+
+- Test: `test/test_option1_notebook_layout.py`
+- Test: existing regression slices
+- Test: notebook JSON sanity
+
+- [ ] **Step 1: Run the notebook-layout test**
+
+Run: `pytest test/test_option1_notebook_layout.py -v`
+
+Expected: pass.
+
+- [ ] **Step 2: Run the focused regression slices**
+
+Run:
+
+- `pytest test/test_aihub_option1_pilots.py test/test_aihub_option1_phase4_gate.py test/test_aihub_option1_phase5_contract.py -v`
+
+Expected: pass.
+
+- [ ] **Step 3: Run Python compile verification**
+
+Run: `python -m compileall src`
+
+Expected: pass.
+
+- [ ] **Step 4: Verify all three notebooks are valid JSON**
+
+Run:
+
+- `python - <<'PY'\nimport json\nfrom pathlib import Path\nfor name in [\n    'On_device_Ai_option1_pilots.ipynb',\n    'On_device_Ai_option1_phase4_gate.ipynb',\n    'On_device_Ai_option1_phase5_contract.ipynb',\n]:\n    json.loads(Path(name).read_text(encoding='utf-8'))\n    print(name, 'ok')\nPY`
+
+Expected:
+
+- each notebook prints `ok`
+
+## Phase 5.5 Acceptance Criteria
+
+- `On_device_Ai_option1_pilots.ipynb` no longer contains Phase 4 or Phase 5 sections
+- the pilot notebook remains usable for:
+  - compile
+  - reuse target
+  - run
+  - optional inspection
+  - hybrid e2e compare
+- `On_device_Ai_option1_phase4_gate.ipynb` exists and can rerun gate logic without recompiling
+- `On_device_Ai_option1_phase5_contract.ipynb` exists and can rerun packaging without recompiling
+- docs describe the three-notebook map clearly
+- notebook layout and regression tests pass locally
+
+## Decision Gates After Phase 5.5
+
+1. Treat the pilot notebook as the default daily-use notebook for research reruns.
+2. Treat Phase 4 and Phase 5 notebooks as downstream operator tools, not mandatory parts of every experiment loop.
+3. Do not add Phase 6 Android work back into any notebook unless a later phase explicitly requires it.
+4. If new logic is only needed for one notebook, prefer helper-module reuse over re-expanding the pilot notebook.
+
+## Recommended Execution Order For Phase 5.5
+
+1. Lock the three-notebook responsibility split first.
+2. Add the notebook-layout test before editing notebooks.
+3. Slim down `On_device_Ai_option1_pilots.ipynb`.
+4. Create the dedicated Phase 4 notebook.
+5. Create the dedicated Phase 5 notebook.
+6. Update the workflow docs to match the new layout.
+7. Run full verification before calling Phase 5.5 complete.
+
 ## Phase 6 Scope
 
 Phase 6 is the first Android-app phase in the Option 1 roadmap.
@@ -2038,6 +2502,55 @@ Phase 6 should start with `Zipformer` first because its current evidence is stro
 - available only behind explicit selection
 - not promoted as the default punctuation path
 
+## Phase 6 Ready-to-Code Framing
+
+Phase 6 should be executed as two vertical slices, not as one big Android rewrite.
+
+### Slice A: Zipformer First
+
+This is the first required Android slice.
+
+Success means:
+
+1. a Phase 5 `zipformer` contract package is synced into `BKMeeting/modelassets`
+2. the synced bundle keeps the existing Android artifact keys:
+   - `encoder`
+   - `decoder`
+   - `joiner`
+   - `tokens`
+3. only the `encoder` artifact changes runtime role:
+   - compiled `precompiled_qnn_onnx` artifact under the existing `encoder` key
+4. Android routes only `encoder` to QNN
+5. `decoder` and `joiner` remain CPU ONNX
+6. strict-device Android validation succeeds on the synced asset namespace
+
+### Slice B: VPCD Second
+
+This is the second Android slice and should only start after Slice A is clean.
+
+Success means:
+
+1. a Phase 5 `vpcd` contract package is synced into `BKMeeting/modelassets`
+2. the synced bundle keeps the existing artifact keys:
+   - `model`
+   - `tokenizer_encode`
+   - `tokenizer_decode`
+   - `tokenizer_to_model_id_map`
+   - `model_to_tokenizer_id_map`
+3. only the `model` artifact changes runtime role:
+   - compiled `precompiled_qnn_onnx` artifact under the existing `model` key
+4. tokenizer remains CPU
+5. Android input creation honors `io_contract.json`, especially integer dtype requirements
+6. device validation is reproducible even if the package still stays experimental
+
+### Contract Rules That Keep Phase 6 Small
+
+- Keep `bundle_manifest.json` as the only Android entrypoint.
+- Keep existing artifact keys stable so `ModelPathResolver` and `PunctuationModelPathResolver` do not need a contract rewrite.
+- Keep `runtime_kind` stable if possible; use `metadata.option1` to describe which artifact is compiled and which artifacts stay CPU.
+- Treat `io_contract.json` as the single source of truth for `truncate_64bit_io` and any input dtype override.
+- Do not promote `VPCD Option 1` into the default punctuation catalog until the repaired notebook run is accepted.
+
 ### Phase 6 Non-Goals
 
 - moving the runtime boundary to QAIRT-native integration
@@ -2055,6 +2568,12 @@ Phase 6 should start with `Zipformer` first because its current evidence is stro
 - Modify: `src/tools/sync_android_bundle.py`
 - Test: `test/test_sync_android_bundle.py`
 
+**Android bundle contract parsing**
+
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/modelbundle/ModelBundleManifest.java`
+- Modify: `../BKMeeting/app/src/test/java/com/navis/bkacs/modelbundle/ModelAssetsContractTest.java`
+- Modify only if needed: `../BKMeeting/app/src/test/java/com/navis/bkacs/modelbundle/ModelBundleManifestTest.java`
+
 **Android asset catalogs and capability detection**
 
 - Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/catalog/AsrModelCatalog.java`
@@ -2067,6 +2586,9 @@ Phase 6 should start with `Zipformer` first because its current evidence is stro
 
 - Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/model/OnnxSessionManager.java`
 - Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/postprocess/model/PunctuationOnnxSessionManager.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/decoder/BeamSearchTransducerDecoder.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/decoder/ZipformerEncoderInputPreparer.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/postprocess/model/PunctuationInferenceEngine.java`
 - Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/OrtSessionOptionsFactory.java`
 - Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/QnnProviderOptions.java`
 
@@ -2077,6 +2599,7 @@ Phase 6 should start with `Zipformer` first because its current evidence is stro
 - Modify: `../BKMeeting/app/src/test/java/com/navis/bkacs/modelbundle/ModelAssetsContractTest.java`
 - Modify if needed: `../BKMeeting/app/src/test/java/com/navis/bkacs/asr/model/OnnxSessionManagerTest.java`
 - Modify if needed: `../BKMeeting/app/src/test/java/com/navis/bkacs/postprocess/model/PunctuationOnnxSessionManagerTest.java`
+- Modify if needed: `../BKMeeting/app/src/test/java/com/navis/bkacs/postprocess/model/PunctuationInferenceEngineTest.java`
 - Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/asr/bundle/ZipformerBundleParityTest.java`
 - Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/asr/runtime/QnnHtpStrictDeviceTest.java`
 - Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/postprocess/runtime/VpcdQnnHtpStrictDeviceTest.java`
@@ -2094,6 +2617,21 @@ Minimum Android payload per pilot:
 - `io_contract.json`
 - any runtime-required fixtures already expected by the current bundle flow
 
+Phase 6 should keep the existing bundle artifact keys stable even when the runtime role changes.
+
+For `Zipformer`:
+
+- compiled artifact should still be exposed under artifact key `encoder`
+- CPU ONNX artifacts should remain under artifact keys `decoder` and `joiner`
+- `tokens` should remain unchanged
+
+For `VPCD`:
+
+- compiled artifact should still be exposed under artifact key `model`
+- tokenizer artifacts should remain under the current tokenizer keys
+
+This rule keeps `ModelPathResolver` and `PunctuationModelPathResolver` reusable instead of forcing a new Android path contract.
+
 The synthesized Android-facing `bundle_manifest.json` should carry enough metadata for runtime capability detection:
 
 - `asset_namespace`
@@ -2102,12 +2640,17 @@ The synthesized Android-facing `bundle_manifest.json` should carry enough metada
 - `metadata.quantization`
 - `metadata.qnn_readiness`
 - `metadata.option1`
-  - `target_runtime = precompiled_qnn_onnx`
   - `run_label`
   - `promotion_status`
   - `device_name`
   - `qairt_version`
   - `io_contract_file = io_contract.json`
+  - `components`
+    - `zipformer.encoder.target_runtime = precompiled_qnn_onnx`
+    - `zipformer.decoder.target_runtime = cpu_onnx`
+    - `zipformer.joiner.target_runtime = cpu_onnx`
+    - `vpcd.model.target_runtime = precompiled_qnn_onnx`
+    - `vpcd.tokenizer.target_runtime = cpu_onnx`
 
 `io_contract.json` remains the precise place for:
 
@@ -2120,6 +2663,12 @@ The synthesized Android-facing `bundle_manifest.json` should carry enough metada
 - special handling such as `truncate_64bit_io`
 
 ## Phase 6 Detailed Tasks
+
+Execution rule for this phase:
+
+- implement `Task 1` through `Task 6` for `Zipformer` first
+- only after the `Zipformer` slice is green should the same machinery be extended to `VPCD`
+- if `VPCD` still has weak notebook evidence, still complete the sync and manifest path, but keep catalog exposure and device validation explicitly experimental
 
 ### Task 1: Extend The Android Sync Tool For Phase 5 Contract Packages
 
@@ -2170,10 +2719,12 @@ Expected: pass.
 Test behavior:
 
 - the synced manifest contains:
-  - `metadata.option1.target_runtime`
   - `metadata.option1.run_label`
   - `metadata.option1.promotion_status`
   - `metadata.option1.io_contract_file`
+  - `metadata.option1.components`
+  - `metadata.option1.components.zipformer.encoder.target_runtime`
+  - `metadata.option1.components.vpcd.model.target_runtime`
 
 - [ ] **Step 2: Run the tests to confirm they fail**
 
@@ -2242,7 +2793,8 @@ Expected: pass.
 
 Test behavior:
 
-- the runtime treats `metadata.option1.target_runtime = precompiled_qnn_onnx` as QNN-capable
+- the runtime treats `metadata.option1.components.zipformer.encoder.target_runtime = precompiled_qnn_onnx` as QNN-capable for the ASR encoder
+- the runtime treats `metadata.option1.components.vpcd.model.target_runtime = precompiled_qnn_onnx` as QNN-capable for the punctuation model session
 - this recognition must not depend on the old `QDQ + fixed_shapes` check alone
 
 - [ ] **Step 2: Run the focused runtime tests to confirm they fail**
@@ -2271,6 +2823,9 @@ Expected: pass.
 
 - Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/model/OnnxSessionManager.java`
 - Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/postprocess/model/PunctuationOnnxSessionManager.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/decoder/BeamSearchTransducerDecoder.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/decoder/ZipformerEncoderInputPreparer.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/postprocess/model/PunctuationInferenceEngine.java`
 - Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/OrtSessionOptionsFactory.java`
 - Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/QnnProviderOptions.java`
 
@@ -2278,15 +2833,23 @@ Expected: pass.
 
 Test behavior:
 
-- the session managers can resolve the synced Option 1 model asset
+- the session managers can resolve the synced Option 1 model asset without changing artifact keys
 - the runtime keeps using the existing ORT + QNN provider stack
+- `Zipformer` keeps `decoder/joiner` on CPU while loading the compiled encoder session
 - integer inputs follow `io_contract.json`, including `truncate_64bit_io` when required
+
+Important implementation note:
+
+- if `io_contract.json` requires integer dtype conversion, the fix may belong in the Android inference path that creates tensors, not only in session creation
+- likely seams:
+  - `BeamSearchTransducerDecoder`
+  - `PunctuationInferenceEngine`
 
 - [ ] **Step 2: Run the focused session-manager tests to confirm they fail**
 
 Run:
 
-- `.\gradlew.bat :app:testDebugUnitTest --tests "com.navis.bkacs.asr.model.OnnxSessionManagerTest" --tests "com.navis.bkacs.postprocess.model.PunctuationOnnxSessionManagerTest" --no-daemon`
+- `.\gradlew.bat :app:testDebugUnitTest --tests "com.navis.bkacs.asr.model.OnnxSessionManagerTest" --tests "com.navis.bkacs.postprocess.model.PunctuationOnnxSessionManagerTest" --tests "com.navis.bkacs.postprocess.model.PunctuationInferenceEngineTest" --no-daemon`
 
 Expected: failure because the session managers do not know the Phase 6 contract yet.
 
@@ -2360,9 +2923,11 @@ Expected: no contradictions between Python-side packaging and Android-side loadi
 ## Phase 6 Acceptance Criteria
 
 - a Phase 5 contract package can be synced into `BKMeeting/modelassets` without manual file shuffling
+- the synced `Zipformer Option 1` payload preserves existing artifact keys while replacing only `encoder` with the compiled artifact
 - Android catalogs can point to the synced Option 1 asset namespace intentionally
 - runtime capability detection recognizes `precompiled_qnn_onnx` bundles without breaking the current QDQ lane
 - the existing ORT + QNN session managers can attempt to load the synced precompiled artifact
+- the Android runtime honors `io_contract.json` where integer dtype conversion is required
 - at least the promoted `Zipformer` Option 1 package can be exercised through Android validation
 - `VPCD` remains explicitly labeled experimental if its gate/package evidence is still weak
 
@@ -2375,10 +2940,10 @@ Expected: no contradictions between Python-side packaging and Android-side loadi
 
 ## Recommended Execution Order For Phase 6
 
-1. Implement `Task 1` first so the Android asset payload shape is deterministic.
-2. Implement `Task 2` immediately after, because the manifest contract drives every downstream runtime decision.
-3. Implement `Task 3` to expose the synced asset in catalogs only after the asset payload is stable.
-4. Implement `Task 4` before touching session creation so provider routing is explicit.
-5. Implement `Task 5` with the current ORT + QNN stack kept as intact as possible.
-6. Run `Task 6` on real hardware only after the unit-test gates are clean.
+1. Implement `Task 1` and `Task 2` for `Zipformer` first so the Android payload and manifest contract are deterministic.
+2. Implement `Task 3` only after the synced `Zipformer` namespace is stable.
+3. Implement `Task 4` before touching runtime loading so provider routing is explicit.
+4. Implement `Task 5` with the current ORT + QNN stack kept as intact as possible, and push dtype-specific fixes down to tensor creation only when `io_contract.json` proves they are needed.
+5. Run `Task 6` for `Zipformer` before extending anything to `VPCD`.
+6. Extend the same machinery to `VPCD` only after the repaired notebook run is accepted.
 7. Finish with `Task 7` so the Android handoff path is reproducible for the next engineer.
