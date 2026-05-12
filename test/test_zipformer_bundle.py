@@ -2,6 +2,7 @@
 import uuid
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from model_bundle.fixtures import AudioExpectedOutput, AudioSampleFixture
@@ -210,4 +211,51 @@ def test_verify_exported_bundle_matches_model_dir_mode(monkeypatch, tmp_case_dir
     assert report['checked_samples'] == 1
     assert model_runtime.audio_paths == [repo_root / 'assets' / 'speech' / 'sample-1.mp3']
     assert bundle_runtime.audio_paths == [repo_root / 'assets' / 'speech' / 'sample-1.mp3']
+
+
+def test_greedy_decode_encoder_frames_reuses_decoder_and_joiner_loop():
+    from model_bundle.projects.zipformer import decode_encoder_frames_greedy
+
+    class FakeDecoderSession:
+        def __init__(self) -> None:
+            self.inputs: list[dict[str, object]] = []
+
+        def run(self, _outputs: object, feeds: dict[str, object]) -> list[object]:
+            self.inputs.append(feeds)
+            return [np.asarray([[0.25, 0.5]], dtype=np.float32)]
+
+    class FakeJoinerSession:
+        def __init__(self) -> None:
+            self.responses = [
+                np.asarray([[0.0, 9.0, 0.0]], dtype=np.float32),
+                np.asarray([[9.0, 0.0, 0.0]], dtype=np.float32),
+                np.asarray([[0.0, 0.0, 9.0]], dtype=np.float32),
+                np.asarray([[9.0, 0.0, 0.0]], dtype=np.float32),
+            ]
+            self.inputs: list[dict[str, object]] = []
+
+        def run(self, _outputs: object, feeds: dict[str, object]) -> list[object]:
+            self.inputs.append(feeds)
+            return [self.responses.pop(0)]
+
+    frames = np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    decoder_session = FakeDecoderSession()
+    joiner_session = FakeJoinerSession()
+
+    result = decode_encoder_frames_greedy(
+        frames=frames,
+        decoder_session=decoder_session,
+        joiner_session=joiner_session,
+        tokens_table=['<blk>', 'xin', ' chao'],
+        blank_id=0,
+        context_size=2,
+    )
+
+    assert result['text'] == 'xin chao'
+    assert result['num_tokens'] == 2
+    assert result['token_ids'] == [1, 2]
+    assert decoder_session.inputs[0]['y'].tolist() == [[0, 0]]
+    assert decoder_session.inputs[1]['y'].tolist() == [[0, 1]]
+    assert decoder_session.inputs[2]['y'].tolist() == [[0, 1]]
+    assert decoder_session.inputs[3]['y'].tolist() == [[1, 2]]
 

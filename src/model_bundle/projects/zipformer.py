@@ -64,6 +64,47 @@ def resolve_fixed_encoder_frames(metadata: dict) -> int | None:
     return None if fixed_encoder_frames is None else int(fixed_encoder_frames)
 
 
+def decode_encoder_frames_greedy(
+    *,
+    frames: np.ndarray,
+    decoder_session: object,
+    joiner_session: object,
+    tokens_table: list[str],
+    blank_id: int,
+    context_size: int,
+) -> dict[str, object]:
+    frame_rows = np.asarray(frames, dtype=np.float32)
+    if frame_rows.ndim != 2:
+        raise ValueError(f'Expected 2D encoder frames, got shape {frame_rows.shape}')
+
+    token_ids: list[int] = []
+    history = [int(blank_id)] * int(context_size)
+
+    for frame in frame_rows:
+        enc_frame = frame.reshape(1, -1).astype(np.float32, copy=False)
+        while True:
+            dec_in = np.asarray([history[-int(context_size) :]], dtype=np.int64)
+            dec_out = decoder_session.run(None, {'y': dec_in})[0]
+            join_out = joiner_session.run(
+                None,
+                {
+                    'encoder_out': enc_frame,
+                    'decoder_out': np.asarray(dec_out, dtype=np.float32),
+                },
+            )[0]
+            token = int(np.argmax(join_out, axis=-1)[0])
+            if token == int(blank_id):
+                break
+            token_ids.append(token)
+            history.append(token)
+
+    return {
+        'text': ZipformerRuntimeBase._decode_tokens(tokens_table, token_ids),
+        'num_tokens': len(token_ids),
+        'token_ids': token_ids,
+    }
+
+
 class ZipformerRuntimeBase:
     def _load_tokens(self, tokens_path: Path) -> list[str]:
         tokens: list[str] = []
@@ -157,26 +198,21 @@ class ModelDirAcousticRuntime(ZipformerRuntimeBase):
         encoder_out = encoder_outputs[0]
         encoder_out_lens = encoder_outputs[1] if len(encoder_outputs) > 1 else None
         frames = trim_encoder_frames(encoder_out[0].astype(np.float32), encoder_out_lens)
-        result: list[int] = []
-        history = [self.blank_id] * self.context_size
 
         decoder_started = time.time()
-        for frame in frames:
-            enc_frame = frame.reshape(1, -1).astype(np.float32)
-            while True:
-                dec_in = np.asarray([history[-self.context_size :]], dtype=np.int64)
-                dec_out = self.decoder_sess.run(None, {'y': dec_in})[0].astype(np.float32)
-                join_out = self.joiner_sess.run(None, {'encoder_out': enc_frame, 'decoder_out': dec_out})[0]
-                token = int(np.argmax(join_out, axis=-1)[0])
-                if token == self.blank_id:
-                    break
-                result.append(token)
-                history.append(token)
+        decode_result = decode_encoder_frames_greedy(
+            frames=frames,
+            decoder_session=self.decoder_sess,
+            joiner_session=self.joiner_sess,
+            tokens_table=self.tokens_table,
+            blank_id=self.blank_id,
+            context_size=self.context_size,
+        )
         decoder_elapsed = time.time() - decoder_started
 
         return {
-            'text': self._decode_tokens(self.tokens_table, result),
-            'num_tokens': len(result),
+            'text': str(decode_result['text']),
+            'num_tokens': int(decode_result['num_tokens']),
             'encoder_time': round(encoder_elapsed, 3),
             'decoder_time': round(decoder_elapsed, 3),
         }

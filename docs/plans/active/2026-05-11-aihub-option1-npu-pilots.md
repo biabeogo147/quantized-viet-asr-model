@@ -65,12 +65,39 @@
   - notebook JSON sanity,
   - `compileall`
 
+### Phase 3 Status: Implemented And Executed In The Shared Notebook
+
+- the shared hybrid runtime now exists in:
+  - `src/tools/aihub_option1_hybrid_pipeline.py`
+- the existing notebook now hosts both:
+  - Phase 2 tensor diagnostics,
+  - Phase 3 hybrid e2e sections,
+  - final compare gates against `expected_outputs.jsonl` and `golden_samples.jsonl`
+- local verification now covers:
+  - compiled target resolution,
+  - compiled inference normalization,
+  - Zipformer hybrid transcript flow with injected cloud inference,
+  - VPCD hybrid restore flow with injected cloud inference,
+  - hybrid run record writing
+- a dedicated workflow document now exists in:
+  - `docs/workflows/aihub-option1-hybrid-pipeline.md`
+- the latest shared-notebook execution now provides live evidence for both pilots:
+  - `Zipformer`
+    - final compare is now using the correct `expected_outputs.jsonl` fixture audio
+    - exact-match status is currently `0 / 2`
+    - current mismatches look small and localized, for example:
+      - `NĂM` vs `LĂM`
+      - `CLIENT` vs `CLIAN`
+  - `VPCD`
+    - final compare is currently `0 / 2`
+    - current outputs collapse to placeholder-like text with `generated_ids = [0, 1, 2]`
+    - tensor diagnostic already shows large drift versus CPU baseline, so this lane must be treated as a likely `NO_GO` candidate until proven otherwise
+
 ### Known Constraints
 
 - The verified Zipformer lane currently uses a prepared source model and direct compile.
 - AI Hub quantize is **not** the current default Zipformer path because the graph still collides with control-flow outputs during QAIRT conversion.
 - ASR scope is still `encoder-only on NPU`; decoder/joiner stay out of scope for the current pilot.
-- No end-to-end Python pipeline result has been promoted to a formal benchmark record yet.
 - No Android integration work is included in this phase plan.
 
 ## Roadmap Overview
@@ -103,7 +130,7 @@
 
 ### Phase 3: Hybrid Python Pipeline Proof
 
-**Status:** Next phase
+**Status:** Implemented And Executed, Pending Phase 4 Judgment
 
 **Purpose:**
 - move from isolated graph success to pipeline-level success while staying in Python
@@ -115,7 +142,7 @@
 
 ### Phase 4: Quality And Performance Gate
 
-**Status:** Planned
+**Status:** Next Coding Phase
 
 **Purpose:**
 - decide whether the Option 1 artifacts are good enough to justify deployment work
@@ -123,27 +150,29 @@
 **Exit Criteria:**
 - latency, warmup, and basic memory observations are recorded
 - output sanity checks are compared against CPU baselines
-- a go/no-go recommendation exists for:
+- a formal gate record and go/no-go recommendation exist for:
   - `Zipformer encoder-only on NPU`
   - `VPCD on NPU`
 
 ### Phase 5: Deployment Contract Packaging
 
-**Status:** Planned
+**Status:** Planned, Not Blocked By Phase 4 Verdict
 
 **Purpose:**
-- freeze the artifact contract that downstream integration will consume
+- freeze the artifact contract that downstream integration and research handoff will consume, even when a pilot is not promotable
 
 **Exit Criteria:**
-- compiled artifacts are stored in predictable locations
-- each artifact has a manifest containing:
+- per-pilot contract packages are stored in predictable locations
+- each package has a manifest containing:
   - source model path and hash,
   - prepared upload model path and hash,
   - input specs,
   - compile flags,
   - device family,
   - QAIRT version,
-  - expected tensor outputs
+  - Phase 4 recommendation,
+  - promotion status,
+  - evidence record paths
 - docs explain how to refresh or validate the package
 
 ### Phase 6: Android Integration Under Option 1
@@ -426,7 +455,13 @@ Expected: prints `ok`.
 
 ## Phase 3 Scope
 
-Phase 3 is now the next coding phase.
+Phase 3 is now implemented in code, notebook structure, and local tests.
+
+The remaining work for this phase is operational:
+
+- run the notebook against real compiled cloud targets,
+- review the generated hybrid run records,
+- decide whether any e2e mismatches or latency problems need follow-up before moving to Phase 4.
 
 The purpose of Phase 3 is to prove the real hybrid Python pipelines, not only isolated graph inference:
 
@@ -1012,3 +1047,938 @@ Expected: prints `ok`.
 5. Implement `Task 5` to lock the hybrid evidence contract and workflow doc.
 6. Implement `Task 6` to refactor `On_device_Ai_option1_pilots.ipynb` into the shared Phase 2 + Phase 3 notebook.
 7. Run `Task 7` verification before calling Phase 3 complete.
+
+---
+
+## Phase 4 Scope
+
+Phase 4 is now the next coding phase.
+
+The purpose of Phase 4 is to turn the raw Phase 3 notebook outputs into a formal quality and performance gate for `Option 1`.
+
+This phase does **not** try to improve model quality yet.
+It answers these questions in a deterministic, record-backed way:
+
+- Is the current `Zipformer encoder on NPU + decoder/joiner on CPU` lane accurate enough to advance?
+- Is the current `VPCD model-step on NPU + tokenizer on CPU` lane accurate enough to advance?
+- How expensive are these lanes in practice for:
+  - warmup,
+  - steady-state latency,
+  - basic memory or footprint observations?
+- Which pilot gets:
+  - `GO`,
+  - `WARN`,
+  - `NO_GO`
+  before Android work begins, while still allowing Phase 5 packaging for all pilots?
+
+Phase 4 should be designed around the current evidence snapshot:
+
+- `Zipformer`
+  - final compare now works against the correct gold fixture
+  - current mismatches look small and localized
+  - this pilot needs a severity classifier and a promotion rule, not just exact-match counting
+- `VPCD`
+  - current hybrid output is catastrophically wrong on the tested samples
+  - this pilot needs an explicit negative gate path instead of being averaged into a neutral benchmark report
+
+### Phase 4 Non-Goals
+
+- changing model architecture
+- re-quantizing models as part of the gate itself
+- moving more Zipformer graphs onto NPU
+- Android integration
+- hiding failures behind averaged metrics
+- inventing ad-hoc judgment outside a deterministic record contract
+
+## Phase 4 File Structure
+
+**Files:**
+
+- Create: `src/tools/aihub_option1_phase4_gate.py`
+- Test: `test/test_aihub_option1_phase4_gate.py`
+- Modify: `src/tools/aihub_option1_hybrid_pipeline.py`
+- Modify: `On_device_Ai_option1_pilots.ipynb`
+- Create: `docs/workflows/aihub-option1-phase4-gate.md`
+- Modify: `docs/workflows/aihub-option1-hybrid-pipeline.md`
+- Modify: `docs/plans/active/2026-05-11-aihub-option1-npu-pilots.md`
+
+### Notebook Refactor Plan
+
+Phase 4 must stay inside:
+
+- `On_device_Ai_option1_pilots.ipynb`
+
+The notebook should remain the single operator entrypoint.
+Do not create a second benchmark notebook for the first implementation.
+
+Target cell layout after the current Phase 3 sections:
+
+1. `## Phase 4 Config`
+   - benchmark iteration counts
+   - per-pilot sample limits
+   - recommendation thresholds
+   - optional skip flags for rerunning expensive sections
+2. `### Zipformer Phase 4 Benchmark Sweep`
+   - rerun the hybrid pipeline for a small fixed iteration count without recompiling
+   - collect warmup and steady-state timings
+3. `### Zipformer Phase 4 Gate Summary`
+   - classify per-sample mismatch severity
+   - print `GO / WARN / NO_GO` recommendation with reasons
+4. `### VPCD Phase 4 Benchmark Sweep`
+   - rerun the hybrid pipeline for a small fixed iteration count without recompiling
+   - collect timings and collapse/failure signals
+5. `### VPCD Phase 4 Gate Summary`
+   - classify per-sample failure severity
+   - print `GO / WARN / NO_GO` recommendation with reasons
+6. `## Phase 4 Recommendation Summary`
+   - print both pilot recommendations together
+   - print all generated Phase 4 record paths
+
+Operator rule:
+
+- compile sections must stay skippable
+- Phase 4 must reuse:
+  - `RUN_LABEL`
+  - existing compile records
+  - existing compiled target ids
+- Phase 4 may rerun inference and hybrid flows, but must never force a fresh compile
+
+## Phase 4 Detailed Tasks
+
+### Task 1: Lock The Phase 4 Gate Vocabulary And Record Contract
+
+**Files:**
+
+- Create: `src/tools/aihub_option1_phase4_gate.py`
+- Test: `test/test_aihub_option1_phase4_gate.py`
+
+- [ ] **Step 1: Write a failing test for per-pilot gate summaries**
+
+Test behavior:
+
+- given sample-level Phase 3 style outputs,
+- a helper produces a deterministic Phase 4 summary containing:
+  - `sample_count`
+  - `comparable_samples`
+  - `matched_samples`
+  - `mismatched_samples`
+  - `severity_counts`
+  - `recommendation`
+  - `recommendation_reasons`
+
+- [ ] **Step 2: Run the focused summary test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k gate_summary -v`
+
+Expected: failure because the Phase 4 module does not exist yet.
+
+- [ ] **Step 3: Implement the minimal Phase 4 gate vocabulary**
+
+In `src/tools/aihub_option1_phase4_gate.py`, add:
+
+- one canonical recommendation vocabulary:
+  - `GO`
+  - `WARN`
+  - `NO_GO`
+- one canonical severity vocabulary:
+  - `exact_match`
+  - `minor_text_drift`
+  - `major_text_drift`
+  - `catastrophic_decode_failure`
+  - `comparison_unavailable`
+- one deterministic summary builder for sample rows
+
+- [ ] **Step 4: Add the Phase 4 record writer**
+
+Write records under deterministic locations such as:
+
+- `build/aihub/records/zipformer_phase4_option1/phase4-gate-<RUN_LABEL>.json`
+- `build/aihub/records/vpcd_phase4_option1/phase4-gate-<RUN_LABEL>.json`
+
+Each record should preserve:
+
+- pilot name
+- run label
+- target model id
+- compile record path
+- live run record path when available
+- hybrid run record path
+- correctness summary
+- latency summary
+- memory or footprint summary
+- final recommendation and reasons
+
+- [ ] **Step 5: Run the focused Phase 4 summary tests**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k gate_summary -v`
+
+Expected: pass.
+
+### Task 2: Add Repeated Benchmark Sweep Helpers Without Recompiling
+
+**Files:**
+
+- Modify: `src/tools/aihub_option1_phase4_gate.py`
+- Modify if needed: `src/tools/aihub_option1_hybrid_pipeline.py`
+- Test: `test/test_aihub_option1_phase4_gate.py`
+
+- [ ] **Step 1: Write a failing test for repeated hybrid benchmark sweeps**
+
+Test behavior:
+
+- given a fake hybrid runner that returns deterministic per-iteration timings,
+- a helper records:
+  - per-iteration total time
+  - per-iteration cloud inference time
+  - per-iteration host decode time
+  - first-iteration warmup time
+  - steady-state mean, min, and max
+
+- [ ] **Step 2: Run the focused benchmark test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k benchmark_sweep -v`
+
+Expected: failure because no repeated benchmark helper exists yet.
+
+- [ ] **Step 3: Implement the benchmark sweep helpers**
+
+Add helpers that:
+
+- rerun the existing hybrid evaluation without recompiling
+- accept:
+  - `iterations`
+  - `max_samples`
+  - `RUN_LABEL`
+  - explicit target model id override if present
+- produce:
+  - one per-iteration result row
+  - warmup timing from the first iteration
+  - steady-state timing summary from the remaining iterations
+
+Default first-pass benchmark sizes:
+
+- `Zipformer`
+  - `iterations = 3`
+  - `max_samples = 2`
+- `VPCD`
+  - `iterations = 2`
+  - `max_samples = 2`
+
+- [ ] **Step 4: Run the focused benchmark tests**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k benchmark_sweep -v`
+
+Expected: pass.
+
+### Task 3: Add Correctness Severity Classification
+
+**Files:**
+
+- Modify: `src/tools/aihub_option1_phase4_gate.py`
+- Test: `test/test_aihub_option1_phase4_gate.py`
+
+- [ ] **Step 1: Write a failing test for Zipformer drift classification**
+
+Test behavior:
+
+- exact text match classifies as `exact_match`
+- tiny localized transcript drift, such as one word or one token substitution, classifies as `minor_text_drift`
+- broader transcript divergence classifies as `major_text_drift`
+
+- [ ] **Step 2: Write a failing test for VPCD catastrophic failure classification**
+
+Test behavior:
+
+- placeholder-like output or extremely short generated ids such as `[0, 1, 2]` against a much longer expected sentence classifies as `catastrophic_decode_failure`
+
+- [ ] **Step 3: Run the focused classification tests to confirm they fail**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k classify -v`
+
+Expected: failure because the classifier logic does not exist yet.
+
+- [ ] **Step 4: Implement the minimal severity classifiers**
+
+Implementation rules for the first version:
+
+- use exact string equality for `exact_match`
+- use a deterministic normalized string-distance heuristic for:
+  - `minor_text_drift`
+  - `major_text_drift`
+- use explicit failure heuristics for:
+  - empty outputs
+  - placeholder-like outputs
+  - extremely short generated ids versus long expected text
+  as `catastrophic_decode_failure`
+
+Important:
+
+- the classifier must support negative outcomes cleanly
+- Phase 4 must not assume every pilot is salvageable
+
+- [ ] **Step 5: Run the focused classification tests**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k classify -v`
+
+Expected: pass.
+
+### Task 4: Add Basic Memory And Footprint Observations
+
+**Files:**
+
+- Modify: `src/tools/aihub_option1_phase4_gate.py`
+- Test: `test/test_aihub_option1_phase4_gate.py`
+
+- [ ] **Step 1: Write a failing test for footprint summaries**
+
+Test behavior:
+
+- given prepared artifact, live-run record, and hybrid-run record metadata,
+- a helper records:
+  - prepared model size
+  - output tensor footprint
+  - generated token footprint where relevant
+  - optional host RSS delta when available
+
+- [ ] **Step 2: Run the focused footprint test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k footprint -v`
+
+Expected: failure because no footprint helper exists yet.
+
+- [ ] **Step 3: Implement the minimal footprint observation helpers**
+
+Use the following strategy:
+
+- always record artifact and tensor size observations
+- attempt host process RSS observation only when the environment supports it
+- if host RSS is unavailable, write a structured reason instead of failing the gate
+
+This is important because Qualcomm AI Hub does not expose true device memory directly through the current notebook lane.
+
+- [ ] **Step 4: Run the focused footprint tests**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k footprint -v`
+
+Expected: pass.
+
+### Task 5: Build Per-Pilot Recommendations And Overall Gate Decisions
+
+**Files:**
+
+- Modify: `src/tools/aihub_option1_phase4_gate.py`
+- Test: `test/test_aihub_option1_phase4_gate.py`
+
+- [ ] **Step 1: Write a failing test for per-pilot recommendations**
+
+Test behavior:
+
+- `Zipformer`
+  - exact match plus acceptable timings can become `GO`
+  - minor drift with otherwise healthy behavior becomes `WARN`
+  - broad drift or catastrophic behavior becomes `NO_GO`
+- `VPCD`
+  - catastrophic output collapse becomes `NO_GO`
+  - exact match plus acceptable timings can become `GO`
+
+- [ ] **Step 2: Run the focused recommendation test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k recommendation -v`
+
+Expected: failure because recommendation logic does not exist yet.
+
+- [ ] **Step 3: Implement the recommendation rules**
+
+The first version should:
+
+- accept threshold values from config rather than hardcoding them into notebook cells
+- produce:
+  - one recommendation per pilot
+  - one overall Phase 4 recommendation summary
+- preserve the exact reasons that drove:
+  - `GO`
+  - `WARN`
+  - `NO_GO`
+
+- [ ] **Step 4: Run the focused recommendation tests**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -k recommendation -v`
+
+Expected: pass.
+
+### Task 6: Refactor The Shared Notebook For Phase 4 Execution
+
+**Files:**
+
+- Modify: `On_device_Ai_option1_pilots.ipynb`
+- Modify: `src/tools/aihub_option1_phase4_gate.py`
+- Test: notebook JSON sanity
+
+- [ ] **Step 1: Add the Phase 4 config cell**
+
+The config cell should expose:
+
+- `PHASE4_ZIPFORMER_ITERATIONS`
+- `PHASE4_VPCD_ITERATIONS`
+- `PHASE4_ZIPFORMER_MAX_SAMPLES`
+- `PHASE4_VPCD_MAX_SAMPLES`
+- threshold settings for:
+  - minor drift
+  - catastrophic collapse
+  - recommendation cutoffs
+
+- [ ] **Step 2: Add the Zipformer Phase 4 benchmark section**
+
+This section should:
+
+- reuse the existing compiled target
+- rerun hybrid evaluation for the configured iteration count
+- write one benchmark or gate record
+- print:
+  - warmup time
+  - steady-state summary
+  - per-sample severity labels
+  - recommendation
+
+- [ ] **Step 3: Add the VPCD Phase 4 benchmark section**
+
+This section should:
+
+- reuse the existing compiled target
+- rerun hybrid evaluation for the configured iteration count
+- write one benchmark or gate record
+- print:
+  - warmup time
+  - steady-state summary
+  - per-sample severity labels
+  - recommendation
+
+- [ ] **Step 4: Add the final Phase 4 recommendation summary section**
+
+This section should print:
+
+- `Zipformer` recommendation and reasons
+- `VPCD` recommendation and reasons
+- all generated Phase 4 record paths
+- a reminder that Phase 5 still packages every pilot, but only `GO` or justified `WARN` candidates may later advance to Android-facing work
+
+- [ ] **Step 5: Verify the notebook still supports compile skipping**
+
+Expected behavior:
+
+- if a compile record already exists for `RUN_LABEL`, the notebook still skips compile
+- Phase 4 can run without forcing any fresh compile job
+
+### Task 7: Add The Phase 4 Workflow Doc And Run Full Verification
+
+**Files:**
+
+- Create: `docs/workflows/aihub-option1-phase4-gate.md`
+- Modify: `docs/workflows/aihub-option1-hybrid-pipeline.md`
+- Test: `test/test_aihub_option1_phase4_gate.py`
+- Test: existing regression slices
+- Test: notebook JSON sanity
+
+- [ ] **Step 1: Document the Phase 4 operator workflow**
+
+The new workflow doc should explain:
+
+- what Phase 4 consumes from Phase 2 and Phase 3
+- how to rerun benchmark sweeps without recompiling
+- what each recommendation level means
+- what artifacts must be preserved for handoff
+
+- [ ] **Step 2: Run the focused Phase 4 tests**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py -v`
+
+Expected: pass.
+
+- [ ] **Step 3: Run the regression slices that protect the existing helpers**
+
+Run: `pytest test/test_aihub_option1_hybrid_pipeline.py test/test_aihub_option1_pilots.py test/test_zipformer_bundle.py test/test_vpcd_bundle.py -v`
+
+Expected: pass.
+
+- [ ] **Step 4: Run Python compile verification**
+
+Run: `python -m compileall src`
+
+Expected: pass.
+
+- [ ] **Step 5: Verify the shared notebook is valid JSON**
+
+Run: `python - <<'PY'\nimport json\nfrom pathlib import Path\njson.loads(Path('On_device_Ai_option1_pilots.ipynb').read_text(encoding='utf-8'))\nprint('ok')\nPY`
+
+Expected: prints `ok`.
+
+## Phase 4 Acceptance Criteria
+
+- a dedicated Phase 4 module exists and can consume Phase 2 and Phase 3 records without forcing recompilation
+- benchmark sweeps can rerun both pilots on the shared notebook with compile skipping intact
+- each pilot receives:
+  - per-sample severity labels
+  - latency summary
+  - basic memory or footprint summary
+  - one final recommendation
+- recommendation levels are deterministic and record-backed
+- the notebook remains the single operator entrypoint for:
+  - Phase 2
+  - Phase 3
+  - Phase 4
+- Phase 4 records are written under deterministic paths
+- focused and regression tests pass locally
+
+## Decision Gates After Phase 4
+
+1. Always enter Phase 5 after Phase 4 so the contract package exists for every pilot, including `NO_GO` lanes.
+2. Treat any `catastrophic_decode_failure` result as an immediate `NO_GO` for that pilot until the lane is changed or repaired.
+3. Treat the current VPCD lane as expected to fail the gate unless benchmark reruns and correctness summaries prove otherwise.
+4. Treat Zipformer minor transcript drift as a product decision, not an automatic promotion. The Phase 4 record must make that tradeoff visible.
+5. Use Phase 4 verdicts to label Phase 5 packages as either:
+   - `deployment_candidate`
+   - `research_only`
+6. Do not start Android integration for any pilot whose Phase 4 recommendation is `NO_GO`.
+
+## Recommended Execution Order For Phase 4
+
+1. Implement `Task 1` to lock the gate vocabulary and record contract.
+2. Implement `Task 2` to add repeated benchmark sweep helpers.
+3. Implement `Task 3` to classify correctness severity.
+4. Implement `Task 4` to add memory and footprint observations.
+5. Implement `Task 5` to produce deterministic recommendations.
+6. Implement `Task 6` to refactor `On_device_Ai_option1_pilots.ipynb` with Phase 4 sections.
+7. Run `Task 7` verification before calling Phase 4 complete.
+
+---
+
+## Phase 5 Scope
+
+Phase 5 is the packaging phase for `Option 1`.
+
+The purpose of Phase 5 is to turn the working research lane and its evidence into a deterministic contract package that later consumers can trust.
+
+This phase now proceeds regardless of the Phase 4 verdict.
+That means:
+
+- `GO` pilots are packaged as likely deployment candidates
+- `WARN` pilots are packaged with explicit risk notes
+- `NO_GO` pilots are still packaged, but clearly marked as `research_only`
+
+Phase 5 is not a loophole around Phase 4.
+It does not override the gate result.
+It preserves the gate result inside the package so later Android work, reviews, or experiments do not lose context.
+
+The package should answer, without opening the notebook:
+
+- what artifact was compiled
+- what runtime contract it expects
+- what evidence exists
+- what the latest quality gate decided
+- whether this pilot is:
+  - `deployment_candidate`
+  - `research_only`
+
+### Phase 5 Non-Goals
+
+- changing model quality or performance
+- recompiling models
+- rerunning large cloud benchmarks unless a required evidence file is missing
+- Android integration
+- hiding `NO_GO` results behind packaging success
+
+## Phase 5 File Structure
+
+**Files:**
+
+- Create: `src/tools/aihub_option1_phase5_contract.py`
+- Test: `test/test_aihub_option1_phase5_contract.py`
+- Modify: `src/tools/aihub_option1_phase4_gate.py`
+- Modify if needed: `src/tools/aihub_option1_hybrid_pipeline.py`
+- Modify: `On_device_Ai_option1_pilots.ipynb`
+- Create: `docs/workflows/aihub-option1-phase5-contract.md`
+- Modify: `docs/workflows/aihub-option1-phase4-gate.md`
+- Modify: `docs/plans/active/2026-05-11-aihub-option1-npu-pilots.md`
+
+### Notebook Refactor Plan
+
+Phase 5 must stay inside:
+
+- `On_device_Ai_option1_pilots.ipynb`
+
+The notebook should remain the single operator entrypoint.
+
+Target new sections after the Phase 4 gate sections:
+
+1. `## Phase 5 Config`
+   - package root
+   - package label override
+   - optional per-pilot include flags
+2. `### Package Zipformer Phase 5 Contract`
+   - gather Phase 2, Phase 3, and Phase 4 evidence
+   - materialize one per-pilot contract package
+3. `### Package VPCD Phase 5 Contract`
+   - gather the same evidence for VPCD
+   - materialize one per-pilot contract package
+4. `## Phase 5 Packaging Summary`
+   - print package paths
+   - print promotion status
+   - print missing optional artifacts, if any
+
+Operator rule:
+
+- Phase 5 may package a `NO_GO` pilot
+- Phase 5 must never silently present a `NO_GO` package as deployable
+- the notebook must keep compile skipping intact
+
+## Phase 5 Detailed Tasks
+
+### Task 1: Lock The Contract Package Layout And Manifest Schema
+
+**Files:**
+
+- Create: `src/tools/aihub_option1_phase5_contract.py`
+- Test: `test/test_aihub_option1_phase5_contract.py`
+
+- [ ] **Step 1: Write a failing test for contract manifest generation**
+
+Test behavior:
+
+- given one pilot and a set of Phase 2 to Phase 4 records,
+- a helper produces one deterministic manifest containing:
+  - pilot name
+  - run label
+  - target model id
+  - promotion status
+  - Phase 4 recommendation
+  - source artifact metadata
+  - evidence record paths
+  - input and output contract summary
+
+- [ ] **Step 2: Run the focused manifest test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k manifest -v`
+
+Expected: failure because the Phase 5 module does not exist yet.
+
+- [ ] **Step 3: Implement the minimal manifest schema**
+
+In `src/tools/aihub_option1_phase5_contract.py`, add:
+
+- one canonical manifest builder
+- one canonical promotion status vocabulary:
+  - `deployment_candidate`
+  - `research_only`
+- deterministic package layout helpers
+
+- [ ] **Step 4: Run the focused manifest tests**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k manifest -v`
+
+Expected: pass.
+
+### Task 2: Resolve And Validate Upstream Evidence Inputs
+
+**Files:**
+
+- Modify: `src/tools/aihub_option1_phase5_contract.py`
+- Test: `test/test_aihub_option1_phase5_contract.py`
+
+- [ ] **Step 1: Write a failing test for evidence resolution**
+
+Test behavior:
+
+- a helper can resolve all required upstream inputs from deterministic locations:
+  - prepared artifact record
+  - compile-run record
+  - live-run record
+  - hybrid-run record
+  - Phase 4 gate record
+- if an optional input is missing, the package still builds with a recorded warning
+- if a required input is missing, the packager fails clearly
+
+- [ ] **Step 2: Run the focused evidence-resolution test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k resolve_inputs -v`
+
+Expected: failure because no evidence resolver exists yet.
+
+- [ ] **Step 3: Implement the evidence resolvers**
+
+Implementation rules:
+
+- Phase 5 should prefer deterministic record paths from:
+  - `RUN_LABEL`
+  - pilot name
+- Phase 5 should preserve missing-optional notes instead of crashing
+- required inputs should fail loudly with actionable messages
+
+- [ ] **Step 4: Run the focused evidence-resolution tests**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k resolve_inputs -v`
+
+Expected: pass.
+
+### Task 3: Build The Per-Pilot Contract Package Materializer
+
+**Files:**
+
+- Modify: `src/tools/aihub_option1_phase5_contract.py`
+- Test: `test/test_aihub_option1_phase5_contract.py`
+
+- [ ] **Step 1: Write a failing test for package materialization**
+
+Test behavior:
+
+- a packager creates one deterministic directory such as:
+  - `build/aihub/contracts/option1/zipformer/<RUN_LABEL>/`
+  - `build/aihub/contracts/option1/vpcd/<RUN_LABEL>/`
+- and writes:
+  - `contract_manifest.json`
+  - `contract_summary.md`
+  - one normalized `io_contract.json`
+  - copied or linked evidence records under an `evidence/` folder
+
+- [ ] **Step 2: Run the focused materialization test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k materialize_package -v`
+
+Expected: failure because the package writer does not exist yet.
+
+- [ ] **Step 3: Implement the minimal package writer**
+
+Package contents for the first implementation:
+
+- local contract metadata files are always materialized
+- upstream JSON evidence records are copied into the package
+- large source artifacts may be referenced in the manifest instead of duplicated if copying them would be wasteful
+- every copied or referenced file must be described by:
+  - path
+  - size
+  - hash when available
+
+- [ ] **Step 4: Run the focused materialization tests**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k materialize_package -v`
+
+Expected: pass.
+
+### Task 4: Add Promotion Status Rules That Respect Phase 4
+
+**Files:**
+
+- Modify: `src/tools/aihub_option1_phase5_contract.py`
+- Test: `test/test_aihub_option1_phase5_contract.py`
+
+- [ ] **Step 1: Write a failing test for promotion status mapping**
+
+Test behavior:
+
+- `GO` maps to `deployment_candidate`
+- `WARN` may still map to `deployment_candidate`, but must preserve risk notes
+- `NO_GO` maps to `research_only`
+
+- [ ] **Step 2: Run the focused promotion-status test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k promotion_status -v`
+
+Expected: failure because the mapping rules do not exist yet.
+
+- [ ] **Step 3: Implement the promotion status mapper**
+
+The first version should:
+
+- consume the Phase 4 recommendation
+- preserve the recommendation reasons in the package manifest
+- never allow `NO_GO` to appear as deployable
+
+- [ ] **Step 4: Run the focused promotion-status tests**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k promotion_status -v`
+
+Expected: pass.
+
+### Task 5: Export Normalized I/O Contracts And Deployment Notes
+
+**Files:**
+
+- Modify: `src/tools/aihub_option1_phase5_contract.py`
+- Test: `test/test_aihub_option1_phase5_contract.py`
+
+- [ ] **Step 1: Write a failing test for normalized I/O contract export**
+
+Test behavior:
+
+- the package contains one normalized `io_contract.json` per pilot with:
+  - input tensor names
+  - input shapes
+  - input dtypes
+  - output tensor names
+  - output shapes
+  - dtype expectations
+  - special handling notes such as `truncate_64bit_io`
+
+- [ ] **Step 2: Run the focused I/O contract test to confirm it fails**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k io_contract -v`
+
+Expected: failure because the export helper does not exist yet.
+
+- [ ] **Step 3: Implement the normalized I/O contract export**
+
+Implementation rules:
+
+- prefer data already recorded in:
+  - prepared artifact records
+  - live-run records
+  - bundle manifests
+- add deployment notes for:
+  - Zipformer `encoder-only on NPU`
+  - VPCD `model-step on NPU`
+  - any dtype coercion required by the compiled target path
+
+- [ ] **Step 4: Run the focused I/O contract tests**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -k io_contract -v`
+
+Expected: pass.
+
+### Task 6: Refactor The Shared Notebook For Phase 5 Packaging
+
+**Files:**
+
+- Modify: `On_device_Ai_option1_pilots.ipynb`
+- Modify: `src/tools/aihub_option1_phase5_contract.py`
+- Test: notebook JSON sanity
+
+- [ ] **Step 1: Add the Phase 5 config cell**
+
+The config cell should expose:
+
+- `PHASE5_PACKAGE_LABEL`
+- `PHASE5_OUTPUT_ROOT`
+- `PHASE5_INCLUDE_ZIPFORMER`
+- `PHASE5_INCLUDE_VPCD`
+
+- [ ] **Step 2: Add the Zipformer package section**
+
+This section should:
+
+- consume the latest records for the chosen `RUN_LABEL`
+- build one Zipformer contract package
+- print:
+  - package path
+  - promotion status
+  - recommendation snapshot
+  - warnings, if any
+
+- [ ] **Step 3: Add the VPCD package section**
+
+This section should:
+
+- consume the latest records for the chosen `RUN_LABEL`
+- build one VPCD contract package
+- print:
+  - package path
+  - promotion status
+  - recommendation snapshot
+  - warnings, if any
+
+- [ ] **Step 4: Add the final Phase 5 package summary section**
+
+This section should print:
+
+- package path per pilot
+- promotion status per pilot
+- which pilots are:
+  - `deployment_candidate`
+  - `research_only`
+- a reminder that package creation does not override the Phase 4 verdict
+
+- [ ] **Step 5: Verify the notebook still supports compile skipping and package-only reruns**
+
+Expected behavior:
+
+- the operator can rerun Phase 5 packaging without rerunning compile
+- the operator can rerun Phase 5 packaging without rerunning Phase 4 if the gate records already exist
+
+### Task 7: Add The Phase 5 Workflow Doc And Run Full Verification
+
+**Files:**
+
+- Create: `docs/workflows/aihub-option1-phase5-contract.md`
+- Modify: `docs/workflows/aihub-option1-phase4-gate.md`
+- Test: `test/test_aihub_option1_phase5_contract.py`
+- Test: existing regression slices
+- Test: notebook JSON sanity
+
+- [ ] **Step 1: Document the Phase 5 operator workflow**
+
+The new workflow doc should explain:
+
+- what Phase 5 consumes from Phases 2, 3, and 4
+- how package layout is organized
+- what `deployment_candidate` and `research_only` mean
+- what downstream consumers should read first in the package
+
+- [ ] **Step 2: Run the focused Phase 5 tests**
+
+Run: `pytest test/test_aihub_option1_phase5_contract.py -v`
+
+Expected: pass.
+
+- [ ] **Step 3: Run the regression slices that protect upstream helpers**
+
+Run: `pytest test/test_aihub_option1_phase4_gate.py test/test_aihub_option1_hybrid_pipeline.py test/test_aihub_option1_pilots.py -v`
+
+Expected: pass.
+
+- [ ] **Step 4: Run Python compile verification**
+
+Run: `python -m compileall src`
+
+Expected: pass.
+
+- [ ] **Step 5: Verify the shared notebook is valid JSON**
+
+Run: `python - <<'PY'\nimport json\nfrom pathlib import Path\njson.loads(Path('On_device_Ai_option1_pilots.ipynb').read_text(encoding='utf-8'))\nprint('ok')\nPY`
+
+Expected: prints `ok`.
+
+## Phase 5 Acceptance Criteria
+
+- a dedicated Phase 5 module exists and can package both pilots without forcing recompilation
+- every package includes:
+  - manifest
+  - normalized I/O contract
+  - evidence copies or references
+  - promotion status
+  - Phase 4 recommendation snapshot
+- `GO`, `WARN`, and `NO_GO` pilots can all be packaged
+- `NO_GO` pilots are always marked `research_only`
+- the notebook remains the single operator entrypoint for:
+  - Phase 2
+  - Phase 3
+  - Phase 4
+  - Phase 5
+- focused and regression tests pass locally
+
+## Decision Gates After Phase 5
+
+1. Start Android integration only from packages marked `deployment_candidate`.
+2. Preserve `research_only` packages for debugging, comparison, and future rework, but do not treat them as app-ready.
+3. Do not let package existence be mistaken for production readiness.
+4. If multiple packages exist for the same pilot, later phases must select one explicitly by:
+   - `RUN_LABEL`
+   - package label
+   - recommendation snapshot
+
+## Recommended Execution Order For Phase 5
+
+1. Implement `Task 1` to lock the package manifest schema.
+2. Implement `Task 2` to resolve and validate upstream evidence.
+3. Implement `Task 3` to materialize deterministic contract packages.
+4. Implement `Task 4` to map Phase 4 verdicts into promotion status.
+5. Implement `Task 5` to export normalized I/O contracts and deployment notes.
+6. Implement `Task 6` to refactor `On_device_Ai_option1_pilots.ipynb` with Phase 5 sections.
+7. Run `Task 7` verification before calling Phase 5 complete.

@@ -323,9 +323,27 @@ class BundleOnnxRuntime:
         )
 
     def restore(self, text: str, max_length: int = 128) -> str:
+        result = self.restore_with_model_step(
+            text,
+            lambda feeds: self.model_session.run(None, feeds)[0],
+            max_length=max_length,
+        )
+        return str(result['text'])
+
+    def restore_with_model_step(
+        self,
+        text: str,
+        model_step_runner: Callable[[dict[str, np.ndarray]], object],
+        *,
+        max_length: int = 128,
+    ) -> dict[str, object]:
         normalized = _normalize_input_text(text, self.metadata)
         if not normalized:
-            return ''
+            return {
+                'text': '',
+                'decode_steps': 0,
+                'generated_ids': np.asarray([], dtype=np.int64),
+            }
 
         model_ids = self._encode_to_model_ids(normalized)
         if self.fixed_input_shapes is None:
@@ -356,22 +374,24 @@ class BundleOnnxRuntime:
                 )
                 logits_position = active_decoder_length - 1
 
-            outputs = self.model_session.run(
-                None,
-                {
-                    'input_ids': input_ids,
-                    'attention_mask': attention_mask,
-                    'decoder_input_ids': decoder_input_ids,
-                    'decoder_attention_mask': decoder_attention_mask,
-                },
-            )
-            next_token_id = self._argmax_token_at(outputs[0], logits_position)
+            feeds = {
+                'input_ids': input_ids,
+                'attention_mask': attention_mask,
+                'decoder_input_ids': decoder_input_ids,
+                'decoder_attention_mask': decoder_attention_mask,
+            }
+            logits = model_step_runner(feeds)
+            next_token_id = self._argmax_token_at(logits, logits_position)
             decoder_token_ids = np.concatenate([decoder_token_ids, np.asarray([next_token_id], dtype=np.int64)])
             if next_token_id == int(self.metadata['eos_token_id']):
                 break
 
         generated_ids = decoder_token_ids[1:]
-        return self._decode_model_ids(generated_ids).strip()
+        return {
+            'text': self._decode_model_ids(generated_ids).strip(),
+            'decode_steps': int(generated_ids.size),
+            'generated_ids': generated_ids,
+        }
 
     def _encode_to_model_ids(self, text: str) -> np.ndarray:
         outputs = self.encode_session.run(None, {'inputs': np.asarray([text], dtype=object)})

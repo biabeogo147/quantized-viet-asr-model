@@ -488,6 +488,83 @@ def test_bundle_runtime_reads_fixed_decoder_logits_at_active_position():
     assert decode_session.inputs[0]['ids'].tolist() == [5, 2]
 
 
+def test_bundle_runtime_restore_with_model_step_accepts_pluggable_runner():
+    manifest = ModelBundleManifest(
+        bundle_version=1,
+        project='vpcd',
+        model_family='bartpho-seq2seq',
+        model_name='tourmii/vietnamese-punc-cap-denorm-v1',
+        model_variant='vpcd_balanced_fixed_8x4',
+        asset_namespace='models/punctuation/vpcd/vpcd_balanced',
+        runtime_kind='text_seq2seq',
+        artifacts={
+            'model': 'model.mobile.onnx',
+            'tokenizer_encode': 'tokenizer.encode.onnx',
+            'tokenizer_decode': 'tokenizer.decode.onnx',
+            'tokenizer_to_model_id_map': 'tokenizer.to_model_id_map.json',
+            'model_to_tokenizer_id_map': 'tokenizer.from_model_id_map.json',
+        },
+        fixtures={'golden_samples': 'golden_samples.jsonl'},
+        metadata={
+            'pad_token_id': 1,
+            'eos_token_id': 2,
+            'decoder_start_token_id': 2,
+            'max_source_length': 8,
+            'max_decode_length': 4,
+            'fixed_input_shapes': {
+                'model': {
+                    'input_ids': [1, 8],
+                    'attention_mask': [1, 8],
+                    'decoder_input_ids': [1, 4],
+                    'decoder_attention_mask': [1, 4],
+                }
+            },
+        },
+    )
+
+    class FakeSession:
+        def __init__(self, responses: list[object]):
+            self.responses = list(responses)
+            self.inputs: list[dict[str, object]] = []
+
+        def run(self, _outputs: object, feeds: dict[str, object]) -> list[object]:
+            self.inputs.append(feeds)
+            return [self.responses.pop(0)]
+
+    first_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    first_logits[0, 0, 5] = 9.0
+    second_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    second_logits[0, 1, 2] = 9.0
+
+    encode_session = FakeSession([np.asarray([[0, 4, 2]], dtype=np.int64)])
+    decode_session = FakeSession([np.asarray(['xin chao.'], dtype=object)])
+    model_step_inputs: list[dict[str, object]] = []
+    model_step_outputs = [first_logits, second_logits]
+
+    def fake_model_step(feeds: dict[str, object]) -> object:
+        model_step_inputs.append(feeds)
+        return model_step_outputs.pop(0)
+
+    runtime = BundleOnnxRuntime(
+        manifest=manifest,
+        model_session=object(),
+        encode_session=encode_session,
+        decode_session=decode_session,
+        tokenizer_to_model_ids=np.asarray([0, 1, 2, 3, 11], dtype=np.int64),
+        model_to_tokenizer_ids=np.asarray([0, 1, 2, 3, 4, 5, 6], dtype=np.int64),
+    )
+
+    restored = runtime.restore_with_model_step('xin chao', fake_model_step, max_length=4)
+
+    assert restored['text'] == 'xin chao.'
+    assert restored['decode_steps'] == 2
+    assert model_step_inputs[0]['decoder_input_ids'][0, :4].tolist() == [2, 1, 1, 1]
+    assert model_step_inputs[0]['decoder_attention_mask'][0, :4].tolist() == [1, 0, 0, 0]
+    assert model_step_inputs[1]['decoder_input_ids'][0, :4].tolist() == [2, 5, 1, 1]
+    assert model_step_inputs[1]['decoder_attention_mask'][0, :4].tolist() == [1, 1, 0, 0]
+    assert decode_session.inputs[0]['ids'].tolist() == [5, 2]
+
+
 def test_export_vpcd_bundle_writes_standardized_layout(tmp_case_dir):
     model_dir = tmp_case_dir / 'model'
     output_dir = tmp_case_dir / 'output'
