@@ -218,9 +218,9 @@ def test_resolve_zipformer_encoder_source_prefers_fixed_shape_encoder_artifact(t
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "zipformer"
+    bundle_dir = repo_root / "build" / "model_bundle" / "zipformer" / "qnn_u16u8"
     _write_zipformer_bundle(bundle_dir, fixed_encoder_frames=144, feature_dim=64)
-    fixed_encoder = repo_root / "build" / "zipformer" / "artifacts" / "fixed_shapes" / "encoder.fixed.onnx"
+    fixed_encoder = repo_root / "build" / "quantize" / "zipformer" / "qnn_u16u8" / "fixed_shapes" / "encoder.fixed.onnx"
     fixed_encoder.parent.mkdir(parents=True, exist_ok=True)
     fixed_encoder.write_bytes(b"encoder")
 
@@ -502,7 +502,7 @@ def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    source_model_path = repo_root / "build" / "zipformer" / "encoder.fixed.onnx"
+    source_model_path = repo_root / "build" / "quantize" / "zipformer" / "qnn_u16u8" / "fixed_shapes" / "encoder.fixed.onnx"
     source_model_path.parent.mkdir(parents=True, exist_ok=True)
     source_model_path.write_bytes(b"source-model")
 
@@ -534,7 +534,7 @@ def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path
     assert payload["device_name"] == "Samsung Galaxy S24 (Family)"
     assert payload["qairt_version"] == "2.46.0"
     assert payload["compile_options"] == "--target_runtime precompiled_qnn_onnx --truncate_64bit_io --qairt_version 2.46.0"
-    assert payload["source_model"]["path"].endswith("build/zipformer/encoder.fixed.onnx")
+    assert payload["source_model"]["path"].endswith("build/quantize/zipformer/qnn_u16u8/fixed_shapes/encoder.fixed.onnx")
     assert payload["prepared_model"]["path"].endswith("build/aihub/zipformer_encoder_option1/encoder.aihub.option1.onnx")
     assert payload["source_model"]["size_bytes"] == len(b"source-model")
     assert payload["prepared_model"]["size_bytes"] == len(b"prepared-model")
@@ -601,6 +601,99 @@ def test_write_live_run_record_summarizes_jobs_and_outputs(tmp_path):
     assert payload["output_tensors"]["output_1"][0]["dtype"] == "int32"
 
 
+def test_write_compile_run_record_captures_target_model_metadata(tmp_path):
+    from tools.aihub_option1_pilots import (
+        build_option1_runtime_config,
+        write_compile_run_record,
+    )
+
+    class FakeJob:
+        def __init__(self, job_id: str, url: str, status: str) -> None:
+            self.job_id = job_id
+            self.url = url
+            self.status = status
+
+    class FakeModel:
+        def __init__(self, model_id: str, url: str, name: str) -> None:
+            self.model_id = model_id
+            self.url = url
+            self.name = name
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        qairt_version="2.46.0",
+        repo_root=repo_root,
+    )
+
+    record_path = write_compile_run_record(
+        pilot_name="zipformer_encoder_option1",
+        runtime_config=config,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io --qairt_version 2.46.0",
+        compile_job=FakeJob("compile-1", "https://aihub/jobs/compile-1", "SUCCESS"),
+        target_model=FakeModel("model-1", "https://aihub/models/model-1", "zipformer-target"),
+        run_label="unit-test",
+    )
+
+    payload = json.loads(record_path.read_text(encoding="utf-8"))
+    assert payload["record_kind"] == "compile_run"
+    assert payload["pilot_name"] == "zipformer_encoder_option1"
+    assert payload["device_name"] == "Samsung Galaxy S24 (Family)"
+    assert payload["compile_options"] == "--target_runtime precompiled_qnn_onnx --truncate_64bit_io --qairt_version 2.46.0"
+    assert payload["jobs"]["compile"]["job_id"] == "compile-1"
+    assert payload["target_model"]["model_id"] == "model-1"
+    assert payload["target_model"]["url"] == "https://aihub/models/model-1"
+    assert payload["target_model"]["name"] == "zipformer-target"
+
+
+def test_resolve_target_model_id_uses_explicit_value_or_compile_record(tmp_path):
+    from tools.aihub_option1_pilots import (
+        build_option1_runtime_config,
+        resolve_target_model_id,
+        write_compile_run_record,
+    )
+
+    class FakeJob:
+        def __init__(self, job_id: str, url: str, status: str) -> None:
+            self.job_id = job_id
+            self.url = url
+            self.status = status
+
+    class FakeModel:
+        def __init__(self, model_id: str, url: str, name: str) -> None:
+            self.model_id = model_id
+            self.url = url
+            self.name = name
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        qairt_version=None,
+        repo_root=repo_root,
+    )
+    write_compile_run_record(
+        pilot_name="zipformer_encoder_option1",
+        runtime_config=config,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
+        compile_job=FakeJob("compile-1", "https://aihub/jobs/compile-1", "SUCCESS"),
+        target_model=FakeModel("model-1", "https://aihub/models/model-1", "zipformer-target"),
+        run_label="latest",
+    )
+
+    assert resolve_target_model_id(
+        pilot_name="zipformer_encoder_option1",
+        runtime_config=config,
+        explicit_target_model_id="model-explicit",
+    ) == "model-explicit"
+    assert resolve_target_model_id(
+        pilot_name="zipformer_encoder_option1",
+        runtime_config=config,
+        explicit_target_model_id=None,
+    ) == "model-1"
+
+
 def test_load_env_file_populates_missing_values_without_overriding_existing_env(tmp_path, monkeypatch):
     from tools.aihub_option1_pilots import load_env_file
 
@@ -632,3 +725,43 @@ def test_resolve_qai_hub_api_token_reads_repo_env_file(tmp_path, monkeypatch):
     token = resolve_qai_hub_api_token(repo_root=repo_root)
 
     assert token == "token-from-repo-env"
+
+
+def test_compare_output_tensors_reports_diff_stats():
+    from tools.aihub_option1_pilots import compare_output_tensors
+
+    reference = {
+        "output_0": [np.asarray([[1.0, 2.0]], dtype=np.float32)],
+        "output_1": [np.asarray([3], dtype=np.int32)],
+    }
+    candidate = {
+        "output_0": [np.asarray([[1.0, 2.25]], dtype=np.float32)],
+        "output_1": [np.asarray([3], dtype=np.int32)],
+    }
+
+    summary = compare_output_tensors(reference, candidate, atol=1e-5, rtol=1e-5)
+
+    assert summary["output_0"]["shape_match"] is True
+    assert summary["output_0"]["allclose"] is False
+    assert summary["output_0"]["max_abs_diff"] == 0.25
+    assert summary["output_0"]["mean_abs_diff"] == 0.125
+    assert summary["output_1"]["allclose"] is True
+    assert summary["output_1"]["max_abs_diff"] == 0.0
+
+
+def test_summarize_vpcd_step_logits_uses_active_decoder_position():
+    from tools.aihub_option1_pilots import summarize_vpcd_step_logits
+
+    logits = np.zeros((1, 1, 4, 6), dtype=np.float32)
+    logits[0, 0, 1, 5] = 9.0
+    logits[0, 0, 1, 2] = 4.0
+    logits[0, 0, 3, 1] = 99.0
+    decoder_attention_mask = np.asarray([[1, 1, 0, 0]], dtype=np.int64)
+
+    summary = summarize_vpcd_step_logits(logits, decoder_attention_mask, top_k=2)
+
+    assert summary["active_index"] == 1
+    assert summary["top_tokens"][0]["token_id"] == 5
+    assert summary["top_tokens"][0]["score"] == 9.0
+    assert summary["top_tokens"][1]["token_id"] == 2
+    assert summary["top_tokens"][1]["score"] == 4.0

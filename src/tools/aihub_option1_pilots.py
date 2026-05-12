@@ -206,9 +206,9 @@ def resolve_zipformer_encoder_pilot_source(repo_root: str | Path | None = None) 
     root = _resolve_repo_root(repo_root)
     manifest_path = _first_existing_path(
         [
-            root / "build" / "zipformer" / "bundle_manifest.json",
             root / "build" / "model_bundle" / "zipformer" / "qnn_u16u8" / "bundle_manifest.json",
-            root / "build" / "model_bundle" / "zipformer" / "bundle-fp32" / "bundle_manifest.json",
+            root / "build" / "model_bundle" / "zipformer" / "fp32" / "bundle_manifest.json",
+            root / "build" / "zipformer" / "bundle_manifest.json",
         ]
     )
     if manifest_path is None:
@@ -221,8 +221,9 @@ def resolve_zipformer_encoder_pilot_source(repo_root: str | Path | None = None) 
     bundle_dir = manifest_path.parent
     source_model_path = _first_existing_path(
         [
-            root / "build" / "zipformer" / "artifacts" / "fixed_shapes" / "encoder.fixed.onnx",
+            root / "build" / "quantize" / "zipformer" / "qnn_u16u8" / "fixed_shapes" / "encoder.fixed.onnx",
             bundle_dir / "artifacts" / "fixed_shapes" / "encoder.fixed.onnx",
+            root / "build" / "zipformer" / "artifacts" / "fixed_shapes" / "encoder.fixed.onnx",
             bundle_dir / manifest.artifacts["encoder"],
         ]
     )
@@ -563,6 +564,78 @@ def summarize_tensor_outputs(
     return summary
 
 
+def compare_output_tensors(
+    reference_outputs: Mapping[str, np.ndarray | list[np.ndarray]],
+    candidate_outputs: Mapping[str, np.ndarray | list[np.ndarray]],
+    *,
+    atol: float = 1e-4,
+    rtol: float = 1e-4,
+) -> dict[str, dict[str, Any]]:
+    aligned_reference = _normalize_output_tensor_mapping(reference_outputs)
+    aligned_candidate = _normalize_output_tensor_mapping(candidate_outputs)
+    summary: dict[str, dict[str, Any]] = {}
+    shared_slots = [slot for slot in aligned_reference if slot in aligned_candidate]
+    for slot in shared_slots:
+        reference_array = np.asarray(aligned_reference[slot][0])
+        candidate_array = np.asarray(aligned_candidate[slot][0])
+        shape_match = tuple(reference_array.shape) == tuple(candidate_array.shape)
+        stats: dict[str, Any] = {
+            "reference_dtype": str(reference_array.dtype),
+            "candidate_dtype": str(candidate_array.dtype),
+            "reference_shape": [int(dim) for dim in reference_array.shape],
+            "candidate_shape": [int(dim) for dim in candidate_array.shape],
+            "shape_match": shape_match,
+            "allclose": False,
+            "max_abs_diff": None,
+            "mean_abs_diff": None,
+        }
+        if shape_match:
+            difference = np.abs(reference_array.astype(np.float64) - candidate_array.astype(np.float64))
+            stats["max_abs_diff"] = float(difference.max()) if difference.size else 0.0
+            stats["mean_abs_diff"] = float(difference.mean()) if difference.size else 0.0
+            stats["allclose"] = bool(np.allclose(reference_array, candidate_array, atol=atol, rtol=rtol))
+        summary[slot] = stats
+    return summary
+
+
+def summarize_vpcd_step_logits(
+    logits: np.ndarray,
+    decoder_attention_mask: np.ndarray,
+    *,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    logits_array = np.asarray(logits)
+    if logits_array.ndim < 2:
+        raise ValueError(f"Expected logits with at least 2 dimensions, got shape {logits_array.shape}")
+
+    sequence_logits = logits_array.reshape(-1, logits_array.shape[-2], logits_array.shape[-1])[0]
+    active_index = resolve_active_decoder_position(decoder_attention_mask)
+    scores = np.asarray(sequence_logits[active_index], dtype=np.float64).reshape(-1)
+    k = max(1, min(int(top_k), int(scores.size)))
+    top_indices = np.argsort(scores)[::-1][:k]
+    return {
+        "active_index": active_index,
+        "top_tokens": [
+            {
+                "token_id": int(token_id),
+                "score": float(scores[token_id]),
+            }
+            for token_id in top_indices
+        ],
+    }
+
+
+def resolve_active_decoder_position(decoder_attention_mask: np.ndarray) -> int:
+    attention_mask = np.asarray(decoder_attention_mask)
+    if attention_mask.ndim == 0:
+        raise ValueError("decoder_attention_mask must not be scalar.")
+    flattened = attention_mask.reshape(attention_mask.shape[0], -1)[0]
+    active_count = int(flattened.astype(np.int64).sum())
+    if active_count <= 0:
+        raise ValueError("decoder_attention_mask must contain at least one active position.")
+    return active_count - 1
+
+
 def write_prepared_artifact_record(
     *,
     pilot_name: str,
@@ -597,6 +670,73 @@ def write_prepared_artifact_record(
         "created_at_utc": _utc_now_isoformat(),
     }
     return _write_json_record(record_path, payload)
+
+
+def write_compile_run_record(
+    *,
+    pilot_name: str,
+    runtime_config: Option1RuntimeConfig,
+    compile_options: str,
+    compile_job: Any = None,
+    target_model: Any = None,
+    run_label: str | None = None,
+    output_path: str | Path | None = None,
+) -> Path:
+    record_path = _resolve_record_path(
+        runtime_config=runtime_config,
+        pilot_name=pilot_name,
+        record_kind="compile-run",
+        run_label=run_label,
+        output_path=output_path,
+    )
+    payload = {
+        "record_kind": "compile_run",
+        "pilot_name": pilot_name,
+        "device_name": runtime_config.device_name,
+        "qairt_version": runtime_config.qairt_version,
+        "compute_unit": runtime_config.compute_unit,
+        "compile_options": compile_options,
+        "jobs": {
+            "compile": _extract_job_metadata(compile_job),
+        },
+        "target_model": _extract_model_metadata(target_model),
+        "record_path": record_path.as_posix(),
+        "created_at_utc": _utc_now_isoformat(),
+    }
+    return _write_json_record(record_path, payload)
+
+
+def resolve_target_model_id(
+    *,
+    pilot_name: str,
+    runtime_config: Option1RuntimeConfig,
+    explicit_target_model_id: str | None = None,
+    run_label: str | None = None,
+) -> str:
+    normalized_explicit_id = _normalize_optional_string(explicit_target_model_id)
+    if normalized_explicit_id:
+        return normalized_explicit_id
+
+    record_path = _resolve_record_path(
+        runtime_config=runtime_config,
+        pilot_name=pilot_name,
+        record_kind="compile-run",
+        run_label=run_label,
+        output_path=None,
+    )
+    if not record_path.exists():
+        raise FileNotFoundError(
+            f"Could not resolve a compile-run record for pilot '{pilot_name}' at: {record_path}"
+        )
+
+    payload = json.loads(record_path.read_text(encoding="utf-8"))
+    target_model = payload.get("target_model") if isinstance(payload, Mapping) else None
+    target_model_id = None
+    if isinstance(target_model, Mapping):
+        target_model_id = _normalize_optional_string(target_model.get("model_id"))
+    if not target_model_id:
+        raise ValueError(f"Compile-run record does not include a target model id: {record_path}")
+    return target_model_id
 
 
 def write_live_run_record(
@@ -785,6 +925,25 @@ def _extract_job_metadata(job: Any) -> dict[str, Any] | None:
     return metadata or None
 
 
+def _extract_model_metadata(model: Any) -> dict[str, Any] | None:
+    if model is None:
+        return None
+    if isinstance(model, Mapping):
+        metadata = {
+            key: model[key]
+            for key in ("model_id", "url", "name")
+            if key in model and model[key] is not None
+        }
+        return metadata or None
+
+    metadata = {}
+    for attr_name in ("model_id", "url", "name"):
+        value = getattr(model, attr_name, None)
+        if value is not None:
+            metadata[attr_name] = value
+    return metadata or None
+
+
 def _utc_now_isoformat() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -794,6 +953,16 @@ def _write_json_record(path: Path, payload: Mapping[str, Any]) -> Path:
     resolved_path.parent.mkdir(parents=True, exist_ok=True)
     resolved_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return resolved_path
+
+
+def _normalize_output_tensor_mapping(
+    output_tensors: Mapping[str, np.ndarray | list[np.ndarray]],
+) -> dict[str, list[np.ndarray]]:
+    normalized: dict[str, list[np.ndarray]] = {}
+    for index, (_name, value) in enumerate(output_tensors.items()):
+        values = value if isinstance(value, list) else [value]
+        normalized[f"output_{index}"] = [np.asarray(item) for item in values]
+    return normalized
 
 
 def _strip_optional_quotes(value: str) -> str:

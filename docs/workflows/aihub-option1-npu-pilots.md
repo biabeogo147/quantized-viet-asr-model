@@ -79,9 +79,9 @@ Recommended local secret setup:
 Current preferred source resolution:
 
 - bundle metadata:
-  - `build/zipformer/bundle_manifest.json`
+  - `build/model_bundle/zipformer/qnn_u16u8/bundle_manifest.json`
 - base source model:
-  - `build/zipformer/artifacts/fixed_shapes/encoder.fixed.onnx`
+  - `build/quantize/zipformer/qnn_u16u8/fixed_shapes/encoder.fixed.onnx`
 - prepared AI Hub upload artifact:
   - `build/aihub/zipformer_encoder_option1/encoder.aihub.option1.onnx`
 
@@ -152,6 +152,10 @@ The Phase 2 records are the minimum handoff artifacts for every pilot run.
   - SHA256 hash
   - input specs
   - compile options
+- compile-only record:
+  - compile job id and URL
+  - resolved target model id and URL
+  - compile options
 - live run record:
   - device name
   - QAIRT version
@@ -167,8 +171,10 @@ For each pilot, record:
 - selected device name
 - prepared upload model path
 - prepared artifact record path
+- compile-only record path
 - compile job URL
 - compile job status
+- target model id
 - profile job URL
 - inference job URL
 - live run record path
