@@ -1,7 +1,10 @@
 ﻿from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
 from types import SimpleNamespace
+
+import numpy as np
 
 from quantize.calibration import build_calibration_records
 from quantize.config import (
@@ -19,7 +22,7 @@ from quantize.config import (
     DEFAULT_SIZE_BUDGET_MB,
 )
 from quantize.model_introspection import load_model_node_names, summarize_quantization_plan
-from quantize.presets import build_quantization_plan, list_supported_presets
+from quantize.presets import build_quantization_plan, get_preset_spec, list_supported_presets
 from quantize.qnn import run_qnn_static_quantization
 from quantize.runner import (
     build_size_budget_message,
@@ -29,9 +32,16 @@ from quantize.runner import (
     run_dynamic_quantization,
     run_static_quantization,
 )
+from quantize.types import AiHubQuantizeRecipe, CalibrationSample
 
 NAME = 'vpcd'
 DEFAULT_PRESET = 'sd8g2_quality'
+AIHUB_DTYPE_NAME_BY_QUANT_TYPE = {
+    "quint8": "INT8",
+    "qint8": "INT8",
+    "quint16": "INT16",
+    "qint16": "INT16",
+}
 
 
 def apply_default_arguments(parser) -> None:
@@ -68,6 +78,80 @@ def _resolve_output_path(args) -> Path:
     if args.preset == 'baseline_dynamic_int8':
         return DEFAULT_DYNAMIC_OUTPUT_ONNX
     return DEFAULT_OUTPUT_ONNX
+
+
+def resolve_vpcd_aihub_quantize_dtype_names(*, preset: str = DEFAULT_PRESET) -> dict[str, str]:
+    spec = get_preset_spec(preset)
+    activation_type = str(spec.activation_type).strip().lower()
+    weight_type = str(spec.weight_type).strip().lower()
+    resolved_activation_dtype = AIHUB_DTYPE_NAME_BY_QUANT_TYPE.get(activation_type)
+    resolved_weight_dtype = AIHUB_DTYPE_NAME_BY_QUANT_TYPE.get(weight_type)
+    if resolved_activation_dtype is None or resolved_weight_dtype is None:
+        raise ValueError(
+            "Unsupported VPCD quantization types for AI Hub mapping: "
+            f"activation_type={activation_type!r}, weight_type={weight_type!r}"
+        )
+    return {
+        "weights_dtype_name": resolved_weight_dtype,
+        "activations_dtype_name": resolved_activation_dtype,
+    }
+
+
+def calibration_records_to_aihub_dataset(records: Sequence[CalibrationSample]) -> dict[str, list[np.ndarray]]:
+    normalized_records = list(records)
+    if not normalized_records:
+        raise ValueError("records must not be empty.")
+
+    input_names = tuple(normalized_records[0].inputs.keys())
+    dataset = {name: [] for name in input_names}
+    for record in normalized_records:
+        current_input_names = tuple(record.inputs.keys())
+        if current_input_names != input_names:
+            raise ValueError(
+                "All calibration records must expose the same input ordering. "
+                f"Expected {input_names}, got {current_input_names}."
+            )
+        for name in input_names:
+            dataset[name].append(np.asarray(record.inputs[name]))
+    return dataset
+
+
+def build_vpcd_aihub_quantize_recipe(
+    *,
+    model_dir: str | Path,
+    fp32_onnx_path: str | Path,
+    calibration_source_path: str | Path,
+    preset: str = DEFAULT_PRESET,
+    max_calibration_samples: int = DEFAULT_MAX_CALIBRATION_SAMPLES,
+    max_generation_length: int = DEFAULT_MAX_GENERATION_LENGTH,
+    ort_provider: str = DEFAULT_ORT_PROVIDER,
+) -> AiHubQuantizeRecipe:
+    records, stats = build_calibration_records(
+        model_dir=Path(model_dir),
+        fp32_onnx_path=Path(fp32_onnx_path),
+        calibration_source_path=Path(calibration_source_path),
+        max_calibration_samples=max_calibration_samples,
+        max_generation_length=max_generation_length,
+        ort_provider=ort_provider,
+    )
+    if not records:
+        raise ValueError('Khong tao duoc calibration records tu file dau vao.')
+
+    spec = get_preset_spec(preset)
+    dtype_names = resolve_vpcd_aihub_quantize_dtype_names(preset=spec.name)
+    recipe_stats = dict(stats)
+    recipe_stats["quantize_preset"] = spec.name
+    recipe_stats["activation_type"] = spec.activation_type
+    recipe_stats["weight_type"] = spec.weight_type
+    return AiHubQuantizeRecipe(
+        preset=spec.name,
+        activation_type=spec.activation_type,
+        weight_type=spec.weight_type,
+        activations_dtype_name=dtype_names["activations_dtype_name"],
+        weights_dtype_name=dtype_names["weights_dtype_name"],
+        calibration_dataset=calibration_records_to_aihub_dataset(records),
+        calibration_stats=recipe_stats,
+    )
 
 
 def run(args) -> int:

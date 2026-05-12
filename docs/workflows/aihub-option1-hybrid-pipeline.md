@@ -8,6 +8,7 @@ Scope:
 - reuse `On_device_Ai_option1_pilots.ipynb`
 - run hybrid e2e pipelines without recompiling
 - compare final outputs only after the full pipeline finishes
+- hand off stable evidence to Phase 4 and Phase 5 without creating a second notebook
 
 ## What Phase 3 Proves
 
@@ -29,6 +30,11 @@ The notebook now has three layers per pilot:
 1. `Prepare / Compile / Resolve / Run` for Phase 2 reproducibility
 2. `Output Inspection (Intermediate Diagnostic Only)` for tensor sanity checks
 3. `Hybrid E2E Run` and `Final Compare` for Phase 3 correctness
+
+The same notebook now continues into:
+
+4. `Phase 4` benchmark and gate sections
+5. `Phase 5` packaging sections
 
 ## Common Reuse Pattern
 
@@ -126,3 +132,4 @@ Current sample-level fields:
 - still reuses Phase 2 compiled targets
 - `Zipformer` is still `encoder on NPU`, not full RNNT on NPU
 - `VPCD` still keeps tokenizer encode/decode on CPU
+- final promotion for deployment now depends on Phase 4 and is preserved by Phase 5 packages

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 
@@ -33,3 +34,14 @@ class QuantizationPlan:
     per_channel: bool
     activation_type: str
     weight_type: str
+
+
+@dataclass(frozen=True)
+class AiHubQuantizeRecipe:
+    preset: str
+    activation_type: str
+    weight_type: str
+    activations_dtype_name: str
+    weights_dtype_name: str
+    calibration_dataset: dict[str, list[np.ndarray]]
+    calibration_stats: dict[str, Any]

@@ -23,12 +23,25 @@ from model_bundle.projects.vpcd_shapes import (
     resolve_vpcd_model_input_shapes,
 )
 from model_bundle.projects.zipformer import ModelDirAcousticRuntime, prepare_encoder_inputs, resolve_fixed_encoder_frames
+from quantize.calibration import (
+    greedy_decode_ids,
+    iter_calibration_texts,
+    load_decoder_start_token_id,
+    resolve_ort_providers,
+)
+from quantize.projects.vpcd import (
+    DEFAULT_PRESET as VPCD_DEFAULT_PRESET,
+    build_vpcd_aihub_quantize_recipe,
+    resolve_vpcd_aihub_quantize_dtype_names as resolve_vpcd_quantize_dtype_names_from_preset,
+)
 from quantize.fixed_shapes import freeze_model_inputs
 from tools.paths import resolve_repo_path
+from transformers import AutoTokenizer
 
 DEFAULT_TARGET_RUNTIME = "precompiled_qnn_onnx"
 DEFAULT_COMPUTE_UNIT = "npu"
 InputSpecs = dict[str, tuple[tuple[int, ...], str]]
+MS_QDQ_OP_TYPES = {"QuantizeLinear", "DequantizeLinear"}
 ZIPFORMER_BOOL_SLICE_NODE_NAMES = (
     "/encoder/Slice_1",
     "/encoder/Slice_3",
@@ -449,6 +462,51 @@ def build_vpcd_input_specs(source: VpcdPilotSource) -> dict[str, tuple[tuple[int
     }
 
 
+def build_vpcd_fixed_shape_inputs(
+    source: VpcdPilotSource,
+    *,
+    input_ids: np.ndarray | list[int],
+    decoder_prefix: list[int] | np.ndarray | None = None,
+    attention_mask: np.ndarray | list[int] | None = None,
+) -> dict[str, np.ndarray]:
+    model_ids = np.asarray(input_ids, dtype=np.int64).reshape(-1)
+    prefix = np.asarray(
+        [int(source.decoder_start_token_id)] if decoder_prefix is None else decoder_prefix,
+        dtype=np.int64,
+    ).reshape(-1)
+    if prefix.size == 0:
+        raise ValueError("decoder_prefix must contain at least one token.")
+
+    if attention_mask is None:
+        actual_encoder_length = int(model_ids.size)
+    else:
+        normalized_attention_mask = np.asarray(attention_mask, dtype=np.int64).reshape(-1)
+        actual_encoder_length = int(normalized_attention_mask.sum())
+        if actual_encoder_length <= 0:
+            actual_encoder_length = int(model_ids.size)
+
+    return {
+        "input_ids": pad_token_row(
+            model_ids,
+            target_length=int(source.encoder_sequence),
+            pad_value=int(source.pad_token_id),
+        ),
+        "attention_mask": attention_mask_for_length(
+            actual_length=actual_encoder_length,
+            target_length=int(source.encoder_sequence),
+        ),
+        "decoder_input_ids": pad_token_row(
+            prefix,
+            target_length=int(source.decoder_sequence),
+            pad_value=int(source.pad_token_id),
+        ),
+        "decoder_attention_mask": attention_mask_for_length(
+            actual_length=int(prefix.size),
+            target_length=int(source.decoder_sequence),
+        ),
+    }
+
+
 def build_vpcd_single_step_inputs(
     source: VpcdPilotSource,
     *,
@@ -462,34 +520,11 @@ def build_vpcd_single_step_inputs(
         raise IndexError(f"VPCD sample_index out of range: {sample_index}")
 
     sample = golden_samples[sample_index]
-    model_ids = np.asarray(sample["input_ids"], dtype=np.int64).reshape(-1)
-    prefix = np.asarray(
-        [int(source.decoder_start_token_id)] if decoder_prefix is None else decoder_prefix,
-        dtype=np.int64,
-    ).reshape(-1)
-    if prefix.size == 0:
-        raise ValueError("decoder_prefix must contain at least one token.")
-
-    return {
-        "input_ids": pad_token_row(
-            model_ids,
-            target_length=int(source.encoder_sequence),
-            pad_value=int(source.pad_token_id),
-        ),
-        "attention_mask": attention_mask_for_length(
-            actual_length=int(model_ids.size),
-            target_length=int(source.encoder_sequence),
-        ),
-        "decoder_input_ids": pad_token_row(
-            prefix,
-            target_length=int(source.decoder_sequence),
-            pad_value=int(source.pad_token_id),
-        ),
-        "decoder_attention_mask": attention_mask_for_length(
-            actual_length=int(prefix.size),
-            target_length=int(source.decoder_sequence),
-        ),
-    }
+    return build_vpcd_fixed_shape_inputs(
+        source,
+        input_ids=np.asarray(sample["input_ids"], dtype=np.int64),
+        decoder_prefix=decoder_prefix,
+    )
 
 
 def build_vpcd_single_step_calibration_entries(
@@ -514,6 +549,191 @@ def build_vpcd_single_step_calibration_entries(
     return dataset
 
 
+def resolve_vpcd_model_dir(source: VpcdPilotSource) -> Path | None:
+    resolved_fp32_path = resolve_vpcd_fp32_source_model_path(source)
+    if resolved_fp32_path is not None and resolved_fp32_path.parent.name == "onnx":
+        candidate = resolved_fp32_path.parent.parent
+        if candidate.exists():
+            return candidate.resolve()
+    candidate = source.repo_root / "assets" / "vietnamese-punc-cap-denorm-v1"
+    if candidate.exists():
+        return candidate.resolve()
+    return None
+
+
+def resolve_vpcd_calibration_text_path(source: VpcdPilotSource) -> Path | None:
+    return _first_existing_path(
+        [
+            source.repo_root / "build" / "calibration" / "vlsp2020" / "vpcd_transcriptions.txt",
+        ]
+    )
+
+
+def resolve_vpcd_aihub_quantize_dtype_names(source: VpcdPilotSource) -> dict[str, str]:
+    manifest = ModelBundleManifest.from_path(source.bundle_manifest_path)
+    metadata = manifest.metadata if isinstance(manifest.metadata, dict) else {}
+    quantization = metadata.get("quantization", {}) if isinstance(metadata, dict) else {}
+    preset = _normalize_optional_string(str(quantization.get("preset", ""))) or VPCD_DEFAULT_PRESET
+    return resolve_vpcd_quantize_dtype_names_from_preset(preset=preset)
+
+
+def build_vpcd_autoregressive_calibration_entries(
+    source: VpcdPilotSource,
+    *,
+    fp32_model_path: str | Path | None = None,
+    model_dir: str | Path | None = None,
+    calibration_source_path: str | Path | None = None,
+    max_samples: int | None = None,
+    max_generation_length: int | None = None,
+    ort_provider: str = "cpu",
+    decode_ids_fn: Callable[[str], tuple[dict[str, np.ndarray], list[int]]] | None = None,
+) -> tuple[dict[str, list[np.ndarray]], dict[str, Any]]:
+    if decode_ids_fn is None:
+        resolved_fp32_model_path = (
+            Path(fp32_model_path).resolve()
+            if fp32_model_path is not None
+            else resolve_vpcd_fp32_source_model_path(source)
+        )
+        if resolved_fp32_model_path is None:
+            raise FileNotFoundError("Could not resolve a VPCD FP32 ONNX source model for autoregressive calibration.")
+
+        resolved_model_dir = (
+            Path(model_dir).resolve()
+            if model_dir is not None
+            else resolve_vpcd_model_dir(source)
+        )
+        if resolved_model_dir is None:
+            raise FileNotFoundError("Could not resolve a VPCD model directory for autoregressive calibration.")
+
+        resolved_calibration_source_path = (
+            Path(calibration_source_path).resolve()
+            if calibration_source_path is not None
+            else resolve_vpcd_calibration_text_path(source)
+        )
+        manifest = ModelBundleManifest.from_path(source.bundle_manifest_path)
+        metadata = manifest.metadata if isinstance(manifest.metadata, dict) else {}
+        quantization = metadata.get("quantization", {}) if isinstance(metadata, dict) else {}
+        preset = _normalize_optional_string(str(quantization.get("preset", ""))) or VPCD_DEFAULT_PRESET
+        if resolved_calibration_source_path is not None:
+            recipe = build_vpcd_aihub_quantize_recipe(
+                model_dir=resolved_model_dir,
+                fp32_onnx_path=resolved_fp32_model_path,
+                calibration_source_path=resolved_calibration_source_path,
+                preset=preset,
+                max_calibration_samples=max(0, int(max_samples)) if max_samples is not None else 128,
+                max_generation_length=max(1, int(max_generation_length or source.decoder_sequence)),
+                ort_provider=ort_provider,
+            )
+            return recipe.calibration_dataset, dict(recipe.calibration_stats)
+
+        tokenizer = AutoTokenizer.from_pretrained(resolved_model_dir, local_files_only=True)
+        decoder_start_token_id = load_decoder_start_token_id(resolved_model_dir, tokenizer)
+        session = ort.InferenceSession(
+            os.fspath(resolved_fp32_model_path),
+            providers=resolve_ort_providers(ort_provider),
+        )
+
+        def _decode_ids_with_fp32(text: str) -> tuple[dict[str, np.ndarray], list[int]]:
+            return greedy_decode_ids(
+                session=session,
+                tokenizer=tokenizer,
+                text=text,
+                decoder_start_token_id=decoder_start_token_id,
+                max_generation_length=max(1, int(max_generation_length or source.decoder_sequence)),
+            )
+
+        decode_ids_fn = _decode_ids_with_fp32
+        stats_fallback = {
+            "session_providers": ",".join(session.get_providers()),
+            "fp32_model_path": resolved_fp32_model_path.as_posix(),
+            "model_dir": resolved_model_dir.as_posix(),
+        }
+    else:
+        stats_fallback = {}
+
+    sample_limit = None if max_samples is None else max(0, int(max_samples))
+    normalized_generation_length = max(1, int(max_generation_length or source.decoder_sequence))
+    dataset = {
+        "input_ids": [],
+        "attention_mask": [],
+        "decoder_input_ids": [],
+        "decoder_attention_mask": [],
+    }
+    stats: dict[str, Any] = {
+        "strategy": "autoregressive_fp32",
+        "text_samples": 0,
+        "records": 0,
+        "max_encoder_len": 0,
+        "max_decoder_prefix_len": 0,
+        "requested_provider": ort_provider,
+        "session_providers": "injected",
+        "calibration_source_path": None,
+        "fp32_model_path": None,
+        "model_dir": None,
+        "quantize_preset": None,
+        "activation_type": None,
+        "weight_type": None,
+    }
+    stats.update(stats_fallback)
+
+    texts: list[str] = []
+    if calibration_source_path is not None:
+        resolved_calibration_source_path = Path(calibration_source_path).resolve()
+        stats["calibration_source_path"] = resolved_calibration_source_path.as_posix()
+        limit = sample_limit if sample_limit is not None else 2**31 - 1
+        texts.extend(iter_calibration_texts(resolved_calibration_source_path, max_samples=limit))
+    else:
+        resolved_calibration_source_path = resolve_vpcd_calibration_text_path(source)
+        if resolved_calibration_source_path is not None:
+            stats["calibration_source_path"] = resolved_calibration_source_path.as_posix()
+            limit = sample_limit if sample_limit is not None else 2**31 - 1
+            texts.extend(iter_calibration_texts(resolved_calibration_source_path, max_samples=limit))
+        else:
+            for sample in read_jsonl(source.golden_samples_path):
+                raw_text = str(sample.get("raw_text", "")).strip()
+                if raw_text:
+                    texts.append(raw_text)
+                    if sample_limit is not None and len(texts) >= sample_limit:
+                        break
+
+    if sample_limit is not None:
+        texts = texts[:sample_limit]
+    if not texts:
+        raise ValueError("Could not resolve any VPCD calibration texts for autoregressive calibration.")
+
+    for text in texts:
+        encoder_inputs, decoded_ids = decode_ids_fn(text)
+        normalized_decoded_ids = [int(token_id) for token_id in decoded_ids]
+        if not normalized_decoded_ids:
+            raise ValueError("decode_ids_fn returned an empty decoded_ids sequence.")
+        if normalized_decoded_ids[0] != int(source.decoder_start_token_id):
+            raise ValueError("decoded_ids must start with source.decoder_start_token_id.")
+
+        encoder_input_ids = np.asarray(encoder_inputs["input_ids"], dtype=np.int64).reshape(-1)
+        encoder_attention_mask = np.asarray(encoder_inputs["attention_mask"], dtype=np.int64).reshape(-1)
+        if len(normalized_decoded_ids) == 1:
+            prefix_lengths = [1]
+        else:
+            prefix_lengths = list(range(1, min(len(normalized_decoded_ids), int(source.decoder_sequence) + 1)))
+
+        for prefix_length in prefix_lengths:
+            inputs = build_vpcd_fixed_shape_inputs(
+                source,
+                input_ids=encoder_input_ids,
+                attention_mask=encoder_attention_mask,
+                decoder_prefix=normalized_decoded_ids[:prefix_length],
+            )
+            for name, value in inputs.items():
+                dataset[name].append(np.asarray(value, dtype=np.int64))
+            stats["records"] = int(stats["records"]) + 1
+            stats["max_decoder_prefix_len"] = max(int(stats["max_decoder_prefix_len"]), int(prefix_length))
+
+        stats["text_samples"] = int(stats["text_samples"]) + 1
+        stats["max_encoder_len"] = max(int(stats["max_encoder_len"]), int(encoder_attention_mask.sum()))
+
+    return dataset, stats
+
+
 def wrap_single_inference_inputs(inputs: dict[str, np.ndarray]) -> dict[str, list[np.ndarray]]:
     return {name: [value] for name, value in inputs.items()}
 
@@ -527,14 +747,47 @@ def resolve_vpcd_fp32_source_model_path(source: VpcdPilotSource) -> Path | None:
     )
 
 
+def rewrite_aihub_compatible_qdq_domains(model: onnx.ModelProto) -> None:
+    touched_ms_qdq = False
+    for node in model.graph.node:
+        if node.domain == "com.microsoft" and node.op_type in MS_QDQ_OP_TYPES:
+            node.domain = ""
+            touched_ms_qdq = True
+
+    if not touched_ms_qdq:
+        return
+
+    has_remaining_ms_domain_nodes = any(node.domain == "com.microsoft" for node in model.graph.node)
+    preserved_opsets = [
+        opset
+        for opset in model.opset_import
+        if opset.domain != "com.microsoft" or has_remaining_ms_domain_nodes
+    ]
+    del model.opset_import[:]
+    model.opset_import.extend(preserved_opsets)
+
+
 def prepare_vpcd_option1_source_model(
     source: VpcdPilotSource,
     *,
     output_path: str | Path | None = None,
+    strategy: str | None = None,
 ) -> tuple[Path, bool]:
+    normalized_strategy = _normalize_optional_string(strategy) or "prefer_fp32_fixed"
     prepared_output_path = Path(output_path).resolve() if output_path is not None else (
         source.repo_root / "build" / "aihub" / "vpcd_fp32_fixed" / "model.fp32.fixed.onnx"
     ).resolve()
+    if normalized_strategy == "direct_qdq_sanitized":
+        prepared_output_path.parent.mkdir(parents=True, exist_ok=True)
+        model = onnx.load(source.model_path.as_posix())
+        rewrite_aihub_compatible_qdq_domains(model)
+        onnx.checker.check_model(model, full_check=True)
+        onnx.save(model, prepared_output_path.as_posix())
+        return prepared_output_path, True
+
+    if normalized_strategy != "prefer_fp32_fixed":
+        raise ValueError(f"Unsupported VPCD Option 1 source strategy: {normalized_strategy}")
+
     fp32_source_path = resolve_vpcd_fp32_source_model_path(source)
     if fp32_source_path is None:
         prepared_output_path.parent.mkdir(parents=True, exist_ok=True)

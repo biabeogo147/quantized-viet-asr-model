@@ -159,6 +159,81 @@ def _write_minimal_vpcd_fp32_model(model_path: Path) -> None:
     onnx.save(model, model_path.as_posix())
 
 
+def _write_minimal_vpcd_ms_qdq_model(model_path: Path) -> None:
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    scale = helper.make_tensor("scale", TensorProto.FLOAT, [1], [0.1])
+    zero_point = helper.make_tensor("zero_point", TensorProto.UINT8, [1], [0])
+    graph = helper.make_graph(
+        nodes=[
+            helper.make_node(
+                "QuantizeLinear",
+                inputs=["decoder_input_ids", "scale", "zero_point"],
+                outputs=["quantized"],
+                domain="com.microsoft",
+                name="ms_quantize",
+            ),
+            helper.make_node(
+                "DequantizeLinear",
+                inputs=["quantized", "scale", "zero_point"],
+                outputs=["logits"],
+                domain="com.microsoft",
+                name="ms_dequantize",
+            ),
+        ],
+        name="vpcd-ms-qdq-minimal",
+        inputs=[
+            helper.make_tensor_value_info("decoder_input_ids", TensorProto.FLOAT, [1, 4]),
+        ],
+        outputs=[
+            helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 4]),
+        ],
+        initializer=[scale, zero_point],
+    )
+    model = helper.make_model(
+        graph,
+        opset_imports=[helper.make_opsetid("", 17), helper.make_opsetid("com.microsoft", 1)],
+    )
+    onnx.save(model, model_path.as_posix())
+
+
+def _build_ms_qdq_with_ms_gelu_model() -> onnx.ModelProto:
+    scale = helper.make_tensor("scale", TensorProto.FLOAT, [1], [0.1])
+    zero_point = helper.make_tensor("zero_point", TensorProto.UINT8, [1], [0])
+    graph = helper.make_graph(
+        nodes=[
+            helper.make_node(
+                "QuantizeLinear",
+                inputs=["x", "scale", "zero_point"],
+                outputs=["quantized"],
+                domain="com.microsoft",
+                name="ms_quantize",
+            ),
+            helper.make_node(
+                "DequantizeLinear",
+                inputs=["quantized", "scale", "zero_point"],
+                outputs=["dequantized"],
+                domain="com.microsoft",
+                name="ms_dequantize",
+            ),
+            helper.make_node(
+                "Gelu",
+                inputs=["dequantized"],
+                outputs=["y"],
+                domain="com.microsoft",
+                name="ms_gelu",
+            ),
+        ],
+        name="ms-qdq-with-gelu",
+        inputs=[helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4])],
+        outputs=[helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 4])],
+        initializer=[scale, zero_point],
+    )
+    return helper.make_model(
+        graph,
+        opset_imports=[helper.make_opsetid("", 17), helper.make_opsetid("com.microsoft", 1)],
+    )
+
+
 def _build_zipformer_bool_slice_model() -> onnx.ModelProto:
     bool_mask = helper.make_tensor_value_info("/GreaterOrEqual_output_0", TensorProto.BOOL, [1, 8])
     graph_output = helper.make_tensor_value_info("masked", TensorProto.FLOAT, [1, 1, 4])
@@ -348,6 +423,62 @@ def test_prepare_vpcd_option1_source_model_copies_qdq_fallback_into_canonical_ou
     assert prepared_model_path.read_bytes() == b"qdq-model"
 
 
+def test_rewrite_aihub_compatible_qdq_domains_converts_ms_qdq_nodes_to_default_domain(tmp_path):
+    from tools.aihub_option1_pilots import rewrite_aihub_compatible_qdq_domains
+
+    model_path = tmp_path / "model.mobile.onnx"
+    _write_minimal_vpcd_ms_qdq_model(model_path)
+    model = onnx.load(model_path.as_posix())
+
+    rewrite_aihub_compatible_qdq_domains(model)
+
+    rewritten_domains = {(node.name, node.op_type): node.domain for node in model.graph.node}
+    assert rewritten_domains[("ms_quantize", "QuantizeLinear")] == ""
+    assert rewritten_domains[("ms_dequantize", "DequantizeLinear")] == ""
+    assert all(opset.domain != "com.microsoft" for opset in model.opset_import)
+    onnx.checker.check_model(model, full_check=True)
+
+
+def test_rewrite_aihub_compatible_qdq_domains_preserves_ms_opset_when_non_qdq_ms_nodes_remain():
+    from tools.aihub_option1_pilots import rewrite_aihub_compatible_qdq_domains
+
+    model = _build_ms_qdq_with_ms_gelu_model()
+
+    rewrite_aihub_compatible_qdq_domains(model)
+
+    rewritten_domains = {(node.name, node.op_type): node.domain for node in model.graph.node}
+    assert rewritten_domains[("ms_quantize", "QuantizeLinear")] == ""
+    assert rewritten_domains[("ms_dequantize", "DequantizeLinear")] == ""
+    assert rewritten_domains[("ms_gelu", "Gelu")] == "com.microsoft"
+    assert any(opset.domain == "com.microsoft" for opset in model.opset_import)
+    onnx.checker.check_model(model, full_check=True)
+
+
+def test_prepare_vpcd_option1_source_model_can_prepare_sanitized_qdq_source_even_when_fp32_exists(tmp_path):
+    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+    qdq_model_path = bundle_dir / "model.mobile.onnx"
+    _write_minimal_vpcd_ms_qdq_model(qdq_model_path)
+    fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
+    _write_minimal_vpcd_fp32_model(fp32_model_path)
+
+    source = resolve_vpcd_pilot_source(repo_root)
+    prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(
+        source,
+        output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.qdq.onnx",
+        strategy="direct_qdq_sanitized",
+    )
+
+    prepared_model = onnx.load(prepared_model_path.as_posix())
+    assert is_quantized_source is True
+    assert prepared_model_path == (repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.qdq.onnx").resolve()
+    assert all(node.domain == "" for node in prepared_model.graph.node if node.op_type in {"QuantizeLinear", "DequantizeLinear"})
+
+
 def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):
     from tools.aihub_option1_pilots import VpcdPilotSource, build_vpcd_single_step_inputs
 
@@ -400,6 +531,195 @@ def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):
     assert inputs["attention_mask"][0, 4:].tolist() == [0, 0, 0, 0]
     assert inputs["decoder_input_ids"][0].tolist() == [2, 1, 1, 1]
     assert inputs["decoder_attention_mask"][0].tolist() == [1, 0, 0, 0]
+
+
+def test_build_vpcd_autoregressive_calibration_entries_expands_decoder_prefixes(tmp_path):
+    from tools.aihub_option1_pilots import VpcdPilotSource, build_vpcd_autoregressive_calibration_entries
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    golden_samples = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "golden_samples.jsonl"
+    golden_samples.parent.mkdir(parents=True, exist_ok=True)
+    golden_samples.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "raw_text": "xin chao",
+                        "input_ids": [0, 11, 12, 2],
+                        "expected_output": "Xin chao.",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "raw_text": "xin chao ban",
+                        "input_ids": [0, 11, 12, 13, 2],
+                        "expected_output": "Xin chao ban.",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    source = VpcdPilotSource(
+        repo_root=repo_root,
+        bundle_manifest_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "bundle_manifest.json",
+        model_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "model.mobile.onnx",
+        golden_samples_path=golden_samples,
+        encoder_sequence=8,
+        decoder_sequence=4,
+        pad_token_id=1,
+        eos_token_id=2,
+        decoder_start_token_id=2,
+        input_text_case="lower",
+        is_quantized_source=False,
+    )
+
+    decoded_by_text = {
+        "xin chao": (
+            {
+                "input_ids": np.asarray([[0, 11, 12, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1, 1]], dtype=np.int64),
+            },
+            [2, 101, 102, 2],
+        ),
+        "xin chao ban": (
+            {
+                "input_ids": np.asarray([[0, 11, 12, 13, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1, 1, 1]], dtype=np.int64),
+            },
+            [2, 201, 202],
+        ),
+    }
+
+    dataset, stats = build_vpcd_autoregressive_calibration_entries(
+        source,
+        decode_ids_fn=lambda text: decoded_by_text[text],
+        max_samples=2,
+    )
+
+    assert stats["strategy"] == "autoregressive_fp32"
+    assert stats["text_samples"] == 2
+    assert stats["records"] == 5
+    assert stats["max_encoder_len"] == 5
+    assert stats["max_decoder_prefix_len"] == 3
+    assert stats["session_providers"] == "injected"
+    assert dataset["input_ids"][0].shape == (1, 8)
+    assert dataset["attention_mask"][0][0, :4].tolist() == [1, 1, 1, 1]
+    assert dataset["decoder_input_ids"][0][0].tolist() == [2, 1, 1, 1]
+    assert dataset["decoder_attention_mask"][0][0].tolist() == [1, 0, 0, 0]
+    assert dataset["decoder_input_ids"][1][0].tolist() == [2, 101, 1, 1]
+    assert dataset["decoder_attention_mask"][1][0].tolist() == [1, 1, 0, 0]
+    assert dataset["decoder_input_ids"][2][0].tolist() == [2, 101, 102, 1]
+    assert dataset["decoder_attention_mask"][2][0].tolist() == [1, 1, 1, 0]
+    assert dataset["decoder_input_ids"][4][0].tolist() == [2, 201, 1, 1]
+    assert dataset["decoder_attention_mask"][4][0].tolist() == [1, 1, 0, 0]
+
+
+def test_build_vpcd_autoregressive_calibration_entries_prefers_text_file(tmp_path):
+    from tools.aihub_option1_pilots import VpcdPilotSource, build_vpcd_autoregressive_calibration_entries
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    calibration_path = repo_root / "build" / "calibration" / "vlsp2020" / "vpcd_transcriptions.txt"
+    calibration_path.parent.mkdir(parents=True, exist_ok=True)
+    calibration_path.write_text("dong mot\ndong hai\n", encoding="utf-8")
+
+    golden_samples = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "golden_samples.jsonl"
+    golden_samples.parent.mkdir(parents=True, exist_ok=True)
+    golden_samples.write_text(
+        json.dumps(
+            {
+                "raw_text": "khong duoc dung",
+                "input_ids": [0, 11, 12, 2],
+                "expected_output": "Khong duoc dung.",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    source = VpcdPilotSource(
+        repo_root=repo_root,
+        bundle_manifest_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "bundle_manifest.json",
+        model_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "model.mobile.onnx",
+        golden_samples_path=golden_samples,
+        encoder_sequence=8,
+        decoder_sequence=4,
+        pad_token_id=1,
+        eos_token_id=2,
+        decoder_start_token_id=2,
+        input_text_case="lower",
+        is_quantized_source=False,
+    )
+
+    seen_texts: list[str] = []
+
+    def _decode_ids(text: str) -> tuple[dict[str, np.ndarray], list[int]]:
+        seen_texts.append(text)
+        return (
+            {
+                "input_ids": np.asarray([[0, 11, 12, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1, 1]], dtype=np.int64),
+            },
+            [2, 10, 2],
+        )
+
+    _, stats = build_vpcd_autoregressive_calibration_entries(
+        source,
+        decode_ids_fn=_decode_ids,
+        max_samples=2,
+    )
+
+    assert seen_texts == ["dong mot", "dong hai"]
+    assert stats["calibration_source_path"] == calibration_path.resolve().as_posix()
+    assert stats["text_samples"] == 2
+    assert stats["records"] == 4
+
+
+def test_resolve_vpcd_aihub_quantize_dtype_names_uses_quantize_preset_source_of_truth(tmp_path):
+    from tools.aihub_option1_pilots import resolve_vpcd_aihub_quantize_dtype_names, resolve_vpcd_pilot_source
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+
+    source = resolve_vpcd_pilot_source(repo_root)
+    dtype_names = resolve_vpcd_aihub_quantize_dtype_names(source)
+
+    assert dtype_names == {
+        "weights_dtype_name": "INT8",
+        "activations_dtype_name": "INT16",
+    }
+
+
+def test_resolve_vpcd_aihub_quantize_dtype_names_prefers_preset_over_stale_bundle_types(tmp_path):
+    from tools.aihub_option1_pilots import resolve_vpcd_aihub_quantize_dtype_names, resolve_vpcd_pilot_source
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+    manifest_path = bundle_dir / "bundle_manifest.json"
+    manifest = ModelBundleManifest.from_path(manifest_path)
+    manifest.metadata["quantization"]["preset"] = "baseline_dynamic_int8"
+    manifest.metadata["quantization"]["activation_type"] = "quint16"
+    manifest.metadata["quantization"]["weight_type"] = "quint8"
+    manifest.write_json(manifest_path)
+
+    source = resolve_vpcd_pilot_source(repo_root)
+    dtype_names = resolve_vpcd_aihub_quantize_dtype_names(source)
+
+    assert dtype_names == {
+        "weights_dtype_name": "INT8",
+        "activations_dtype_name": "INT8",
+    }
 
 
 def test_strip_model_io_value_info_conflicts_removes_output_duplicates():

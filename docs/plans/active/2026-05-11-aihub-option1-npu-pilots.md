@@ -93,6 +93,42 @@
     - current outputs collapse to placeholder-like text with `generated_ids = [0, 1, 2]`
     - tensor diagnostic already shows large drift versus CPU baseline, so this lane must be treated as a likely `NO_GO` candidate until proven otherwise
 
+### Phase 4 Status: Implemented In Code And Notebook, Pending Live Gate Refresh
+
+- the dedicated gate module now exists in:
+  - `src/tools/aihub_option1_phase4_gate.py`
+- focused tests now cover:
+  - benchmark sweep summaries
+  - correctness severity classification
+  - footprint summaries
+  - per-pilot recommendations
+  - deterministic Phase 4 gate record writing
+- the shared notebook now includes:
+  - `Phase 4 Config`
+  - `Zipformer Phase 4 Benchmark And Gate`
+  - `VPCD Phase 4 Benchmark And Gate`
+  - `Phase 4 Recommendation Summary`
+- the Phase 4 workflow doc now exists in:
+  - `docs/workflows/aihub-option1-phase4-gate.md`
+
+### Phase 5 Status: Implemented In Code And Notebook, Pending Live Packaging Refresh
+
+- the dedicated contract packager now exists in:
+  - `src/tools/aihub_option1_phase5_contract.py`
+- focused tests now cover:
+  - manifest generation
+  - evidence resolution
+  - package materialization
+  - promotion-status mapping
+  - normalized I/O contract export
+- the shared notebook now includes:
+  - `Phase 5 Config`
+  - `Package Zipformer Phase 5 Contract`
+  - `Package VPCD Phase 5 Contract`
+  - `Phase 5 Packaging Summary`
+- workflow docs now exist in:
+  - `docs/workflows/aihub-option1-phase5-contract.md`
+
 ### Known Constraints
 
 - The verified Zipformer lane currently uses a prepared source model and direct compile.
@@ -142,7 +178,7 @@
 
 ### Phase 4: Quality And Performance Gate
 
-**Status:** Next Coding Phase
+**Status:** Implemented In Code And Notebook, Pending Live Gate Refresh
 
 **Purpose:**
 - decide whether the Option 1 artifacts are good enough to justify deployment work
@@ -156,7 +192,7 @@
 
 ### Phase 5: Deployment Contract Packaging
 
-**Status:** Planned, Not Blocked By Phase 4 Verdict
+**Status:** Implemented In Code And Notebook, Pending Live Packaging Refresh
 
 **Purpose:**
 - freeze the artifact contract that downstream integration and research handoff will consume, even when a pilot is not promotable
@@ -1052,7 +1088,7 @@ Expected: prints `ok`.
 
 ## Phase 4 Scope
 
-Phase 4 is now the next coding phase.
+Phase 4 is now implemented in the shared Python lane.
 
 The purpose of Phase 4 is to turn the raw Phase 3 notebook outputs into a formal quality and performance gate for `Option 1`.
 
@@ -1554,7 +1590,7 @@ Expected: prints `ok`.
 
 ## Phase 5 Scope
 
-Phase 5 is the packaging phase for `Option 1`.
+Phase 5 is now implemented as the packaging phase for `Option 1`.
 
 The purpose of Phase 5 is to turn the working research lane and its evidence into a deterministic contract package that later consumers can trust.
 
@@ -1982,3 +2018,367 @@ Expected: prints `ok`.
 5. Implement `Task 5` to export normalized I/O contracts and deployment notes.
 6. Implement `Task 6` to refactor `On_device_Ai_option1_pilots.ipynb` with Phase 5 sections.
 7. Run `Task 7` verification before calling Phase 5 complete.
+
+## Phase 6 Scope
+
+Phase 6 is the first Android-app phase in the Option 1 roadmap.
+
+The purpose is narrow and explicit:
+
+- take the Phase 5 contract package as the only promoted Python-side input
+- sync that package into `BKMeeting/modelassets`
+- teach the existing ORT + QNN Android runtime to load the `precompiled_qnn_onnx` artifact through the current manifest-driven asset flow
+- validate the selected pilot on device without changing the runtime boundary away from ONNX Runtime
+
+Phase 6 should start with `Zipformer` first because its current evidence is stronger.
+
+`VPCD` can still be wired in the same phase, but if its Phase 4 verdict remains weak it must stay experimental:
+
+- present in assets for reproducibility
+- available only behind explicit selection
+- not promoted as the default punctuation path
+
+### Phase 6 Non-Goals
+
+- moving the runtime boundary to QAIRT-native integration
+- changing the current CPU/NPU split:
+  - `Zipformer`: encoder only on NPU
+  - `VPCD`: model session only on NPU, tokenizer stays CPU
+- redesigning the provider stack from scratch if the current ORT + QNN layer can already load the compiled artifacts
+- using notebook records directly inside the Android app
+- treating `research_only` packages as production-ready
+
+## Phase 6 File Structure
+
+**Python-side sync and contract handoff**
+
+- Modify: `src/tools/sync_android_bundle.py`
+- Test: `test/test_sync_android_bundle.py`
+
+**Android asset catalogs and capability detection**
+
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/catalog/AsrModelCatalog.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/postprocess/catalog/PunctuationModelCatalog.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/ModelBundleQnnCapability.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/AsrProviderAssignment.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/PunctuationProviderAssignment.java`
+
+**Android session loading**
+
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/model/OnnxSessionManager.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/postprocess/model/PunctuationOnnxSessionManager.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/OrtSessionOptionsFactory.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/QnnProviderOptions.java`
+
+**Android tests**
+
+- Modify: `../BKMeeting/app/src/test/java/com/navis/bkacs/runtime/AsrProviderAssignmentTest.java`
+- Modify: `../BKMeeting/app/src/test/java/com/navis/bkacs/runtime/PunctuationProviderAssignmentTest.java`
+- Modify: `../BKMeeting/app/src/test/java/com/navis/bkacs/modelbundle/ModelAssetsContractTest.java`
+- Modify if needed: `../BKMeeting/app/src/test/java/com/navis/bkacs/asr/model/OnnxSessionManagerTest.java`
+- Modify if needed: `../BKMeeting/app/src/test/java/com/navis/bkacs/postprocess/model/PunctuationOnnxSessionManagerTest.java`
+- Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/asr/bundle/ZipformerBundleParityTest.java`
+- Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/asr/runtime/QnnHtpStrictDeviceTest.java`
+- Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/postprocess/runtime/VpcdQnnHtpStrictDeviceTest.java`
+
+## Phase 6 Asset Contract Shape
+
+Phase 6 should not ask Android to interpret the full Phase 5 research package directly.
+
+Instead, the sync tool should materialize an Android-ready payload under `BKMeeting/modelassets`, keeping the existing `bundle_manifest.json` entrypoint and adding only the extra files Android truly needs.
+
+Minimum Android payload per pilot:
+
+- `bundle_manifest.json`
+- compiled `precompiled_qnn_onnx` model file
+- `io_contract.json`
+- any runtime-required fixtures already expected by the current bundle flow
+
+The synthesized Android-facing `bundle_manifest.json` should carry enough metadata for runtime capability detection:
+
+- `asset_namespace`
+- `model_name`
+- `model_variant`
+- `metadata.quantization`
+- `metadata.qnn_readiness`
+- `metadata.option1`
+  - `target_runtime = precompiled_qnn_onnx`
+  - `run_label`
+  - `promotion_status`
+  - `device_name`
+  - `qairt_version`
+  - `io_contract_file = io_contract.json`
+
+`io_contract.json` remains the precise place for:
+
+- input tensor names
+- input dtypes
+- input shapes
+- output tensor names
+- output dtypes
+- output shapes
+- special handling such as `truncate_64bit_io`
+
+## Phase 6 Detailed Tasks
+
+### Task 1: Extend The Android Sync Tool For Phase 5 Contract Packages
+
+**Files:**
+
+- Modify: `src/tools/sync_android_bundle.py`
+- Test: `test/test_sync_android_bundle.py`
+
+- [ ] **Step 1: Write a failing test for syncing a Phase 5 Option 1 contract package**
+
+Test behavior:
+
+- given a Phase 5 contract package directory for `zipformer` or `vpcd`
+- the sync tool copies the compiled model into the right Android asset namespace
+- the sync tool writes an Android-facing `bundle_manifest.json`
+- the sync tool copies `io_contract.json`
+
+- [ ] **Step 2: Run the test to confirm it fails**
+
+Run: `pytest test/test_sync_android_bundle.py -k option1 -v`
+
+Expected: failure because the sync tool only understands bundle variants today.
+
+- [ ] **Step 3: Implement contract-package-aware sync**
+
+The simplest acceptable implementation is:
+
+- extend `sync_android_bundle.py` with an Option 1 contract input mode
+- keep namespace mapping deterministic
+- refuse to sync packages without the minimum Phase 5 evidence files
+
+- [ ] **Step 4: Run the focused sync test to verify it passes**
+
+Run: `pytest test/test_sync_android_bundle.py -k option1 -v`
+
+Expected: pass.
+
+### Task 2: Define The Android-Facing Option 1 Manifest Contract
+
+**Files:**
+
+- Modify: `src/tools/sync_android_bundle.py`
+- Test: `test/test_sync_android_bundle.py`
+- Modify: `../BKMeeting/app/src/test/java/com/navis/bkacs/modelbundle/ModelAssetsContractTest.java`
+
+- [ ] **Step 1: Write a failing test for the synthesized manifest metadata**
+
+Test behavior:
+
+- the synced manifest contains:
+  - `metadata.option1.target_runtime`
+  - `metadata.option1.run_label`
+  - `metadata.option1.promotion_status`
+  - `metadata.option1.io_contract_file`
+
+- [ ] **Step 2: Run the tests to confirm they fail**
+
+Run:
+
+- `pytest test/test_sync_android_bundle.py -k option1_manifest -v`
+- `.\gradlew.bat :app:testDebugUnitTest --tests "com.navis.bkacs.modelbundle.ModelAssetsContractTest" --no-daemon`
+
+Expected: failures because the new manifest contract does not exist yet.
+
+- [ ] **Step 3: Implement the Android-facing Option 1 metadata block**
+
+Keep this rule:
+
+- Android still enters through `bundle_manifest.json`
+- `io_contract.json` is referenced from the manifest, not guessed by filename conventions alone
+
+- [ ] **Step 4: Re-run the focused tests**
+
+Expected: pass.
+
+### Task 3: Register Option 1 Packages In The Android Catalogs
+
+**Files:**
+
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/catalog/AsrModelCatalog.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/postprocess/catalog/PunctuationModelCatalog.java`
+- Modify: corresponding catalog tests
+
+- [ ] **Step 1: Write failing catalog tests for new Option 1 entries**
+
+Test behavior:
+
+- `Zipformer` gets an explicit catalog entry for the synced Phase 6 Option 1 asset namespace
+- `VPCD` gets an explicit catalog entry only when the package is intentionally exposed
+
+- [ ] **Step 2: Run the focused tests to confirm they fail**
+
+Run:
+
+- `.\gradlew.bat :app:testDebugUnitTest --tests "com.navis.bkacs.asr.catalog.AsrModelCatalogTest" --tests "com.navis.bkacs.postprocess.catalog.PunctuationModelCatalogTest" --no-daemon`
+
+Expected: failure because catalog entries do not exist yet.
+
+- [ ] **Step 3: Implement catalog entries and promotion rules**
+
+Recommended rule:
+
+- `deployment_candidate` packages may appear in the normal selectable catalog
+- `research_only` packages must either stay hidden or be clearly marked experimental
+
+- [ ] **Step 4: Re-run the focused catalog tests**
+
+Expected: pass.
+
+### Task 4: Teach Runtime Capability Detection To Recognize Option 1 Precompiled Bundles
+
+**Files:**
+
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/ModelBundleQnnCapability.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/AsrProviderAssignment.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/PunctuationProviderAssignment.java`
+- Test: corresponding runtime unit tests
+
+- [ ] **Step 1: Write failing runtime tests for precompiled bundle recognition**
+
+Test behavior:
+
+- the runtime treats `metadata.option1.target_runtime = precompiled_qnn_onnx` as QNN-capable
+- this recognition must not depend on the old `QDQ + fixed_shapes` check alone
+
+- [ ] **Step 2: Run the focused runtime tests to confirm they fail**
+
+Run:
+
+- `.\gradlew.bat :app:testDebugUnitTest --tests "com.navis.bkacs.runtime.AsrProviderAssignmentTest" --tests "com.navis.bkacs.runtime.PunctuationProviderAssignmentTest" --no-daemon`
+
+Expected: failure because Option 1 precompiled bundles are not recognized yet.
+
+- [ ] **Step 3: Implement precompiled capability detection**
+
+Keep the logic narrow:
+
+- existing QDQ candidate detection remains untouched for the current local-QNN lane
+- add a second path for `precompiled_qnn_onnx`
+- do not let malformed manifests silently fall back to “QNN-capable”
+
+- [ ] **Step 4: Re-run the focused runtime tests**
+
+Expected: pass.
+
+### Task 5: Load Precompiled Option 1 Artifacts Through The Existing Session Managers
+
+**Files:**
+
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/asr/model/OnnxSessionManager.java`
+- Modify: `../BKMeeting/app/src/main/java/com/navis/bkacs/postprocess/model/PunctuationOnnxSessionManager.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/OrtSessionOptionsFactory.java`
+- Modify only if needed: `../BKMeeting/app/src/main/java/com/navis/bkacs/runtime/QnnProviderOptions.java`
+
+- [ ] **Step 1: Write failing unit tests for precompiled artifact loading**
+
+Test behavior:
+
+- the session managers can resolve the synced Option 1 model asset
+- the runtime keeps using the existing ORT + QNN provider stack
+- integer inputs follow `io_contract.json`, including `truncate_64bit_io` when required
+
+- [ ] **Step 2: Run the focused session-manager tests to confirm they fail**
+
+Run:
+
+- `.\gradlew.bat :app:testDebugUnitTest --tests "com.navis.bkacs.asr.model.OnnxSessionManagerTest" --tests "com.navis.bkacs.postprocess.model.PunctuationOnnxSessionManagerTest" --no-daemon`
+
+Expected: failure because the session managers do not know the Phase 6 contract yet.
+
+- [ ] **Step 3: Implement precompiled loading with minimal provider changes**
+
+Preferred rule:
+
+- reuse the existing provider-option plumbing first
+- only touch `OrtSessionOptionsFactory` or `QnnProviderOptions` if the current path cannot create valid sessions for the compiled artifact
+
+- [ ] **Step 4: Re-run the focused unit tests**
+
+Expected: pass.
+
+### Task 6: Validate The Selected Option 1 Asset On Real Android Hardware
+
+**Files:**
+
+- Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/asr/bundle/ZipformerBundleParityTest.java`
+- Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/asr/runtime/QnnHtpStrictDeviceTest.java`
+- Modify if needed: `../BKMeeting/app/src/androidTest/java/com/navis/bkacs/postprocess/runtime/VpcdQnnHtpStrictDeviceTest.java`
+
+- [ ] **Step 1: Add or update instrumentation coverage for the synced Option 1 asset**
+
+Test behavior:
+
+- the strict device test loads the new asset namespace
+- session creation succeeds on the real Snapdragon target
+- fallback behavior remains explicit and observable
+
+- [ ] **Step 2: Run Android instrumentation verification**
+
+Run:
+
+- `.\gradlew.bat :app:connectedDebugAndroidTest --no-daemon`
+
+Expected:
+
+- `Zipformer` strict load succeeds for the promoted Option 1 package
+- `VPCD` succeeds only if its promoted package is genuinely app-ready; otherwise the failure is recorded without redefining the contract
+
+### Task 7: Refresh The Playbook And Close The Android Handoff Loop
+
+**Files:**
+
+- Modify: `../BKMeeting/docs/qnn/playbook.md`
+- Modify: this plan file
+
+- [ ] **Step 1: Document the exact Phase 6 operator flow**
+
+Document:
+
+- which Phase 5 package to sync
+- which catalog entry to select
+- which unit tests to run
+- which device test to run
+
+- [ ] **Step 2: Record the minimum evidence for “Android-integrated Option 1”**
+
+At minimum:
+
+- synced asset namespace path
+- manifest metadata snapshot
+- unit-test pass
+- device strict-test result
+
+- [ ] **Step 3: Re-read the playbook and ensure it matches the code path**
+
+Expected: no contradictions between Python-side packaging and Android-side loading.
+
+## Phase 6 Acceptance Criteria
+
+- a Phase 5 contract package can be synced into `BKMeeting/modelassets` without manual file shuffling
+- Android catalogs can point to the synced Option 1 asset namespace intentionally
+- runtime capability detection recognizes `precompiled_qnn_onnx` bundles without breaking the current QDQ lane
+- the existing ORT + QNN session managers can attempt to load the synced precompiled artifact
+- at least the promoted `Zipformer` Option 1 package can be exercised through Android validation
+- `VPCD` remains explicitly labeled experimental if its gate/package evidence is still weak
+
+## Decision Gates After Phase 6
+
+1. Promote only the Android-validated `deployment_candidate` package into default app flows.
+2. Keep `research_only` or failing packages available only for explicit debug selection.
+3. Do not let Android asset sync become the only evidence source; keep Phase 4 and Phase 5 records linked.
+4. If the current provider stack cannot load the compiled artifact cleanly, treat that as a Phase 6 blocker instead of silently switching Option 1 to another runtime lane.
+
+## Recommended Execution Order For Phase 6
+
+1. Implement `Task 1` first so the Android asset payload shape is deterministic.
+2. Implement `Task 2` immediately after, because the manifest contract drives every downstream runtime decision.
+3. Implement `Task 3` to expose the synced asset in catalogs only after the asset payload is stable.
+4. Implement `Task 4` before touching session creation so provider routing is explicit.
+5. Implement `Task 5` with the current ORT + QNN stack kept as intact as possible.
+6. Run `Task 6` on real hardware only after the unit-test gates are clean.
+7. Finish with `Task 7` so the Android handoff path is reproducible for the next engineer.
