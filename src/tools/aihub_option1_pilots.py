@@ -782,7 +782,7 @@ def prepare_vpcd_option1_source_model(
 ) -> tuple[Path, bool]:
     normalized_strategy = _normalize_optional_string(strategy)
     if normalized_strategy is None:
-        normalized_strategy = "direct_qdq_sanitized" if source.is_quantized_source else "prefer_fp32_fixed"
+        normalized_strategy = "prefer_fp32_fixed"
     prepared_output_path = Path(output_path).resolve() if output_path is not None else (
         source.repo_root / "build" / "aihub" / "vpcd_fp32_fixed" / "model.fp32.fixed.onnx"
     ).resolve()
@@ -799,9 +799,9 @@ def prepare_vpcd_option1_source_model(
 
     fp32_source_path = resolve_vpcd_fp32_source_model_path(source)
     if fp32_source_path is None:
-        prepared_output_path.parent.mkdir(parents=True, exist_ok=True)
-        copy2(source.model_path, prepared_output_path)
-        return prepared_output_path, bool(source.is_quantized_source)
+        raise FileNotFoundError(
+            "Could not resolve a VPCD FP32 ONNX source model for the FP32 -> AI Hub quantize debug lane."
+        )
 
     input_shapes = {name: spec[0] for name, spec in build_vpcd_input_specs(source).items()}
     freeze_model_inputs(fp32_source_path, prepared_output_path, input_shapes)

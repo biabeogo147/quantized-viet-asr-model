@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import onnx
+import pytest
 from onnx import TensorProto, helper
 
 from model_bundle.manifest import ModelBundleManifest
@@ -405,7 +406,7 @@ def test_prepare_vpcd_option1_source_model_prefers_fp32_and_freezes_shapes_when_
     assert input_dims["decoder_attention_mask"] == [1, 128]
 
 
-def test_prepare_vpcd_option1_source_model_prefers_sanitized_qdq_bundle_by_default(tmp_path):
+def test_prepare_vpcd_option1_source_model_defaults_to_fp32_fixed_shape_prepare(tmp_path):
     from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
 
     repo_root = tmp_path / "repo"
@@ -424,15 +425,19 @@ def test_prepare_vpcd_option1_source_model_prefers_sanitized_qdq_bundle_by_defau
     )
 
     prepared_model = onnx.load(prepared_model_path.as_posix())
-    assert is_quantized_source is True
+    assert is_quantized_source is False
     assert prepared_model_path == (repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx").resolve()
-    rewritten_domains = {(node.name, node.op_type): node.domain for node in prepared_model.graph.node}
-    assert rewritten_domains[("ms_quantize", "QuantizeLinear")] == ""
-    assert rewritten_domains[("ms_dequantize", "DequantizeLinear")] == ""
-    assert all(opset.domain != "com.microsoft" for opset in prepared_model.opset_import)
+    input_dims = {
+        value.name: [dim.dim_value if dim.HasField("dim_value") else dim.dim_param for dim in value.type.tensor_type.shape.dim]
+        for value in prepared_model.graph.input
+    }
+    assert input_dims["input_ids"] == [1, 1024]
+    assert input_dims["attention_mask"] == [1, 1024]
+    assert input_dims["decoder_input_ids"] == [1, 128]
+    assert input_dims["decoder_attention_mask"] == [1, 128]
 
 
-def test_prepare_vpcd_option1_source_model_copies_qdq_fallback_into_canonical_output(tmp_path):
+def test_prepare_vpcd_option1_source_model_requires_fp32_for_default_debug_lane(tmp_path):
     from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
 
     repo_root = tmp_path / "repo"
@@ -443,15 +448,12 @@ def test_prepare_vpcd_option1_source_model_copies_qdq_fallback_into_canonical_ou
     qdq_model_path.write_bytes(b"qdq-model")
 
     source = resolve_vpcd_pilot_source(repo_root)
-    prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(
-        source,
-        output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx",
-        strategy="prefer_fp32_fixed",
-    )
-
-    assert prepared_model_path == (repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx").resolve()
-    assert is_quantized_source is True
-    assert prepared_model_path.read_bytes() == b"qdq-model"
+    with pytest.raises(FileNotFoundError, match="VPCD FP32 ONNX source model"):
+        prepare_vpcd_option1_source_model(
+            source,
+            output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx",
+            strategy="prefer_fp32_fixed",
+        )
 
 
 def test_rewrite_aihub_compatible_qdq_domains_converts_ms_qdq_nodes_to_default_domain(tmp_path):
