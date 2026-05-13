@@ -515,6 +515,95 @@ def test_vpcd_hybrid_runner_passes_decode_step_limit_to_bundle_runtime(tmp_path)
     assert report["results"][0]["decode_steps"] == 5
 
 
+def test_vpcd_teacher_forced_diagnostics_records_cpu_and_cloud_step_summaries(tmp_path):
+    from tools.aihub_option1_hybrid_pipeline import run_vpcd_teacher_forced_diagnostics
+    from tools.aihub_option1_pilots import build_option1_runtime_config, write_compile_run_record
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+
+    runtime_config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24",
+        repo_root=repo_root,
+    )
+    write_compile_run_record(
+        pilot_name="vpcd_option1",
+        runtime_config=runtime_config,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
+        target_model={"model_id": "vpcd-target", "url": "https://example/models/vpcd-target"},
+        run_label="phase3",
+    )
+
+    cpu_step_outputs: list[np.ndarray] = []
+    first_cpu_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    first_cpu_logits[0, 0, 5] = 9.0
+    second_cpu_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    second_cpu_logits[0, 1, 6] = 9.0
+    cpu_step_outputs.extend([first_cpu_logits, second_cpu_logits])
+
+    cloud_step_outputs: list[np.ndarray] = []
+    first_cloud_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    first_cloud_logits[0, 0, 5] = 8.0
+    second_cloud_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    second_cloud_logits[0, 1, 4] = 8.0
+    cloud_step_outputs.extend([first_cloud_logits, second_cloud_logits])
+
+    seen_inputs: list[dict[str, list[np.ndarray]]] = []
+
+    def fake_decode_ids(text: str) -> tuple[dict[str, np.ndarray], list[int]]:
+        assert text == "xin chao"
+        return (
+            {
+                "input_ids": np.asarray([[0, 11, 12, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1, 1]], dtype=np.int64),
+            },
+            [2, 5, 6],
+        )
+
+    def fake_cpu_model_step_runner(feeds: dict[str, np.ndarray]) -> np.ndarray:
+        return cpu_step_outputs.pop(0)
+
+    def fake_inference_runner(*, target_model_id: str, runtime_config: object, inputs: dict[str, list[np.ndarray]], inference_name: str | None):
+        seen_inputs.append(inputs)
+        return (
+            {"output_0": [cloud_step_outputs.pop(0)]},
+            {"job_id": f"teacher-job-{len(seen_inputs)}", "url": f"https://example/jobs/teacher-job-{len(seen_inputs)}"},
+        )
+
+    report = run_vpcd_teacher_forced_diagnostics(
+        runtime_config=runtime_config,
+        run_label="phase3",
+        sample_index=0,
+        max_decode_steps=2,
+        inference_runner=fake_inference_runner,
+        cpu_model_step_runner=fake_cpu_model_step_runner,
+        decode_ids_fn=fake_decode_ids,
+    )
+
+    assert report["decode_step_limit"] == 2
+    assert len(report["steps"]) == 2
+    assert seen_inputs[0]["decoder_input_ids"][0].dtype == np.int32
+
+    first_step = report["steps"][0]
+    assert first_step["step_index"] == 1
+    assert first_step["decoder_prefix_ids"] == [2]
+    assert first_step["expected_next_token_id"] == 5
+    assert first_step["cpu_argmax_token_id"] == 5
+    assert first_step["cloud_argmax_token_id"] == 5
+    assert first_step["job_id"] == "teacher-job-1"
+    assert "cloud_top_tokens" in first_step
+
+    second_step = report["steps"][1]
+    assert second_step["step_index"] == 2
+    assert second_step["decoder_prefix_ids"] == [2, 5]
+    assert second_step["expected_next_token_id"] == 6
+    assert second_step["cpu_argmax_token_id"] == 6
+    assert second_step["cloud_argmax_token_id"] == 4
+    assert second_step["matches_cpu_argmax"] is False
+
+
 def test_hybrid_record_writer_persists_sample_results_and_summary(tmp_path):
     from tools.aihub_option1_hybrid_pipeline import (
         ResolvedCompiledTarget,

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
+import onnxruntime as ort
 
 from model_bundle.fixtures import read_jsonl
 from model_bundle.manifest import ModelBundleManifest
@@ -19,21 +20,28 @@ from model_bundle.projects.zipformer import (
     prepare_encoder_inputs,
     trim_encoder_frames,
 )
+from quantize.calibration import greedy_decode_ids, load_decoder_start_token_id, resolve_ort_providers
 from tools.aihub_option1_pilots import (
     Option1RuntimeConfig,
+    build_vpcd_fixed_shape_inputs,
     build_job_options,
     build_vpcd_input_specs,
     build_zipformer_encoder_input_specs,
     coerce_inputs_for_compiled_model,
+    resolve_vpcd_fp32_source_model_path,
+    resolve_vpcd_model_dir,
     resolve_target_model_id,
     resolve_vpcd_pilot_source,
     resolve_zipformer_encoder_pilot_source,
+    summarize_vpcd_step_logits,
 )
+from transformers import AutoTokenizer
 
 ZIPFORMER_PHASE2_PILOT = "zipformer_encoder_option1"
 ZIPFORMER_PHASE3_PILOT = "zipformer_hybrid_option1"
 VPCD_PHASE2_PILOT = "vpcd_option1"
 VPCD_PHASE3_PILOT = "vpcd_hybrid_option1"
+VPCD_TEACHER_FORCED_PILOT = "vpcd_teacher_forced_option1"
 DEFAULT_ZIPFORMER_MAX_SAMPLES = 2
 DEFAULT_VPCD_MAX_SAMPLES = 4
 
@@ -316,6 +324,171 @@ def run_vpcd_hybrid_evaluation(
         "pilot_name": VPCD_PHASE3_PILOT,
         "target_reference": target_reference,
         "results": results,
+        "summary": summary,
+        "record_path": record_path,
+        "decode_step_limit": int(decode_step_limit),
+    }
+
+
+def run_vpcd_teacher_forced_diagnostics(
+    *,
+    runtime_config: Option1RuntimeConfig,
+    run_label: str | None = None,
+    explicit_target_model_id: str | None = None,
+    sample_index: int = 0,
+    max_decode_steps: int | None = None,
+    top_k: int = 5,
+    inference_runner: Callable[..., object] | None = None,
+    cpu_model_step_runner: Callable[[dict[str, np.ndarray]], object] | None = None,
+    decode_ids_fn: Callable[[str], tuple[dict[str, np.ndarray], list[int]]] | None = None,
+) -> dict[str, Any]:
+    source = resolve_vpcd_pilot_source(runtime_config.repo_root)
+    sample_rows = read_jsonl(source.golden_samples_path)
+    if sample_index < 0 or sample_index >= len(sample_rows):
+        raise IndexError(f"VPCD sample_index out of range: {sample_index}")
+
+    target_reference = resolve_compiled_target_reference(
+        runtime_config=runtime_config,
+        compile_pilot_name=VPCD_PHASE2_PILOT,
+        explicit_target_model_id=explicit_target_model_id,
+        run_label=run_label,
+    )
+    input_specs = build_vpcd_input_specs(source)
+    sample = sample_rows[sample_index]
+
+    reference_stats: dict[str, Any] = {
+        "requested_provider": "cpu",
+        "session_providers": "injected" if cpu_model_step_runner is not None else None,
+        "fp32_model_path": None,
+        "model_dir": None,
+    }
+    if decode_ids_fn is None or cpu_model_step_runner is None:
+        resolved_fp32_model_path = resolve_vpcd_fp32_source_model_path(source)
+        if resolved_fp32_model_path is None:
+            raise FileNotFoundError("Could not resolve a VPCD FP32 ONNX source model for teacher-forced diagnostics.")
+        fp32_session = ort.InferenceSession(
+            resolved_fp32_model_path.as_posix(),
+            providers=resolve_ort_providers("cpu"),
+        )
+        reference_stats["fp32_model_path"] = resolved_fp32_model_path.as_posix()
+        reference_stats["session_providers"] = ",".join(fp32_session.get_providers())
+
+        if decode_ids_fn is None:
+            resolved_model_dir = resolve_vpcd_model_dir(source)
+            if resolved_model_dir is None:
+                raise FileNotFoundError("Could not resolve a VPCD model directory for teacher-forced diagnostics.")
+            tokenizer = AutoTokenizer.from_pretrained(resolved_model_dir, local_files_only=True)
+            decoder_start_token_id = load_decoder_start_token_id(resolved_model_dir, tokenizer)
+            reference_stats["model_dir"] = resolved_model_dir.as_posix()
+
+            def _decode_ids_with_fp32(text: str) -> tuple[dict[str, np.ndarray], list[int]]:
+                return greedy_decode_ids(
+                    session=fp32_session,
+                    tokenizer=tokenizer,
+                    text=text,
+                    decoder_start_token_id=decoder_start_token_id,
+                    max_generation_length=max(1, int(max_decode_steps or source.decoder_sequence)),
+                )
+
+            decode_ids_fn = _decode_ids_with_fp32
+
+        if cpu_model_step_runner is None:
+            cpu_model_step_runner = lambda feeds: fp32_session.run(None, feeds)[0]
+
+    encoder_inputs, decoded_ids = decode_ids_fn(str(sample["raw_text"]))
+    normalized_decoded_ids = [int(token_id) for token_id in decoded_ids]
+    if not normalized_decoded_ids:
+        raise ValueError("decode_ids_fn returned an empty decoded_ids sequence.")
+    if normalized_decoded_ids[0] != int(source.decoder_start_token_id):
+        raise ValueError("decoded_ids must start with source.decoder_start_token_id.")
+
+    encoder_input_ids = np.asarray(encoder_inputs["input_ids"], dtype=np.int64).reshape(-1)
+    encoder_attention_mask = np.asarray(encoder_inputs["attention_mask"], dtype=np.int64).reshape(-1)
+    available_steps = max(0, len(normalized_decoded_ids) - 1)
+    requested_steps = int(source.decoder_sequence) if max_decode_steps is None else max(1, int(max_decode_steps))
+    decode_step_limit = min(int(source.decoder_sequence), requested_steps, available_steps)
+
+    step_results: list[dict[str, Any]] = []
+    inference_jobs: list[dict[str, Any]] = []
+    decode_started = time.perf_counter()
+    for step_index in range(1, decode_step_limit + 1):
+        prefix_ids = normalized_decoded_ids[:step_index]
+        expected_next_token_id = normalized_decoded_ids[step_index] if step_index < len(normalized_decoded_ids) else None
+        feeds = build_vpcd_fixed_shape_inputs(
+            source,
+            input_ids=encoder_input_ids,
+            attention_mask=encoder_attention_mask,
+            decoder_prefix=prefix_ids,
+        )
+        cpu_logits = np.asarray(cpu_model_step_runner(feeds))
+        cpu_summary = summarize_vpcd_step_logits(cpu_logits, feeds["decoder_attention_mask"], top_k=top_k)
+        cpu_argmax_token_id = BundleOnnxRuntime._argmax_token_at(cpu_logits, cpu_summary["active_index"])
+
+        cloud_outputs, inference_metadata = run_compiled_inference(
+            target_reference=target_reference,
+            runtime_config=runtime_config,
+            inputs=feeds,
+            input_specs=input_specs,
+            inference_runner=inference_runner,
+            inference_name=f"bkmeeting-vpcd-teacher-forced-s{sample_index}-step-{step_index}",
+        )
+        inference_jobs.append(inference_metadata)
+        cloud_logits = _resolve_output_array(cloud_outputs, preferred_names=("output_0",))
+        cloud_summary = summarize_vpcd_step_logits(cloud_logits, feeds["decoder_attention_mask"], top_k=top_k)
+        cloud_argmax_token_id = BundleOnnxRuntime._argmax_token_at(cloud_logits, cloud_summary["active_index"])
+
+        step_results.append(
+            {
+                "step_index": int(step_index),
+                "decoder_prefix_ids": [int(token_id) for token_id in prefix_ids],
+                "expected_next_token_id": int(expected_next_token_id) if expected_next_token_id is not None else None,
+                "active_index": int(cpu_summary["active_index"]),
+                "cpu_top_tokens": list(cpu_summary["top_tokens"]),
+                "cloud_top_tokens": list(cloud_summary["top_tokens"]),
+                "cpu_argmax_token_id": int(cpu_argmax_token_id),
+                "cloud_argmax_token_id": int(cloud_argmax_token_id),
+                "cpu_matches_expected_next_token": (
+                    int(cpu_argmax_token_id) == int(expected_next_token_id) if expected_next_token_id is not None else None
+                ),
+                "cloud_matches_expected_next_token": (
+                    int(cloud_argmax_token_id) == int(expected_next_token_id) if expected_next_token_id is not None else None
+                ),
+                "matches_cpu_argmax": int(cpu_argmax_token_id) == int(cloud_argmax_token_id),
+                "job_id": inference_metadata["job"].get("job_id"),
+                "job_url": inference_metadata["job"].get("url"),
+            }
+        )
+
+    decode_seconds = round(time.perf_counter() - decode_started, 6)
+    sample_result = {
+        "sample_index": int(sample_index),
+        "raw_text": str(sample["raw_text"]),
+        "expected_text": str(sample.get("expected_output", "")),
+        "expected_available": bool(sample.get("expected_output")),
+        "matches_expected": None,
+        "decode_step_limit": int(decode_step_limit),
+        "available_teacher_forced_steps": int(available_steps),
+        "gold_decoder_ids": [int(token_id) for token_id in normalized_decoded_ids],
+        "encoder_input_ids": [int(token_id) for token_id in encoder_input_ids.tolist()],
+        "cloud_inference_seconds": round(sum(float(job["elapsed_seconds"]) for job in inference_jobs), 6),
+        "decode_seconds": decode_seconds,
+        "jobs": [job["job"] for job in inference_jobs],
+        "reference_stats": reference_stats,
+        "steps": step_results,
+    }
+    record_path = write_hybrid_run_record(
+        pilot_name=VPCD_TEACHER_FORCED_PILOT,
+        runtime_config=runtime_config,
+        target_reference=target_reference,
+        sample_results=[sample_result],
+        run_label=run_label,
+    )
+    summary = _summarize_match_results([sample_result])
+    return {
+        "pilot_name": VPCD_TEACHER_FORCED_PILOT,
+        "target_reference": target_reference,
+        "results": [sample_result],
+        "steps": step_results,
         "summary": summary,
         "record_path": record_path,
         "decode_step_limit": int(decode_step_limit),

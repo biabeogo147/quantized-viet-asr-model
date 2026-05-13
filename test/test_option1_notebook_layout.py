@@ -49,6 +49,22 @@ def test_pilot_notebook_limits_vpcd_hybrid_decode_steps() -> None:
     assert "max_decode_steps=VPCD_HYBRID_MAX_STEPS" in code_text
 
 
+def test_pilot_notebook_runs_vpcd_teacher_forced_debug_before_hybrid() -> None:
+    notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
+    code_cells = _cell_texts(notebook, cell_type="code")
+    markdown_cells = _cell_texts(notebook, cell_type="markdown")
+    code_text = "\n".join(code_cells)
+
+    assert "VPCD_TEACHER_FORCED_SAMPLE_INDEX = 0" in code_text
+    assert "run_vpcd_teacher_forced_diagnostics(" in code_text
+    assert "sample_index=VPCD_TEACHER_FORCED_SAMPLE_INDEX" in code_text
+    assert "if vpcd_is_quantized_source:" not in code_text
+
+    teacher_heading_index = next(index for index, text in enumerate(markdown_cells) if "### VPCD Teacher-Forced Diagnostics" in text)
+    hybrid_heading_index = next(index for index, text in enumerate(markdown_cells) if "### VPCD Hybrid E2E Run" in text)
+    assert teacher_heading_index < hybrid_heading_index
+
+
 def test_phase4_notebook_exists_with_phase4_sections() -> None:
     notebook = _load_notebook("On_device_Ai_option1_phase4_gate.ipynb")
     markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
