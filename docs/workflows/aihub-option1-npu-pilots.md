@@ -30,7 +30,7 @@ This workflow intentionally moves upstream:
    - source: a prepared encoder artifact derived from the fixed-shape encoder ONNX
    - goal: prove the first-slice ASR graph can compile and run on NPU even though the raw fixed-shape source still needs graph preparation first
 2. `VPCD model-session-first`
-   - source: fixed-shape FP32 ONNX when available, otherwise the existing fixed-shape QDQ fallback
+   - source: fixed-shape FP32 ONNX prepared locally, then quantized on AI Hub
    - goal: prove the first-slice punctuation model session can compile and run on NPU
 
 ## Prerequisites
@@ -103,20 +103,22 @@ Current caveat:
 
 Current preferred source resolution:
 
-- fixed-shape candidate bundle:
-  - `build/model_bundle/vpcd/qnn_fixed_1024x128/`
 - preferred AI Hub source graph:
   - `assets/vietnamese-punc-cap-denorm-v1/onnx/model.fp32.onnx`
 - prepared fixed-shape upload artifact:
   - `build/aihub/vpcd_fp32_fixed/model.fp32.fixed.onnx`
-- fallback direct-compile graph:
-  - `build/model_bundle/vpcd/qnn_fixed_1024x128/model.mobile.onnx`
 
 Current caveat:
 
 - the preferred FP32 source must be frozen to the bundle's `1024 x 128` input shapes before upload
-- the fallback bundle graph is already QDQ and remains useful only as a backup experiment lane
+- this workflow intentionally excludes local QDQ experiments so that root-cause attribution stays on a single source lane
 - when compile uses `--truncate_64bit_io`, submit compiled-model inference tensors as `int32` for the integer inputs
+- the intended debug lane for this notebook is:
+  - fixed-shape FP32 prepare locally
+  - autoregressive calibration build locally
+  - AI Hub quantize
+  - AI Hub compile
+  - AI Hub inference
 
 ## Canonical Run Outputs
 
@@ -182,8 +184,9 @@ Run, per enabled pilot:
 3. `Resolve Existing Compiled Target`
 4. `Run And Compare Against The Compiled Target`
 5. optional `Output Inspection (Debug Only)`
-6. `Hybrid E2E Run`
-7. `Final Compare`
+6. `Teacher-Forced Diagnostics` for VPCD
+7. `Hybrid E2E Run`
+8. `Final Compare`
 
 ### Reuse An Existing Compiled Target
 
@@ -195,8 +198,9 @@ Keep the same `RUN_LABEL`, or set an explicit `*_TARGET_MODEL_ID`, then run:
 2. `Resolve Existing Compiled Target`
 3. `Run And Compare Against The Compiled Target`
 4. optional `Output Inspection (Debug Only)`
-5. `Hybrid E2E Run`
-6. `Final Compare`
+5. `Teacher-Forced Diagnostics` for VPCD
+6. `Hybrid E2E Run`
+7. `Final Compare`
 
 Recommended config defaults:
 
@@ -207,6 +211,7 @@ Operator note:
 
 - environment setup belongs outside the normal notebook execution path
 - the pilot notebook no longer includes the old mandatory `pip install` cell
+- for the current VPCD failure, use teacher-forced diagnosis before any free-run hybrid rerun
 
 ## Notebook Outputs To Preserve
 
