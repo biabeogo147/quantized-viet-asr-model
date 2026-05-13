@@ -373,7 +373,7 @@ def test_resolve_vpcd_source_reads_fixed_shape_candidate(tmp_path):
     assert source.decoder_start_token_id == 2
 
 
-def test_prepare_vpcd_option1_source_model_prefers_fp32_and_freezes_shapes(tmp_path):
+def test_prepare_vpcd_option1_source_model_prefers_fp32_and_freezes_shapes_when_requested(tmp_path):
     from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
 
     repo_root = tmp_path / "repo"
@@ -384,7 +384,10 @@ def test_prepare_vpcd_option1_source_model_prefers_fp32_and_freezes_shapes(tmp_p
     _write_minimal_vpcd_fp32_model(fp32_model_path)
 
     source = resolve_vpcd_pilot_source(repo_root)
-    prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(source)
+    prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(
+        source,
+        strategy="prefer_fp32_fixed",
+    )
 
     assert prepared_model_path == (
         repo_root / "build" / "aihub" / "vpcd_fp32_fixed" / "model.fp32.fixed.onnx"
@@ -402,6 +405,33 @@ def test_prepare_vpcd_option1_source_model_prefers_fp32_and_freezes_shapes(tmp_p
     assert input_dims["decoder_attention_mask"] == [1, 128]
 
 
+def test_prepare_vpcd_option1_source_model_prefers_sanitized_qdq_bundle_by_default(tmp_path):
+    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+    qdq_model_path = bundle_dir / "model.mobile.onnx"
+    _write_minimal_vpcd_ms_qdq_model(qdq_model_path)
+    fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
+    _write_minimal_vpcd_fp32_model(fp32_model_path)
+
+    source = resolve_vpcd_pilot_source(repo_root)
+    prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(
+        source,
+        output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx",
+    )
+
+    prepared_model = onnx.load(prepared_model_path.as_posix())
+    assert is_quantized_source is True
+    assert prepared_model_path == (repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx").resolve()
+    rewritten_domains = {(node.name, node.op_type): node.domain for node in prepared_model.graph.node}
+    assert rewritten_domains[("ms_quantize", "QuantizeLinear")] == ""
+    assert rewritten_domains[("ms_dequantize", "DequantizeLinear")] == ""
+    assert all(opset.domain != "com.microsoft" for opset in prepared_model.opset_import)
+
+
 def test_prepare_vpcd_option1_source_model_copies_qdq_fallback_into_canonical_output(tmp_path):
     from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
 
@@ -416,6 +446,7 @@ def test_prepare_vpcd_option1_source_model_copies_qdq_fallback_into_canonical_ou
     prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(
         source,
         output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx",
+        strategy="prefer_fp32_fixed",
     )
 
     assert prepared_model_path == (repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx").resolve()

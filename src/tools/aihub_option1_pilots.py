@@ -780,7 +780,9 @@ def prepare_vpcd_option1_source_model(
     output_path: str | Path | None = None,
     strategy: str | None = None,
 ) -> tuple[Path, bool]:
-    normalized_strategy = _normalize_optional_string(strategy) or "prefer_fp32_fixed"
+    normalized_strategy = _normalize_optional_string(strategy)
+    if normalized_strategy is None:
+        normalized_strategy = "direct_qdq_sanitized" if source.is_quantized_source else "prefer_fp32_fixed"
     prepared_output_path = Path(output_path).resolve() if output_path is not None else (
         source.repo_root / "build" / "aihub" / "vpcd_fp32_fixed" / "model.fp32.fixed.onnx"
     ).resolve()

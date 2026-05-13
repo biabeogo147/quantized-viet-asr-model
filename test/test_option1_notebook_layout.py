@@ -41,6 +41,14 @@ def test_pilot_notebook_has_no_mandatory_pip_install_cell() -> None:
     assert '!pip install qai-hub "qai-hub[torch]"' not in code_text
 
 
+def test_pilot_notebook_limits_vpcd_hybrid_decode_steps() -> None:
+    notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
+    code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
+
+    assert "VPCD_HYBRID_MAX_STEPS = 5" in code_text
+    assert "max_decode_steps=VPCD_HYBRID_MAX_STEPS" in code_text
+
+
 def test_phase4_notebook_exists_with_phase4_sections() -> None:
     notebook = _load_notebook("On_device_Ai_option1_phase4_gate.ipynb")
     markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
@@ -54,8 +62,11 @@ def test_phase4_notebook_exists_with_phase4_sections() -> None:
 def test_phase5_notebook_exists_with_phase5_sections() -> None:
     notebook = _load_notebook("On_device_Ai_option1_phase5_contract.ipynb")
     markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
+    code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
 
     assert "## Phase 5 Config" in markdown_text
     assert "### Package Zipformer Phase 5 Contract" in markdown_text
     assert "### Package VPCD Phase 5 Contract" in markdown_text
     assert "## Phase 5 Packaging Summary" in markdown_text
+    assert "PHASE5_INCLUDE_ZIPFORMER" in code_text
+    assert "PHASE5_INCLUDE_VPCD" in code_text

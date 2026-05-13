@@ -241,6 +241,7 @@ def run_vpcd_hybrid_evaluation(
     run_label: str | None = None,
     explicit_target_model_id: str | None = None,
     max_samples: int = DEFAULT_VPCD_MAX_SAMPLES,
+    max_decode_steps: int | None = None,
     inference_runner: Callable[..., object] | None = None,
     bundle_runtime: BundleOnnxRuntime | None = None,
 ) -> dict[str, Any]:
@@ -257,6 +258,7 @@ def run_vpcd_hybrid_evaluation(
     )
     input_specs = build_vpcd_input_specs(source)
     sample_rows = read_jsonl(source.golden_samples_path)[: max(0, int(max_samples))]
+    decode_step_limit = max(1, min(int(max_decode_steps), int(source.decoder_sequence))) if max_decode_steps is not None else int(source.decoder_sequence)
 
     results: list[dict[str, Any]] = []
     for sample_index, sample in enumerate(sample_rows):
@@ -278,7 +280,7 @@ def run_vpcd_hybrid_evaluation(
         restored = runtime.restore_with_model_step(
             str(sample["raw_text"]),
             step_runner,
-            max_length=int(source.decoder_sequence),
+            max_length=decode_step_limit,
         )
         decode_seconds = round(time.perf_counter() - decode_started, 6)
         output_text = str(restored["text"])
@@ -291,6 +293,7 @@ def run_vpcd_hybrid_evaluation(
                 "expected_text": expected_text,
                 "expected_available": bool(expected_text),
                 "matches_expected": output_text == expected_text,
+                "decode_step_limit": int(decode_step_limit),
                 "decode_steps": int(restored["decode_steps"]),
                 "generated_ids": [int(token_id) for token_id in np.asarray(restored["generated_ids"]).tolist()],
                 "golden_input_ids": [int(token_id) for token_id in np.asarray(sample.get("input_ids", []), dtype=np.int64).tolist()],
@@ -315,6 +318,7 @@ def run_vpcd_hybrid_evaluation(
         "results": results,
         "summary": summary,
         "record_path": record_path,
+        "decode_step_limit": int(decode_step_limit),
     }
 
 

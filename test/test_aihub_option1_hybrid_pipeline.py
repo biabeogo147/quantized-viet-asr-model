@@ -397,8 +397,8 @@ def test_vpcd_hybrid_runner_restores_expected_text(tmp_path):
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4"
-    _write_vpcd_bundle(bundle_dir, encoder_sequence=8, decoder_sequence=4)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
 
     runtime_config = build_option1_runtime_config(
         device_name="Samsung Galaxy S24",
@@ -467,6 +467,52 @@ def test_vpcd_hybrid_runner_restores_expected_text(tmp_path):
     assert report["results"][0]["decode_steps"] == 2
     assert len(seen_inputs) == 2
     assert seen_inputs[0]["decoder_input_ids"][0].dtype == np.int32
+
+
+def test_vpcd_hybrid_runner_passes_decode_step_limit_to_bundle_runtime(tmp_path):
+    from tools.aihub_option1_hybrid_pipeline import run_vpcd_hybrid_evaluation
+    from tools.aihub_option1_pilots import build_option1_runtime_config, write_compile_run_record
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+
+    runtime_config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24",
+        repo_root=repo_root,
+    )
+    write_compile_run_record(
+        pilot_name="vpcd_option1",
+        runtime_config=runtime_config,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
+        target_model={"model_id": "vpcd-target", "url": "https://example/models/vpcd-target"},
+        run_label="phase3",
+    )
+
+    seen: dict[str, object] = {}
+
+    class FakeRuntime:
+        def restore_with_model_step(self, text: str, model_step_runner, *, max_length: int = 128):
+            seen["text"] = text
+            seen["max_length"] = max_length
+            return {
+                "text": "Xin chao.",
+                "decode_steps": max_length,
+                "generated_ids": np.asarray([5] * max_length, dtype=np.int64),
+            }
+
+    report = run_vpcd_hybrid_evaluation(
+        runtime_config=runtime_config,
+        run_label="phase3",
+        max_samples=1,
+        max_decode_steps=5,
+        bundle_runtime=FakeRuntime(),
+    )
+
+    assert seen["text"] == "xin chao"
+    assert seen["max_length"] == 5
+    assert report["results"][0]["decode_steps"] == 5
 
 
 def test_hybrid_record_writer_persists_sample_results_and_summary(tmp_path):
