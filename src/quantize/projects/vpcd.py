@@ -1,8 +1,9 @@
 ﻿from __future__ import annotations
 
+from types import SimpleNamespace
+import hashlib
 from pathlib import Path
 from typing import Sequence
-from types import SimpleNamespace
 
 import numpy as np
 
@@ -152,6 +153,49 @@ def calibration_records_to_aihub_dataset(
     return dataset
 
 
+def summarize_aihub_calibration_dataset(
+    dataset: dict[str, list[np.ndarray]],
+) -> dict[str, object]:
+    input_order = list(dataset.keys())
+    fingerprint = hashlib.sha256()
+    fingerprint.update(len(input_order).to_bytes(8, "little", signed=False))
+    input_sample_counts: dict[str, int] = {}
+    input_dtypes: dict[str, str] = {}
+    input_shapes: dict[str, list[list[int]]] = {}
+
+    for input_name in input_order:
+        encoded_name = input_name.encode("utf-8")
+        fingerprint.update(len(encoded_name).to_bytes(8, "little", signed=False))
+        fingerprint.update(encoded_name)
+
+        arrays = [np.asarray(value) for value in dataset[input_name]]
+        input_sample_counts[input_name] = len(arrays)
+        input_dtypes[input_name] = str(arrays[0].dtype) if arrays else ""
+        input_shapes[input_name] = [list(array.shape) for array in arrays]
+        fingerprint.update(len(arrays).to_bytes(8, "little", signed=False))
+
+        for array in arrays:
+            normalized = np.ascontiguousarray(array)
+            dtype_text = str(normalized.dtype)
+            encoded_dtype = dtype_text.encode("utf-8")
+            fingerprint.update(len(encoded_dtype).to_bytes(8, "little", signed=False))
+            fingerprint.update(encoded_dtype)
+            fingerprint.update(normalized.ndim.to_bytes(8, "little", signed=False))
+            for dimension in normalized.shape:
+                fingerprint.update(int(dimension).to_bytes(8, "little", signed=True))
+            raw_bytes = normalized.tobytes()
+            fingerprint.update(len(raw_bytes).to_bytes(8, "little", signed=False))
+            fingerprint.update(raw_bytes)
+
+    return {
+        "input_order": input_order,
+        "input_sample_counts": input_sample_counts,
+        "input_dtypes": input_dtypes,
+        "input_shapes": input_shapes,
+        "dataset_fingerprint": fingerprint.hexdigest(),
+    }
+
+
 def build_vpcd_aihub_quantize_recipe(
     *,
     model_dir: str | Path,
@@ -177,26 +221,28 @@ def build_vpcd_aihub_quantize_recipe(
 
     spec = get_preset_spec(preset)
     dtype_names = resolve_vpcd_aihub_quantize_dtype_names(preset=spec.name)
+    calibration_dataset = calibration_records_to_aihub_dataset(
+        records,
+        fixed_input_shapes=fixed_input_shapes,
+        pad_values={
+            "input_ids": int(pad_token_id),
+            "attention_mask": 0,
+            "decoder_input_ids": int(pad_token_id),
+            "decoder_attention_mask": 0,
+        },
+    )
     recipe_stats = dict(stats)
     recipe_stats["quantize_preset"] = spec.name
     recipe_stats["activation_type"] = spec.activation_type
     recipe_stats["weight_type"] = spec.weight_type
+    recipe_stats.update(summarize_aihub_calibration_dataset(calibration_dataset))
     return AiHubQuantizeRecipe(
         preset=spec.name,
         activation_type=spec.activation_type,
         weight_type=spec.weight_type,
         activations_dtype_name=dtype_names["activations_dtype_name"],
         weights_dtype_name=dtype_names["weights_dtype_name"],
-        calibration_dataset=calibration_records_to_aihub_dataset(
-            records,
-            fixed_input_shapes=fixed_input_shapes,
-            pad_values={
-                "input_ids": int(pad_token_id),
-                "attention_mask": 0,
-                "decoder_input_ids": int(pad_token_id),
-                "decoder_attention_mask": 0,
-            },
-        ),
+        calibration_dataset=calibration_dataset,
         calibration_stats=recipe_stats,
     )
 

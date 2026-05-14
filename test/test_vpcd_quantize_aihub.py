@@ -104,6 +104,25 @@ def test_build_vpcd_aihub_quantize_recipe_uses_autoregressive_records(monkeypatc
     assert recipe.calibration_stats["quantize_preset"] == "sd8g2_quality"
     assert recipe.calibration_stats["activation_type"] == "quint16"
     assert recipe.calibration_stats["weight_type"] == "quint8"
+    assert recipe.calibration_stats["input_order"] == [
+        "input_ids",
+        "attention_mask",
+        "decoder_input_ids",
+        "decoder_attention_mask",
+    ]
+    assert recipe.calibration_stats["input_sample_counts"] == {
+        "input_ids": 1,
+        "attention_mask": 1,
+        "decoder_input_ids": 1,
+        "decoder_attention_mask": 1,
+    }
+    assert recipe.calibration_stats["input_dtypes"] == {
+        "input_ids": "int64",
+        "attention_mask": "int64",
+        "decoder_input_ids": "int64",
+        "decoder_attention_mask": "int64",
+    }
+    assert recipe.calibration_stats["dataset_fingerprint"]
     assert list(recipe.calibration_dataset.keys()) == [
         "input_ids",
         "attention_mask",
@@ -126,3 +145,64 @@ def test_build_vpcd_aihub_quantize_recipe_uses_autoregressive_records(monkeypatc
         recipe.calibration_dataset["attention_mask"][0][0, 3:],
         np.asarray([0, 0, 0, 0, 0], dtype=np.int64),
     )
+
+
+def test_build_vpcd_aihub_quantize_recipe_fingerprint_is_stable(monkeypatch, tmp_path):
+    from quantize.projects.vpcd import build_vpcd_aihub_quantize_recipe
+
+    records = [
+        CalibrationSample(
+            inputs={
+                "input_ids": np.asarray([[7, 8, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1]], dtype=np.int64),
+                "decoder_input_ids": np.asarray([[2, 9]], dtype=np.int64),
+                "decoder_attention_mask": np.asarray([[1, 1]], dtype=np.int64),
+            }
+        ),
+        CalibrationSample(
+            inputs={
+                "input_ids": np.asarray([[7, 8, 1]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 0]], dtype=np.int64),
+                "decoder_input_ids": np.asarray([[2, 5]], dtype=np.int64),
+                "decoder_attention_mask": np.asarray([[1, 1]], dtype=np.int64),
+            }
+        ),
+    ]
+
+    def fake_build_calibration_records(**_kwargs):
+        return (
+            records,
+            {
+                "requested_provider": "cpu",
+                "session_providers": "CPUExecutionProvider",
+                "source_files": 1,
+                "text_samples": 2,
+                "records": 2,
+                "max_encoder_len": 3,
+                "max_decoder_len": 2,
+            },
+        )
+
+    monkeypatch.setattr("quantize.projects.vpcd.build_calibration_records", fake_build_calibration_records)
+
+    common_kwargs = dict(
+        model_dir=tmp_path / "assets" / "vpcd",
+        fp32_onnx_path=tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx",
+        calibration_source_path=tmp_path / "build" / "calibration" / "vpcd_transcriptions.txt",
+        preset="sd8g2_quality",
+        max_calibration_samples=16,
+        max_generation_length=32,
+        ort_provider="cpu",
+        fixed_input_shapes={
+            "input_ids": (1, 8),
+            "attention_mask": (1, 8),
+            "decoder_input_ids": (1, 4),
+            "decoder_attention_mask": (1, 4),
+        },
+        pad_token_id=1,
+    )
+
+    recipe_a = build_vpcd_aihub_quantize_recipe(**common_kwargs)
+    recipe_b = build_vpcd_aihub_quantize_recipe(**common_kwargs)
+
+    assert recipe_a.calibration_stats["dataset_fingerprint"] == recipe_b.calibration_stats["dataset_fingerprint"]
