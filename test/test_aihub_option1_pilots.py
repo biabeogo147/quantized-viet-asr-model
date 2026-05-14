@@ -1000,6 +1000,130 @@ def test_write_compile_run_record_captures_target_model_metadata(tmp_path):
     assert payload["target_model"]["name"] == "zipformer-target"
 
 
+def test_write_quantize_run_record_captures_downloaded_quantized_artifact(tmp_path):
+    from tools.aihub_option1_pilots import (
+        build_option1_runtime_config,
+        write_quantize_run_record,
+    )
+
+    class FakeJob:
+        def __init__(self, job_id: str, url: str, status: str) -> None:
+            self.job_id = job_id
+            self.url = url
+            self.status = status
+
+    class FakeModel:
+        def __init__(self, model_id: str, url: str, name: str) -> None:
+            self.model_id = model_id
+            self.url = url
+            self.name = name
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        qairt_version=None,
+        repo_root=repo_root,
+    )
+    quantized_model_path = repo_root / "build" / "aihub" / "vpcd_option1" / "model.quantized.unit-test.onnx"
+    quantized_model_path.parent.mkdir(parents=True, exist_ok=True)
+    quantized_model_path.write_bytes(b"quantized-model")
+
+    record_path = write_quantize_run_record(
+        pilot_name="vpcd_option1",
+        runtime_config=config,
+        quantize_job=FakeJob("quantize-1", "https://aihub/jobs/quantize-1", "SUCCESS"),
+        target_model=FakeModel("model-q1", "https://aihub/models/model-q1", "vpcd-quantized"),
+        quantized_model_path=quantized_model_path,
+        weights_dtype_name="INT8",
+        activations_dtype_name="INT16",
+        quantize_options="--range_scheme min_max",
+        calibration_stats={
+            "records": 8,
+            "dataset_fingerprint": "abc123",
+            "input_order": [
+                "input_ids",
+                "attention_mask",
+                "decoder_input_ids",
+                "decoder_attention_mask",
+            ],
+        },
+        run_label="unit-test",
+    )
+
+    payload = json.loads(record_path.read_text(encoding="utf-8"))
+    assert payload["record_kind"] == "quantize_run"
+    assert payload["pilot_name"] == "vpcd_option1"
+    assert payload["jobs"]["quantize"]["job_id"] == "quantize-1"
+    assert payload["target_model"]["model_id"] == "model-q1"
+    assert payload["weights_dtype_name"] == "INT8"
+    assert payload["activations_dtype_name"] == "INT16"
+    assert payload["quantize_options"] == "--range_scheme min_max"
+    assert payload["quantized_model"]["path"].endswith("build/aihub/vpcd_option1/model.quantized.unit-test.onnx")
+    assert payload["quantized_model"]["size_bytes"] == len(b"quantized-model")
+    assert payload["calibration"]["dataset_fingerprint"] == "abc123"
+    assert payload["calibration"]["records"] == 8
+
+
+def test_resolve_downloaded_quantized_model_path_uses_explicit_value_or_quantize_record(tmp_path):
+    from tools.aihub_option1_pilots import (
+        build_option1_runtime_config,
+        resolve_downloaded_quantized_model_path,
+        write_quantize_run_record,
+    )
+
+    class FakeJob:
+        def __init__(self, job_id: str, url: str, status: str) -> None:
+            self.job_id = job_id
+            self.url = url
+            self.status = status
+
+    class FakeModel:
+        def __init__(self, model_id: str, url: str, name: str) -> None:
+            self.model_id = model_id
+            self.url = url
+            self.name = name
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        qairt_version=None,
+        repo_root=repo_root,
+    )
+    quantized_model_path = repo_root / "build" / "aihub" / "vpcd_option1" / "model.quantized.latest.onnx"
+    quantized_model_path.parent.mkdir(parents=True, exist_ok=True)
+    quantized_model_path.write_bytes(b"quantized-model")
+
+    write_quantize_run_record(
+        pilot_name="vpcd_option1",
+        runtime_config=config,
+        quantize_job=FakeJob("quantize-1", "https://aihub/jobs/quantize-1", "SUCCESS"),
+        target_model=FakeModel("model-q1", "https://aihub/models/model-q1", "vpcd-quantized"),
+        quantized_model_path=quantized_model_path,
+        weights_dtype_name="INT8",
+        activations_dtype_name="INT16",
+        quantize_options="",
+        calibration_stats={"dataset_fingerprint": "abc123"},
+        run_label="latest",
+    )
+
+    explicit_path = repo_root / "manual" / "quantized.override.onnx"
+    explicit_path.parent.mkdir(parents=True, exist_ok=True)
+    explicit_path.write_bytes(b"override")
+
+    assert resolve_downloaded_quantized_model_path(
+        pilot_name="vpcd_option1",
+        runtime_config=config,
+        explicit_quantized_model_path=explicit_path,
+    ) == explicit_path.resolve()
+    assert resolve_downloaded_quantized_model_path(
+        pilot_name="vpcd_option1",
+        runtime_config=config,
+        explicit_quantized_model_path=None,
+    ) == quantized_model_path.resolve()
+
+
 def test_resolve_target_model_id_uses_explicit_value_or_compile_record(tmp_path):
     from tools.aihub_option1_pilots import (
         build_option1_runtime_config,

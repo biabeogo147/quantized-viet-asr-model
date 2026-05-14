@@ -968,6 +968,96 @@ def write_compile_run_record(
     return _write_json_record(record_path, payload)
 
 
+def write_quantize_run_record(
+    *,
+    pilot_name: str,
+    runtime_config: Option1RuntimeConfig,
+    quantize_job: Any = None,
+    target_model: Any = None,
+    quantized_model_path: str | Path,
+    weights_dtype_name: str,
+    activations_dtype_name: str,
+    quantize_options: str = "",
+    calibration_stats: Mapping[str, Any] | None = None,
+    run_label: str | None = None,
+    output_path: str | Path | None = None,
+) -> Path:
+    resolved_quantized_model_path = Path(quantized_model_path).resolve()
+    record_path = _resolve_record_path(
+        runtime_config=runtime_config,
+        pilot_name=pilot_name,
+        record_kind="quantize-run",
+        run_label=run_label,
+        output_path=output_path,
+    )
+    payload = {
+        "record_kind": "quantize_run",
+        "pilot_name": pilot_name,
+        "device_name": runtime_config.device_name,
+        "qairt_version": runtime_config.qairt_version,
+        "compute_unit": runtime_config.compute_unit,
+        "weights_dtype_name": str(weights_dtype_name),
+        "activations_dtype_name": str(activations_dtype_name),
+        "quantize_options": str(quantize_options or ""),
+        "jobs": {
+            "quantize": _extract_job_metadata(quantize_job),
+        },
+        "target_model": _extract_model_metadata(target_model),
+        "quantized_model": _build_file_metadata(resolved_quantized_model_path),
+        "calibration": dict(calibration_stats or {}),
+        "record_path": record_path.as_posix(),
+        "created_at_utc": _utc_now_isoformat(),
+    }
+    return _write_json_record(record_path, payload)
+
+
+def resolve_downloaded_quantized_model_path(
+    *,
+    pilot_name: str,
+    runtime_config: Option1RuntimeConfig,
+    explicit_quantized_model_path: str | Path | None = None,
+    run_label: str | None = None,
+) -> Path:
+    if explicit_quantized_model_path is not None:
+        return Path(explicit_quantized_model_path).resolve()
+
+    record_path = _resolve_record_path(
+        runtime_config=runtime_config,
+        pilot_name=pilot_name,
+        record_kind="quantize-run",
+        run_label=run_label,
+        output_path=None,
+    )
+    if not record_path.exists():
+        raise FileNotFoundError(
+            f"Could not resolve a quantize-run record for pilot '{pilot_name}' at: {record_path}"
+        )
+
+    payload = json.loads(record_path.read_text(encoding="utf-8"))
+    quantized_model = payload.get("quantized_model") if isinstance(payload, Mapping) else None
+    quantized_model_path = None
+    if isinstance(quantized_model, Mapping):
+        quantized_model_path = _normalize_optional_string(quantized_model.get("path"))
+    if not quantized_model_path:
+        raise ValueError(f"Quantize-run record does not include a quantized model path: {record_path}")
+    return Path(quantized_model_path).resolve()
+
+
+def download_quantized_target_model(
+    *,
+    quantize_job: Any,
+    output_path: str | Path,
+) -> Path:
+    resolved_output_path = Path(output_path).resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    download_result = quantize_job.download_target_model(filename=resolved_output_path.as_posix())
+    if isinstance(download_result, (str, Path)):
+        resolved_output_path = Path(download_result).resolve()
+    if not resolved_output_path.exists():
+        raise FileNotFoundError(f"Quantized target model was not downloaded to: {resolved_output_path}")
+    return resolved_output_path
+
+
 def resolve_target_model_id(
     *,
     pilot_name: str,
