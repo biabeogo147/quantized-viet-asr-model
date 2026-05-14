@@ -65,6 +65,21 @@ def test_pilot_notebook_runs_vpcd_teacher_forced_debug_before_hybrid() -> None:
     assert teacher_heading_index < hybrid_heading_index
 
 
+def test_pilot_notebook_runs_vpcd_quantized_local_teacher_forced_before_cloud_teacher_forced() -> None:
+    notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
+    code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
+    markdown_cells = _cell_texts(notebook, cell_type="markdown")
+
+    assert "run_vpcd_quantized_teacher_forced_diagnostics(" in code_text
+    assert "vpcd quantized model path:" in code_text
+
+    quantized_local_heading_index = next(
+        index for index, text in enumerate(markdown_cells) if "### VPCD Quantized Local Teacher-Forced Diagnostics" in text
+    )
+    teacher_heading_index = next(index for index, text in enumerate(markdown_cells) if "### VPCD Teacher-Forced Diagnostics" in text)
+    assert quantized_local_heading_index < teacher_heading_index
+
+
 def test_phase4_notebook_exists_with_phase4_sections() -> None:
     notebook = _load_notebook("On_device_Ai_option1_phase4_gate.ipynb")
     markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
