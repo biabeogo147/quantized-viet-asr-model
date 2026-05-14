@@ -4,6 +4,27 @@ Date: `2026-05-13`
 
 This note records the outcome of the VPCD Option 1 containment and debug plan after implementation, verification, and a real notebook rerun on Qualcomm AI Hub.
 
+## Pending Attribution Template
+
+Use the structure below for the next quantize-vs-compile isolation rerun.
+
+- calibration fingerprint:
+  - `<dataset_fingerprint>`
+- quantize job:
+  - `<job_id>`
+- downloaded quantized ONNX:
+  - `<path>`
+- quantized-local teacher-forced:
+  - first divergent step: `<n or none>`
+  - verdict: `<passes / diverges>`
+- compiled-cloud teacher-forced:
+  - first divergent step: `<n or none>`
+  - verdict: `<passes / diverges>`
+- final attribution:
+  - `<quantize / compile-qnn / neither-yet>`
+- recommended next action:
+  - `<next bounded step>`
+
 ## Scope Executed
 
 - enforced the shared VPCD notebook lane to stay on:

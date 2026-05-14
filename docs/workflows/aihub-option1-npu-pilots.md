@@ -137,6 +137,10 @@ Each successful Phase 2 run should leave behind a predictable set of local outpu
 
 - prepared upload model:
   - `build/aihub/vpcd_option1/model.option1.onnx`
+- quantize run record:
+  - `build/aihub/records/vpcd_option1/quantize-run-latest.json`
+- downloaded quantized ONNX:
+  - `build/aihub/vpcd_option1/model.quantized.<RUN_LABEL>.onnx`
 - prepared artifact record:
   - `build/aihub/records/vpcd_option1/prepared-artifact-latest.json`
 - live run record:
@@ -157,6 +161,13 @@ The Phase 2 records are the minimum handoff artifacts for every pilot run.
   - compile job id and URL
   - resolved target model id and URL
   - compile options
+- quantize-run record:
+  - quantize job id and URL
+  - quantized target model id and URL
+  - downloaded quantized ONNX path
+  - quantize dtype names
+  - quantize options
+  - calibration fingerprint and stats
 - live run record:
   - device name
   - QAIRT version
@@ -184,9 +195,10 @@ Run, per enabled pilot:
 3. `Resolve Existing Compiled Target`
 4. `Run And Compare Against The Compiled Target`
 5. optional `Output Inspection (Debug Only)`
-6. `Teacher-Forced Diagnostics` for VPCD
-7. `Hybrid E2E Run`
-8. `Final Compare`
+6. `Quantized Local Teacher-Forced Diagnostics` for VPCD
+7. `Teacher-Forced Diagnostics` for VPCD
+8. `Hybrid E2E Run`
+9. `Final Compare`
 
 ### Reuse An Existing Compiled Target
 
@@ -198,9 +210,10 @@ Keep the same `RUN_LABEL`, or set an explicit `*_TARGET_MODEL_ID`, then run:
 2. `Resolve Existing Compiled Target`
 3. `Run And Compare Against The Compiled Target`
 4. optional `Output Inspection (Debug Only)`
-5. `Teacher-Forced Diagnostics` for VPCD
-6. `Hybrid E2E Run`
-7. `Final Compare`
+5. `Quantized Local Teacher-Forced Diagnostics` for VPCD
+6. `Teacher-Forced Diagnostics` for VPCD
+7. `Hybrid E2E Run`
+8. `Final Compare`
 
 Recommended config defaults:
 
@@ -211,7 +224,7 @@ Operator note:
 
 - environment setup belongs outside the normal notebook execution path
 - the pilot notebook no longer includes the old mandatory `pip install` cell
-- for the current VPCD failure, use teacher-forced diagnosis before any free-run hybrid rerun
+- for the current VPCD failure, use quantized-local teacher-forced before cloud teacher-forced, and both before any free-run hybrid rerun
 
 ## Notebook Outputs To Preserve
 

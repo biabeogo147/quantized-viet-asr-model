@@ -29,13 +29,14 @@ The notebook now has three layers per pilot:
 
 1. `Prepare / Compile / Resolve / Run` for Phase 2 reproducibility
 2. `Output Inspection (Intermediate Diagnostic Only)` for tensor sanity checks
-3. `Teacher-Forced Diagnostics` for bounded next-token comparison on VPCD
-4. `Hybrid E2E Run` and `Final Compare` for Phase 3 correctness
+3. `Quantized Local Teacher-Forced Diagnostics` for bounded FP32-vs-quantized next-token comparison on VPCD
+4. `Teacher-Forced Diagnostics` for bounded FP32-vs-compiled-cloud comparison on VPCD
+5. `Hybrid E2E Run` and `Final Compare` for Phase 3 correctness
 
 The same notebook now continues into:
 
-4. `Phase 4` benchmark and gate sections
-5. `Phase 5` packaging sections
+6. `Phase 4` benchmark and gate sections
+7. `Phase 5` packaging sections
 
 ## Common Reuse Pattern
 
@@ -83,21 +84,28 @@ Sections to run in order:
 2. `Resolve Existing Compiled Target`
 3. `Run And Compare Against The Compiled Target`
 4. `VPCD Output Inspection (Intermediate Diagnostic Only)`
-5. `VPCD Teacher-Forced Diagnostics`
-6. `VPCD Hybrid E2E Run`
-7. `VPCD Final Compare Against Gold Samples`
+5. `VPCD Quantized Local Teacher-Forced Diagnostics`
+6. `VPCD Teacher-Forced Diagnostics`
+7. `VPCD Hybrid E2E Run`
+8. `VPCD Final Compare Against Gold Samples`
 
 Notes:
 
 - the logits inspection section is not the final pass/fail gate
-- the teacher-forced section is the first bounded diagnostic step and should run before the free-run hybrid loop
+- the quantized-local teacher-forced section is the first bounded diagnostic step and should run before the compiled-cloud teacher-forced section
+- the compiled-cloud teacher-forced section should run before the free-run hybrid loop
 - the final pass/fail decision comes from punctuated outputs compared against `golden_samples.jsonl`
 - recommended knobs for the current runaway decode failure are:
   - `VPCD_HYBRID_MAX_SAMPLES = 2`
   - `VPCD_HYBRID_MAX_STEPS = 5`
   - `VPCD_TEACHER_FORCED_SAMPLE_INDEX = 0`
+- quantize runs now also preserve:
+  - `build/aihub/records/vpcd_option1/quantize-run-<RUN_LABEL>.json`
+  - `build/aihub/vpcd_option1/model.quantized.<RUN_LABEL>.onnx`
 - the hybrid run writes:
   - `build/aihub/records/vpcd_hybrid_option1/hybrid-run-<RUN_LABEL>.json`
+- the quantized-local teacher-forced run writes:
+  - `build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-<RUN_LABEL>.json`
 - the teacher-forced run writes:
   - `build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-<RUN_LABEL>.json`
 
@@ -150,18 +158,35 @@ Current sample-level fields:
   - `steps[*].matches_cpu_argmax`
   - `steps[*].job_id`
 
+- `VPCD quantized-local teacher-forced`
+  - `sample_index`
+  - `raw_text`
+  - `decode_step_limit`
+  - `reference_stats.quantized_model_path`
+  - `steps[*].decoder_prefix_ids`
+  - `steps[*].expected_next_token_id`
+  - `steps[*].cpu_top_tokens`
+  - `steps[*].quantized_top_tokens`
+  - `steps[*].cpu_argmax_token_id`
+  - `steps[*].quantized_argmax_token_id`
+  - `steps[*].matches_fp32_argmax`
+
 ## VPCD Decision Tree
 
 Use the current VPCD notebook flow to separate two questions:
 
-1. Does the compiled cloud target diverge immediately on teacher-forced prefixes?
-2. Or does the model only drift later during free-run autoregressive decoding?
+1. Does the downloaded AI Hub quantized ONNX already diverge from FP32 on teacher-forced prefixes?
+2. If not, does divergence appear only after AI Hub compile and cloud inference?
+3. Or does the model only drift later during free-run autoregressive decoding?
 
 Interpret the evidence this way:
 
-- if teacher-forced divergence appears in the first few steps:
-  - treat `AI Hub quantize -> compile` as the primary suspect
-  - do not waste time extending the free-run decode length yet
+- if quantized-local divergence appears in the first few steps:
+  - treat `AI Hub quantize` as the primary suspect
+  - keep the calibration fingerprint fixed while trying bounded quantize variants
+- if quantized-local steps stay aligned but compiled-cloud teacher-forced diverges:
+  - treat `AI Hub compile / QNN execution` as the primary suspect
+  - do not spend more time on quantize variants yet
 - if teacher-forced steps look reasonable but free-run hybrid later collapses into punctuation loops:
   - treat stopping behavior or autoregressive drift as the next suspect
 - if both teacher-forced and free-run stay aligned for the bounded `5`-step window:
