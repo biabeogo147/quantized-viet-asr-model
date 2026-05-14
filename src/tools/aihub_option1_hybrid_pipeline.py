@@ -28,6 +28,7 @@ from tools.aihub_option1_pilots import (
     build_vpcd_input_specs,
     build_zipformer_encoder_input_specs,
     coerce_inputs_for_compiled_model,
+    resolve_downloaded_quantized_model_path,
     resolve_vpcd_fp32_source_model_path,
     resolve_vpcd_model_dir,
     resolve_target_model_id,
@@ -42,6 +43,7 @@ ZIPFORMER_PHASE3_PILOT = "zipformer_hybrid_option1"
 VPCD_PHASE2_PILOT = "vpcd_option1"
 VPCD_PHASE3_PILOT = "vpcd_hybrid_option1"
 VPCD_TEACHER_FORCED_PILOT = "vpcd_teacher_forced_option1"
+VPCD_QUANTIZED_TEACHER_FORCED_PILOT = "vpcd_quantized_teacher_forced_option1"
 DEFAULT_ZIPFORMER_MAX_SAMPLES = 2
 DEFAULT_VPCD_MAX_SAMPLES = 4
 
@@ -487,6 +489,181 @@ def run_vpcd_teacher_forced_diagnostics(
     return {
         "pilot_name": VPCD_TEACHER_FORCED_PILOT,
         "target_reference": target_reference,
+        "results": [sample_result],
+        "steps": step_results,
+        "summary": summary,
+        "record_path": record_path,
+        "decode_step_limit": int(decode_step_limit),
+    }
+
+
+def run_vpcd_quantized_teacher_forced_diagnostics(
+    *,
+    runtime_config: Option1RuntimeConfig,
+    run_label: str | None = None,
+    sample_index: int = 0,
+    max_decode_steps: int | None = None,
+    top_k: int = 5,
+    explicit_quantized_model_path: str | Path | None = None,
+    cpu_model_step_runner: Callable[[dict[str, np.ndarray]], object] | None = None,
+    quantized_model_step_runner: Callable[[dict[str, np.ndarray]], object] | None = None,
+    decode_ids_fn: Callable[[str], tuple[dict[str, np.ndarray], list[int]]] | None = None,
+) -> dict[str, Any]:
+    source = resolve_vpcd_pilot_source(runtime_config.repo_root)
+    sample_rows = read_jsonl(source.golden_samples_path)
+    if sample_index < 0 or sample_index >= len(sample_rows):
+        raise IndexError(f"VPCD sample_index out of range: {sample_index}")
+
+    sample = sample_rows[sample_index]
+    reference_stats: dict[str, Any] = {
+        "requested_provider": "cpu",
+        "session_providers": "injected" if cpu_model_step_runner is not None else None,
+        "fp32_model_path": None,
+        "model_dir": None,
+        "quantized_model_path": None,
+        "quantized_session_providers": "injected" if quantized_model_step_runner is not None else None,
+    }
+    if decode_ids_fn is None or cpu_model_step_runner is None:
+        resolved_fp32_model_path = resolve_vpcd_fp32_source_model_path(source)
+        if resolved_fp32_model_path is None:
+            raise FileNotFoundError("Could not resolve a VPCD FP32 ONNX source model for quantized teacher-forced diagnostics.")
+        fp32_session = ort.InferenceSession(
+            resolved_fp32_model_path.as_posix(),
+            providers=resolve_ort_providers("cpu"),
+        )
+        reference_stats["fp32_model_path"] = resolved_fp32_model_path.as_posix()
+        reference_stats["session_providers"] = ",".join(fp32_session.get_providers())
+
+        if decode_ids_fn is None:
+            resolved_model_dir = resolve_vpcd_model_dir(source)
+            if resolved_model_dir is None:
+                raise FileNotFoundError("Could not resolve a VPCD model directory for quantized teacher-forced diagnostics.")
+            tokenizer = AutoTokenizer.from_pretrained(resolved_model_dir, local_files_only=True)
+            decoder_start_token_id = load_decoder_start_token_id(resolved_model_dir, tokenizer)
+            reference_stats["model_dir"] = resolved_model_dir.as_posix()
+
+            def _decode_ids_with_fp32(text: str) -> tuple[dict[str, np.ndarray], list[int]]:
+                return greedy_decode_ids(
+                    session=fp32_session,
+                    tokenizer=tokenizer,
+                    text=text,
+                    decoder_start_token_id=decoder_start_token_id,
+                    max_generation_length=max(1, int(max_decode_steps or source.decoder_sequence)),
+                )
+
+            decode_ids_fn = _decode_ids_with_fp32
+
+        if cpu_model_step_runner is None:
+            cpu_model_step_runner = lambda feeds: fp32_session.run(None, feeds)[0]
+
+    if quantized_model_step_runner is None:
+        resolved_quantized_model_path = resolve_downloaded_quantized_model_path(
+            pilot_name=VPCD_PHASE2_PILOT,
+            runtime_config=runtime_config,
+            explicit_quantized_model_path=explicit_quantized_model_path,
+            run_label=run_label,
+        )
+        quantized_session = ort.InferenceSession(
+            resolved_quantized_model_path.as_posix(),
+            providers=resolve_ort_providers("cpu"),
+        )
+        reference_stats["quantized_model_path"] = resolved_quantized_model_path.as_posix()
+        reference_stats["quantized_session_providers"] = ",".join(quantized_session.get_providers())
+        quantized_model_step_runner = lambda feeds: quantized_session.run(None, feeds)[0]
+    elif explicit_quantized_model_path is not None:
+        reference_stats["quantized_model_path"] = Path(explicit_quantized_model_path).resolve().as_posix()
+
+    encoder_inputs, decoded_ids = decode_ids_fn(str(sample["raw_text"]))
+    normalized_decoded_ids = [int(token_id) for token_id in decoded_ids]
+    if not normalized_decoded_ids:
+        raise ValueError("decode_ids_fn returned an empty decoded_ids sequence.")
+    if normalized_decoded_ids[0] != int(source.decoder_start_token_id):
+        raise ValueError("decoded_ids must start with source.decoder_start_token_id.")
+
+    encoder_input_ids = np.asarray(encoder_inputs["input_ids"], dtype=np.int64).reshape(-1)
+    encoder_attention_mask = np.asarray(encoder_inputs["attention_mask"], dtype=np.int64).reshape(-1)
+    available_steps = max(0, len(normalized_decoded_ids) - 1)
+    requested_steps = int(source.decoder_sequence) if max_decode_steps is None else max(1, int(max_decode_steps))
+    decode_step_limit = min(int(source.decoder_sequence), requested_steps, available_steps)
+
+    step_results: list[dict[str, Any]] = []
+    quantized_inference_seconds = 0.0
+    decode_started = time.perf_counter()
+    for step_index in range(1, decode_step_limit + 1):
+        prefix_ids = normalized_decoded_ids[:step_index]
+        expected_next_token_id = normalized_decoded_ids[step_index] if step_index < len(normalized_decoded_ids) else None
+        feeds = build_vpcd_fixed_shape_inputs(
+            source,
+            input_ids=encoder_input_ids,
+            attention_mask=encoder_attention_mask,
+            decoder_prefix=prefix_ids,
+        )
+        cpu_logits = np.asarray(cpu_model_step_runner(feeds))
+        cpu_summary = summarize_vpcd_step_logits(cpu_logits, feeds["decoder_attention_mask"], top_k=top_k)
+        cpu_argmax_token_id = BundleOnnxRuntime._argmax_token_at(cpu_logits, cpu_summary["active_index"])
+
+        quantized_started = time.perf_counter()
+        quantized_logits = np.asarray(quantized_model_step_runner(feeds))
+        quantized_inference_seconds += time.perf_counter() - quantized_started
+        quantized_summary = summarize_vpcd_step_logits(quantized_logits, feeds["decoder_attention_mask"], top_k=top_k)
+        quantized_argmax_token_id = BundleOnnxRuntime._argmax_token_at(quantized_logits, quantized_summary["active_index"])
+
+        step_results.append(
+            {
+                "step_index": int(step_index),
+                "decoder_prefix_ids": [int(token_id) for token_id in prefix_ids],
+                "expected_next_token_id": int(expected_next_token_id) if expected_next_token_id is not None else None,
+                "active_index": int(cpu_summary["active_index"]),
+                "cpu_top_tokens": list(cpu_summary["top_tokens"]),
+                "quantized_top_tokens": list(quantized_summary["top_tokens"]),
+                "cpu_argmax_token_id": int(cpu_argmax_token_id),
+                "quantized_argmax_token_id": int(quantized_argmax_token_id),
+                "cpu_matches_expected_next_token": (
+                    int(cpu_argmax_token_id) == int(expected_next_token_id) if expected_next_token_id is not None else None
+                ),
+                "quantized_matches_expected_next_token": (
+                    int(quantized_argmax_token_id) == int(expected_next_token_id) if expected_next_token_id is not None else None
+                ),
+                "matches_fp32_argmax": int(cpu_argmax_token_id) == int(quantized_argmax_token_id),
+            }
+        )
+
+    decode_seconds = round(time.perf_counter() - decode_started, 6)
+    sample_result = {
+        "sample_index": int(sample_index),
+        "raw_text": str(sample["raw_text"]),
+        "expected_text": str(sample.get("expected_output", "")),
+        "expected_available": bool(sample.get("expected_output")),
+        "matches_expected": None,
+        "decode_step_limit": int(decode_step_limit),
+        "available_teacher_forced_steps": int(available_steps),
+        "gold_decoder_ids": [int(token_id) for token_id in normalized_decoded_ids],
+        "encoder_input_ids": [int(token_id) for token_id in encoder_input_ids.tolist()],
+        "cloud_inference_seconds": None,
+        "quantized_inference_seconds": round(float(quantized_inference_seconds), 6),
+        "decode_seconds": decode_seconds,
+        "jobs": [],
+        "reference_stats": reference_stats,
+        "steps": step_results,
+    }
+    synthetic_reference = ResolvedCompiledTarget(
+        compile_pilot_name=VPCD_PHASE2_PILOT,
+        target_model_id=reference_stats["quantized_model_path"] or "local-quantized-vpcd",
+        compile_record_path=None,
+        run_label=_normalize_optional_string(run_label),
+        explicit_override=explicit_quantized_model_path is not None,
+    )
+    record_path = write_hybrid_run_record(
+        pilot_name=VPCD_QUANTIZED_TEACHER_FORCED_PILOT,
+        runtime_config=runtime_config,
+        target_reference=synthetic_reference,
+        sample_results=[sample_result],
+        run_label=run_label,
+    )
+    summary = _summarize_match_results([sample_result])
+    return {
+        "pilot_name": VPCD_QUANTIZED_TEACHER_FORCED_PILOT,
+        "target_reference": synthetic_reference,
         "results": [sample_result],
         "steps": step_results,
         "summary": summary,

@@ -604,6 +604,87 @@ def test_vpcd_teacher_forced_diagnostics_records_cpu_and_cloud_step_summaries(tm
     assert second_step["matches_cpu_argmax"] is False
 
 
+def test_vpcd_quantized_teacher_forced_diagnostics_records_fp32_vs_quantized_steps(tmp_path):
+    from tools.aihub_option1_hybrid_pipeline import run_vpcd_quantized_teacher_forced_diagnostics
+    from tools.aihub_option1_pilots import build_option1_runtime_config
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+
+    runtime_config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24",
+        repo_root=repo_root,
+    )
+    quantized_model_path = repo_root / "build" / "aihub" / "vpcd_option1" / "model.quantized.phase3.onnx"
+    quantized_model_path.parent.mkdir(parents=True, exist_ok=True)
+    quantized_model_path.write_bytes(b"quantized-model")
+
+    cpu_step_outputs: list[np.ndarray] = []
+    first_cpu_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    first_cpu_logits[0, 0, 5] = 9.0
+    second_cpu_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    second_cpu_logits[0, 1, 6] = 9.0
+    cpu_step_outputs.extend([first_cpu_logits, second_cpu_logits])
+
+    quantized_step_outputs: list[np.ndarray] = []
+    first_quantized_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    first_quantized_logits[0, 0, 5] = 8.0
+    second_quantized_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    second_quantized_logits[0, 1, 4] = 8.0
+    quantized_step_outputs.extend([first_quantized_logits, second_quantized_logits])
+
+    def fake_decode_ids(text: str) -> tuple[dict[str, np.ndarray], list[int]]:
+        assert text == "xin chao"
+        return (
+            {
+                "input_ids": np.asarray([[0, 11, 12, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1, 1]], dtype=np.int64),
+            },
+            [2, 5, 6],
+        )
+
+    def fake_cpu_model_step_runner(feeds: dict[str, np.ndarray]) -> np.ndarray:
+        return cpu_step_outputs.pop(0)
+
+    def fake_quantized_model_step_runner(feeds: dict[str, np.ndarray]) -> np.ndarray:
+        assert feeds["decoder_input_ids"].dtype == np.int64
+        return quantized_step_outputs.pop(0)
+
+    report = run_vpcd_quantized_teacher_forced_diagnostics(
+        runtime_config=runtime_config,
+        run_label="phase3",
+        sample_index=0,
+        max_decode_steps=2,
+        explicit_quantized_model_path=quantized_model_path,
+        cpu_model_step_runner=fake_cpu_model_step_runner,
+        quantized_model_step_runner=fake_quantized_model_step_runner,
+        decode_ids_fn=fake_decode_ids,
+    )
+
+    assert report["pilot_name"] == "vpcd_quantized_teacher_forced_option1"
+    assert report["decode_step_limit"] == 2
+    assert len(report["steps"]) == 2
+    assert report["results"][0]["reference_stats"]["quantized_model_path"] == quantized_model_path.resolve().as_posix()
+
+    first_step = report["steps"][0]
+    assert first_step["step_index"] == 1
+    assert first_step["decoder_prefix_ids"] == [2]
+    assert first_step["expected_next_token_id"] == 5
+    assert first_step["cpu_argmax_token_id"] == 5
+    assert first_step["quantized_argmax_token_id"] == 5
+    assert "quantized_top_tokens" in first_step
+
+    second_step = report["steps"][1]
+    assert second_step["step_index"] == 2
+    assert second_step["decoder_prefix_ids"] == [2, 5]
+    assert second_step["expected_next_token_id"] == 6
+    assert second_step["cpu_argmax_token_id"] == 6
+    assert second_step["quantized_argmax_token_id"] == 4
+    assert second_step["matches_fp32_argmax"] is False
+
+
 def test_hybrid_record_writer_persists_sample_results_and_summary(tmp_path):
     from tools.aihub_option1_hybrid_pipeline import (
         ResolvedCompiledTarget,
