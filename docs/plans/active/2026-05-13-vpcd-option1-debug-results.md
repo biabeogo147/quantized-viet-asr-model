@@ -1,187 +1,281 @@
 # VPCD Option 1 Debug Results
 
-Date: `2026-05-13`
+Date: `2026-05-14`
 
-This note records the outcome of the VPCD Option 1 containment and debug plan after implementation, verification, and a real notebook rerun on Qualcomm AI Hub.
+This note captures the real outcome after implementing the VPCD quantize-vs-compile isolation work, rerunning the VPCD notebook path, and comparing FP32 local, quantized local, and compiled cloud behavior.
 
-## Pending Attribution Template
+## Executive Conclusion
 
-Use the structure below for the next quantize-vs-compile isolation rerun.
+The VPCD punctuation-collapse bug is now attributed to the `quantize` stage, not only to `compile` or to long free-run decoding.
 
-- calibration fingerprint:
-  - `<dataset_fingerprint>`
-- quantize job:
-  - `<job_id>`
-- downloaded quantized ONNX:
-  - `<path>`
-- quantized-local teacher-forced:
-  - first divergent step: `<n or none>`
-  - verdict: `<passes / diverges>`
-- compiled-cloud teacher-forced:
-  - first divergent step: `<n or none>`
-  - verdict: `<passes / diverges>`
-- final attribution:
-  - `<quantize / compile-qnn / neither-yet>`
-- recommended next action:
-  - `<next bounded step>`
+Evidence:
 
-## Scope Executed
+- the downloaded AI Hub quantized ONNX already diverges from the FP32 local reference at teacher-forced step `2`
+- the compiled cloud target diverges at the same step and with the same top-token pattern
+- bounded hybrid free-run then collapses to `",,,,"` because that earlier next-token error keeps feeding punctuation tokens back into the decoder
 
-- enforced the shared VPCD notebook lane to stay on:
-  - `FP32 fixed-shape prepare -> AI Hub quantize -> AI Hub compile`
-- kept the bounded free-run guardrail:
-  - `VPCD_HYBRID_MAX_STEPS = 5`
-- added a teacher-forced diagnostic path before free-run hybrid
-- reran the VPCD notebook path and saved outputs back into:
-  - [On_device_Ai_option1_pilots.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_pilots.ipynb)
+Short version:
 
-## Records Produced
+- `max_step = 5` fixed the runaway runtime cost
+- it did not fix correctness
+- correctness is already broken in the quantized ONNX before cloud compile/runtime enters the picture
 
-- prepared artifact:
-  - [prepared-artifact-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1/prepared-artifact-20260513-1am.json)
-- compile record reused:
+## Notebook Status
+
+The VPCD notebook path completed successfully and wrote outputs back into:
+
+- [On_device_Ai_option1_pilots.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_pilots.ipynb)
+
+Cells executed for VPCD:
+
+- auth and setup
+- imports and config
+- VPCD prepare
+- VPCD compile-only
+- resolve compiled target
+- VPCD live run
+- VPCD quantized-local teacher-forced diagnostics
+- VPCD compiled-cloud teacher-forced diagnostics
+- VPCD bounded hybrid
+- final compare
+- summary
+
+Important implementation note:
+
+- a fresh explicit quantize submission `jp0ekj665` stayed in `QUANTIZING_MODEL` long enough to block the first notebook attempt
+- to avoid manual reruns, the notebook was unblocked with the historical successful quantized artifact from `jp8wwq1op`
+- later, `jp0ekj665` also completed successfully and was checked separately as the current `A` baseline
+
+## Primary Evidence
+
+### Calibration Fingerprint
+
+- fingerprint: `873ef0635a0bb4b29d6f37080517908a275f7961196676e9a1a7ab59d77c0510`
+- text samples: `24`
+- autoregressive records: `715`
+- fixed shapes:
+  - encoder `1 x 1024`
+  - decoder `1 x 128`
+
+### Quantized Artifact Evidence
+
+Historical successful AI Hub quantize job used to unblock the notebook:
+
+- quantize job: `jp8wwq1op`
+- target model: `mnolrjpkn`
+- quantized record:
+  - [quantize-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1/quantize-run-20260513-1am.json)
+- quantized-local teacher-forced record:
+  - [hybrid-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260513-1am.json)
+
+Current baseline `A` rerun using the same current calibration recipe:
+
+- quantize job: `jp0ekj665`
+- target model: `mq8r4jw3n`
+- quantize record:
+  - [quantize-run-20260513-1am-currentA.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1/quantize-run-20260513-1am-currentA.json)
+- quantized-local teacher-forced record:
+  - [hybrid-run-20260513-1am-currentA.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260513-1am-currentA.json)
+
+Compiled cloud record for the failing production lane:
+
+- compile record:
   - [compile-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1/compile-run-20260513-1am.json)
-- live run:
-  - [live-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1/live-run-20260513-1am.json)
-- teacher-forced diagnostic:
+- compiled-cloud teacher-forced record:
   - [hybrid-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260513-1am.json)
-- bounded free-run hybrid:
+- bounded hybrid record:
   - [hybrid-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260513-1am.json)
 
-## Approaches And Results
+## Attribution Result
 
-### Approach 1: Bound The Free-Run Hybrid Loop
+### FP32 Local vs Quantized Local
 
-What changed:
+Local quantized teacher-forced result:
 
-- kept sample count bounded by the fixture set
-- capped per-sample decode to `5` steps
+- first divergent step: `2`
+- expected next token at step `2`: `2232`
+- FP32 local argmax at step `2`: `2232`
+- quantized local argmax at step `2`: `4`
 
-Result:
+Top quantized tokens at first divergence:
 
-- the old free-run record on `2026-05-13` had average cloud inference time around `12508.406844` seconds per sample
-- the bounded rerun dropped that to `1258.532508` seconds per sample
-- this is roughly a `10x` reduction in cloud time
-- the run now stops after `5` decode steps instead of running out toward `48` and `55` steps
+- token `4` score about `28.09`
+- token `2` score about `26.72`
+- token `382` score about `25.50`
 
-Observed output:
+This result reproduced in both:
 
-- sample 0 text: `",,,,"`
-- sample 1 text: `",,,,"`
-- generated ids for both samples collapsed to:
+- historical quantized artifact `jp8wwq1op`
+- current baseline `A` artifact `jp0ekj665`
+
+Conclusion:
+
+- the quantized ONNX is already wrong before compile/cloud inference
+
+### FP32 Local vs Compiled Cloud
+
+Compiled cloud teacher-forced result:
+
+- first divergent step: `2`
+- expected next token at step `2`: `2232`
+- FP32 local argmax at step `2`: `2232`
+- compiled cloud argmax at step `2`: `4`
+
+Top cloud tokens at first divergence:
+
+- token `4` score about `28.43`
+- token `2` score about `27.16`
+- token `382` score about `25.99`
+
+Conclusion:
+
+- compiled cloud preserves the same failure signature already present in the quantized ONNX
+- compile/cloud may still contribute noise, but they are no longer the first failing stage
+
+### Bounded Hybrid
+
+Bounded hybrid output after `max_decode_steps = 5`:
+
+- sample `0`: `",,,,"`
+- sample `1`: `",,,,"`
+- generated ids for both samples:
   - `[0, 4, 4, 4, 4]`
 
 Conclusion:
 
-- the cost-containment goal succeeded
-- the correctness problem still remained
+- the punctuation loop is a downstream symptom of the earlier quantized next-token collapse
 
-### Approach 2: Add Teacher-Forced Diagnostics Before Free-Run
+## Approaches Tried
+
+### Approach 1: Containment First
 
 What changed:
 
-- each cloud step used the gold decoder prefix instead of the model's previous generated token
-- each step recorded:
-  - expected next token
-  - local CPU top tokens
-  - cloud top tokens
-  - CPU argmax
-  - cloud argmax
-
-Result on sample `0`:
-
-- step `1` matched:
-  - expected next token `0`
-  - CPU argmax `0`
-  - cloud argmax `0`
-- step `2` diverged immediately:
-  - expected next token `2232`
-  - CPU argmax `2232`
-  - cloud argmax `4`
-- steps `3`, `4`, and `5` stayed divergent:
-  - CPU argmax followed the gold path `177 -> 9 -> 847`
-  - cloud argmax kept collapsing to token `4`
-
-Important token pattern:
-
-- cloud top-k after divergence repeatedly favored punctuation-like ids:
-  - `4`
-  - `382`
-  - sometimes `135`
-
-Conclusion:
-
-- this is not primarily a late free-run drift problem
-- the compiled cloud target is already wrong by teacher-forced step `2`
-- the repeated punctuation string is a downstream symptom of that earlier divergence
-
-### Approach 3: Run The Notebook End-To-End Without Requiring Manual Reruns
-
-What happened:
-
-- a single foreground notebook execution hit a `1` hour tool timeout
-- the notebook was then rerun using a background per-cell execution flow with per-cell saves
-
-Cells executed for the VPCD path:
-
-- AI Hub auth and setup
-- imports and config
-- VPCD prepare
-- VPCD compile-only cell
-- resolve existing compiled target
-- VPCD live run
-- VPCD teacher-forced diagnostics
-- VPCD hybrid free-run
-- VPCD final compare
-- summary
+- kept `VPCD_HYBRID_MAX_SAMPLES = 2`
+- enforced `VPCD_HYBRID_MAX_STEPS = 5`
 
 Result:
 
-- the notebook finished the VPCD path successfully
-- outputs were written back into the notebook file
-- no manual rerun is required for the completed `20260513-1am` path
+- notebook reruns no longer spend many hours inside runaway free-run decode
+- cloud hybrid now stops after `5` decode steps
+- correctness remained broken
 
-## Root Cause Conclusion
+### Approach 2: Teacher-Forced Cloud Before Free-Run
 
-Current best-supported conclusion:
+What changed:
 
-- the VPCD output failure on AI Hub is not caused by the old missing decode-step cap alone
-- the `max_step = 5` change fixed the runtime/debug-loop cost problem, but it did not fix token correctness
-- the strongest current suspect is the compiled target produced by:
-  - `FP32 fixed-shape prepare -> AI Hub quantize -> AI Hub compile`
-- evidence for that conclusion is that:
-  - local CPU reference stays aligned with the expected next token through the bounded teacher-forced window
-  - the cloud target diverges at teacher-forced step `2`
-  - once divergence starts, the cloud target repeatedly prefers punctuation-like token ids, especially `4`
+- added a compiled-cloud teacher-forced checkpoint
 
-Short version:
+Result:
 
-- the punctuation loop is a symptom
-- the earlier failure is next-token divergence in the compiled AI Hub lane
+- divergence appears at step `2`, not after a long autoregressive chain
+- this ruled out “late drift only” as the main explanation
+
+### Approach 3: Download And Run The Quantized ONNX Locally
+
+What changed:
+
+- downloaded the quantized ONNX produced by the AI Hub quantize job
+- ran the same teacher-forced diagnostic locally with ONNX Runtime CPU
+
+Result:
+
+- the downloaded quantized ONNX diverged at the same step `2`
+- the first wrong argmax was the same token `4`
+- the same punctuation-like top-token pattern reappeared locally
+
+Conclusion:
+
+- this is the decisive attribution step
+- the root-cause stage is `quantize`
+
+### Approach 4: Re-submit Baseline `A` With Current Calibration
+
+What changed:
+
+- re-submitted baseline `A`
+  - `w8a16 + auto + calibration giữ nguyên`
+
+Observed behavior:
+
+- the new quantize job `jp0ekj665` initially stayed in `QUANTIZING_MODEL` long enough to block notebook execution
+- after completion, its downloaded artifact still diverged at teacher-forced step `2`
+
+Conclusion:
+
+- the historical artifact was not a one-off anomaly
+- the current calibration recipe still reproduces the quantize-stage failure on baseline `A`
+
+## Matrix Status
+
+The bounded follow-up matrix is only partially exercised.
+
+Completed:
+
+- `A`: `w8a16 + auto + calibration giữ nguyên`
+  - historical quantize job `jp8wwq1op`: fails at local quantized step `2`
+  - current quantize job `jp0ekj665`: fails at local quantized step `2`
+
+Not yet executed:
+
+- `B`: `w8a16 + min_max + calibration giữ nguyên`
+- `C`: `w8a8 + auto + calibration giữ nguyên`
+- `D`: `w8a8 + min_max + calibration giữ nguyên`
+
+Reason not yet executed:
+
+- the main implementation and attribution goal is complete
+- each extra variant is another full AI Hub quantize cycle
+- once quantize was proven to be the first failing stage, the highest-value next work became bounded matrix exploration rather than more compile reruns on the known-bad baseline
 
 ## What Is Fixed Now
 
-- the notebook no longer needs an unbounded VPCD hybrid rerun
-- VPCD hybrid runs are capped at `5` steps
-- teacher-forced diagnostics now exist and run before free-run hybrid
-- the VPCD notebook path was executed successfully and recorded
-- the team now has a concrete failure signature for the compiled target
+- the notebook VPCD path is implemented and runnable end-to-end
+- the notebook completed without requiring user reruns
+- VPCD free-run cost is bounded
+- quantize/local/cloud attribution is no longer guesswork
+- the failure signature is now reproducible and documented
 
 ## What Is Not Fixed Yet
 
-- final VPCD correctness on the current AI Hub compiled target is still failing
-- the compiled target still emits punctuation-collapse behavior after the first generated token
+- VPCD punctuation correctness on AI Hub is still failing
+- baseline `A` remains bad even with the current calibration fingerprint
+- no passing quantized variant has been found yet
 
-## Recommended Next Fixes
+## Recommended Next Steps
 
-Run these in order:
+Run the remaining bounded matrix in this order and stop early on the first passing local quantized result:
 
-1. Keep teacher-forced diagnostics as the first gate for any new compile attempt.
-2. Re-run the `FP32 -> AI Hub quantize -> compile` lane with a new compile label and a calibration variant that is more aggressive about decoder-prefix coverage.
-3. Compare at least one alternate quantize setting against the current preset, because the failure appears after quantization/compile rather than after a long free-run decode.
-4. Do not spend more time extending hybrid decode length until teacher-forced step `2` stops diverging.
+1. `B`: `w8a16 + --range_scheme min_max`
+2. `C`: `w8a8 + auto`
+3. `D`: `w8a8 + --range_scheme min_max`
+
+Execution rules:
+
+- keep the same calibration fingerprint `873ef0635a0bb4b29d6f37080517908a275f7961196676e9a1a7ab59d77c0510`
+- use a new `RUN_LABEL` per variant
+- run only local quantized teacher-forced first
+- compile cloud only for the first variant whose local quantized step `2` stops diverging
+
+Interpretation rules:
+
+- if `B` passes and `A` fails:
+  - range selection is the leading suspect
+- if `C` or `D` passes while `A/B` fail:
+  - the `INT16` activation lane is the leading suspect
+- if all four fail at the same early step:
+  - stop spending time on compile
+  - move next to source-graph / AI Hub quantize compatibility investigation
 
 ## Practical Decision Rule
 
-- if a new compile still fails at teacher-forced step `2`, keep treating quantize/compile as the primary target
-- if teacher-forced steps become correct but free-run still collapses later, then shift focus to stopping behavior and autoregressive drift
+- quantized local diverges:
+  - blame `quantize`
+- quantized local matches FP32 but compiled cloud diverges:
+  - blame `compile / QNN execution`
+- both match and only free-run fails:
+  - investigate stopping and autoregressive drift
+
+For VPCD baseline `A`, the verdict is now:
+
+- final attribution: `quantize`
