@@ -1,6 +1,6 @@
 # VPCD Option 1 Debug Results
 
-Date: `2026-05-14`
+Date: `2026-05-18`
 
 This note captures the real outcome after implementing the VPCD quantize-vs-compile isolation work, rerunning the VPCD notebook path, and comparing FP32 local, quantized local, and compiled cloud behavior.
 
@@ -19,6 +19,12 @@ Short version:
 - `max_step = 5` fixed the runaway runtime cost
 - it did not fix correctness
 - correctness is already broken in the quantized ONNX before cloud compile/runtime enters the picture
+
+Update after the local-QDQ compile probe on `2026-05-18`:
+
+- the current local ORT/QNN-flavored QDQ artifact does not reproduce the old step-`2` divergence when it is run locally with teacher-forced prefixes
+- however, AI Hub compile rejects that same artifact before runtime because the graph still contains `com.microsoft:DequantizeLinear`
+- this means the local-QDQ lane is currently semantically healthier than the AI Hub-quantized baseline for the bounded `5`-step check, but it is not yet a valid AI Hub compile input
 
 ## Notebook Status
 
@@ -45,6 +51,19 @@ Important implementation note:
 - a fresh explicit quantize submission `jp0ekj665` stayed in `QUANTIZING_MODEL` long enough to block the first notebook attempt
 - to avoid manual reruns, the notebook was unblocked with the historical successful quantized artifact from `jp8wwq1op`
 - later, `jp0ekj665` also completed successfully and was checked separately as the current `A` baseline
+- a later local-QDQ probe run was executed by selecting only the VPCD cells needed for:
+  - setup
+  - VPCD prepare
+  - VPCD compile-only
+  - target resolution
+  - local quantized teacher-forced diagnostics
+  - compiled-cloud teacher-forced diagnostics
+  - bounded hybrid
+  - summary
+- executed notebook copy:
+  - [On_device_Ai_option1_pilots.local_qdq_probe.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_qdq_probe.executed.ipynb)
+- probe log:
+  - [local_qdq_probe.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_qdq_probe.log)
 
 ## Primary Evidence
 
@@ -206,6 +225,57 @@ Conclusion:
 - the historical artifact was not a one-off anomaly
 - the current calibration recipe still reproduces the quantize-stage failure on baseline `A`
 
+### Approach 5: Local QDQ Compile Probe
+
+What changed:
+
+- prepared the bundled local VPCD QDQ artifact as an explicit `local_qdq_compile_candidate`
+- added a strict compatibility report before upload
+- skipped AI Hub quantize and submitted the packaged local QDQ graph directly to AI Hub compile
+- ran local quantized teacher-forced diagnostics against the same prepared artifact
+
+Compatibility report from the prepared local-QDQ probe artifact:
+
+- prepared artifact record:
+  - [prepared-artifact-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_qdq/prepared-artifact-20260518-local-qdq-probe.json)
+- compile record:
+  - [compile-run-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_qdq/compile-run-20260518-local-qdq-probe.json)
+- local quantized teacher-forced record:
+  - [hybrid-run-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260518-local-qdq-probe.json)
+
+Observed graph facts:
+
+- `main` opset: `17`
+- `com.microsoft` opset: `1`
+- `com.microsoft` Q/DQ nodes: `842`
+- `uses_uint16_qdq`: `true`
+- `uses_quantized_weight_initializers`: `true`
+- conservative graph readiness: `unsafe`
+- candidate readiness: `experimental`
+
+First failure encountered during implementation:
+
+- blindly rewriting `com.microsoft` Q/DQ domains on this graph produced an invalid ONNX graph for `uint16` QDQ under `main` opset `17`
+- the fix was to preserve the local QDQ graph `as_is` for the compile probe whenever `uint16` or `int16` QDQ is present under opset `<21`
+- this fixed the local ONNX-checker failure, but it did not make the graph AI Hub-compatible yet
+
+Compile probe result:
+
+- compile job: `jp3qz24m5`
+- AI Hub failure:
+  - `Layer 'DequantizeLinear' with domain 'com.microsoft' in input model is not supported by Qualcomm AI Hub Workbench.`
+
+Local teacher-forced result on the same local-QDQ artifact:
+
+- steps `1` through `5` matched the FP32 argmax
+- step `2` matched token `2232`
+- no punctuation collapse appeared in the bounded local test window
+
+Conclusion:
+
+- the current local VPCD QDQ artifact is useful as evidence and as a semantically healthier local reference
+- it is not yet a valid replacement for AI Hub quantize because AI Hub compile rejects the artifact format before runtime
+
 ## Matrix Status
 
 The bounded follow-up matrix is only partially exercised.
@@ -235,14 +305,21 @@ Reason not yet executed:
 - VPCD free-run cost is bounded
 - quantize/local/cloud attribution is no longer guesswork
 - the failure signature is now reproducible and documented
+- the notebook now completes cleanly even when the local-QDQ compile probe fails to produce a target model
+- the repo now records an explicit compatibility report for local-QDQ compile candidates
 
 ## What Is Not Fixed Yet
 
 - VPCD punctuation correctness on AI Hub is still failing
 - baseline `A` remains bad even with the current calibration fingerprint
 - no passing quantized variant has been found yet
+- the current local QDQ artifact still cannot be compiled by AI Hub in its present ORT/QNN-specific format
 
 ## Recommended Next Steps
+
+Keep two next-step tracks alive:
+
+### Track 1: AI Hub Quantize Fallback Matrix
 
 Run the remaining bounded matrix in this order and stop early on the first passing local quantized result:
 
@@ -267,6 +344,15 @@ Interpretation rules:
   - stop spending time on compile
   - move next to source-graph / AI Hub quantize compatibility investigation
 
+### Track 2: Official-Compatible Local Quantization Path
+
+If the team continues pursuing local quantization as the default source lane, the next work should target an artifact format that is closer to what AI Hub documents as officially supported:
+
+1. standard main-domain QDQ with `main` opset `21+`, without `com.microsoft` Q/DQ
+2. or an official `.aimet` package lane containing ONNX plus encodings
+
+Do not keep spending time on blind domain rewriting of the current `opset 17 + com.microsoft + uint16` graph. The compile probe already showed that AI Hub rejects it as input.
+
 ## Practical Decision Rule
 
 - quantized local diverges:
@@ -279,3 +365,8 @@ Interpretation rules:
 For VPCD baseline `A`, the verdict is now:
 
 - final attribution: `quantize`
+
+For the current local-QDQ compile probe, the verdict is now:
+
+- local semantics in the bounded teacher-forced check: `promising`
+- AI Hub compile compatibility: `rejected`

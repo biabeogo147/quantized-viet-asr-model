@@ -32,8 +32,9 @@ This workflow intentionally moves upstream:
    - source: a prepared encoder artifact derived from the fixed-shape encoder ONNX
    - goal: prove the first-slice ASR graph can compile and run on NPU even though the raw fixed-shape source still needs graph preparation first
 2. `VPCD model-session-first`
-   - source: fixed-shape FP32 ONNX prepared locally, then quantized on AI Hub
+   - source: fixed-shape FP32 ONNX prepared locally, then quantized on AI Hub by default
    - goal: prove the first-slice punctuation model session can compile and run on NPU
+   - optional probe: direct local-QDQ compile candidate, only for compatibility investigation
 
 ## Prerequisites
 
@@ -113,14 +114,30 @@ Current preferred source resolution:
 Current caveat:
 
 - the preferred FP32 source must be frozen to the bundle's `1024 x 128` input shapes before upload
-- this workflow intentionally excludes local QDQ experiments so that root-cause attribution stays on a single source lane
-- when compile uses `--truncate_64bit_io`, submit compiled-model inference tensors as `int32` for the integer inputs
-- the intended debug lane for this notebook is:
+- the default supported notebook lane is still:
   - fixed-shape FP32 prepare locally
   - autoregressive calibration build locally
   - AI Hub quantize
   - AI Hub compile
   - AI Hub inference
+- when compile uses `--truncate_64bit_io`, submit compiled-model inference tensors as `int32` for the integer inputs
+
+Experimental local-QDQ probe lane:
+
+- strategy flag:
+  - `VPCD_SOURCE_STRATEGY = "local_qdq_compile_candidate"`
+- prepared source graph:
+  - `build/model_bundle/vpcd/qnn_fixed_1024x128/model.mobile.onnx`
+- prepared upload artifact:
+  - `build/aihub/vpcd_option1_local_qdq/model.option1.qdq.onnx`
+
+Current status of the local-QDQ probe:
+
+- the local artifact is semantically promising in the bounded local teacher-forced check
+- the same artifact is not AI Hub compile-ready yet
+- AI Hub currently rejects it with:
+  - `Layer 'DequantizeLinear' with domain 'com.microsoft' in input model is not supported by Qualcomm AI Hub Workbench.`
+- because of that rejection, local QDQ is still an investigation lane, not the default notebook source
 
 ## Canonical Run Outputs
 
@@ -147,6 +164,17 @@ Each successful Phase 2 run should leave behind a predictable set of local outpu
   - `build/aihub/records/vpcd_option1/prepared-artifact-latest.json`
 - live run record:
   - `build/aihub/records/vpcd_option1/live-run-latest.json`
+
+Local-QDQ compile probe outputs:
+
+- prepared upload model:
+  - `build/aihub/vpcd_option1_local_qdq/model.option1.qdq.onnx`
+- prepared artifact record:
+  - `build/aihub/records/vpcd_option1_local_qdq/prepared-artifact-latest.json`
+- compile record:
+  - `build/aihub/records/vpcd_option1_local_qdq/compile-run-latest.json`
+- local quantized teacher-forced record:
+  - `build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-latest.json`
 
 ### What The Records Contain
 
@@ -227,6 +255,7 @@ Operator note:
 - environment setup belongs outside the normal notebook execution path
 - the pilot notebook no longer includes the old mandatory `pip install` cell
 - for the current VPCD failure, use quantized-local teacher-forced before cloud teacher-forced, and both before any free-run hybrid rerun
+- if `VPCD_SOURCE_STRATEGY = "local_qdq_compile_candidate"` and AI Hub compile fails, the notebook now skips target resolution, live run, compiled-cloud teacher-forced, and hybrid cells cleanly while still preserving the compatibility and local teacher-forced evidence
 
 ## Notebook Outputs To Preserve
 
@@ -297,6 +326,7 @@ Typical examples:
 - unsupported op
 - internal compiler error
 - device/runtime incompatibility
+- local QDQ artifact still contains `com.microsoft` Q/DQ operators that AI Hub Workbench does not accept
 
 ### AI Hub profile failure
 

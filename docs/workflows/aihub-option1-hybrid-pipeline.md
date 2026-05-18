@@ -33,6 +33,12 @@ The notebook now has three layers per pilot:
 4. `Teacher-Forced Diagnostics` for bounded FP32-vs-compiled-cloud comparison on VPCD
 5. `Hybrid E2E Run` and `Final Compare` for Phase 3 correctness
 
+For VPCD, a fourth bounded probe path now also exists:
+
+- `local QDQ compile candidate -> local teacher-forced diagnostics`
+
+That probe is used only to answer whether the current local VPCD quantized artifact is semantically healthier than the AI Hub-quantized artifact and whether AI Hub compile will even accept it.
+
 The same notebook now continues into:
 
 6. `Phase 4` benchmark and gate sections
@@ -94,6 +100,13 @@ Notes:
 - the logits inspection section is not the final pass/fail gate
 - the quantized-local teacher-forced section is the first bounded diagnostic step and should run before the compiled-cloud teacher-forced section
 - the compiled-cloud teacher-forced section should run before the free-run hybrid loop
+- when `VPCD_SOURCE_STRATEGY = "local_qdq_compile_candidate"`, the notebook still runs the local quantized teacher-forced section even if AI Hub compile fails
+- in that local-QDQ failure case, the notebook intentionally skips:
+  - compiled target resolution
+  - live run
+  - compiled-cloud teacher-forced
+  - hybrid free-run
+  - final compare
 - the final pass/fail decision comes from punctuated outputs compared against `golden_samples.jsonl`
 - recommended knobs for the current runaway decode failure are:
   - `VPCD_HYBRID_MAX_SAMPLES = 2`
@@ -108,6 +121,10 @@ Notes:
   - `build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-<RUN_LABEL>.json`
 - the teacher-forced run writes:
   - `build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-<RUN_LABEL>.json`
+- a recent local-QDQ probe completed with:
+  - [prepared-artifact-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_qdq/prepared-artifact-20260518-local-qdq-probe.json)
+  - [compile-run-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_qdq/compile-run-20260518-local-qdq-probe.json)
+  - [hybrid-run-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260518-local-qdq-probe.json)
 
 ## Evidence Contract
 
@@ -176,14 +193,19 @@ Current sample-level fields:
 Use the current VPCD notebook flow to separate two questions:
 
 1. Does the downloaded AI Hub quantized ONNX already diverge from FP32 on teacher-forced prefixes?
-2. If not, does divergence appear only after AI Hub compile and cloud inference?
-3. Or does the model only drift later during free-run autoregressive decoding?
+2. If we bypass AI Hub quantize and use the local-QDQ compile candidate, does the local quantized artifact still align with FP32 on teacher-forced prefixes?
+3. If a quantized artifact looks healthy locally, does divergence appear only after AI Hub compile and cloud inference?
+4. Or does the model only drift later during free-run autoregressive decoding?
 
 Interpret the evidence this way:
 
 - if quantized-local divergence appears in the first few steps:
   - treat `AI Hub quantize` as the primary suspect
   - keep the calibration fingerprint fixed while trying bounded quantize variants
+- if the local-QDQ artifact stays aligned locally but AI Hub compile rejects it before runtime:
+  - treat `artifact compatibility with AI Hub compile` as the primary blocker
+  - do not switch notebook defaults away from the FP32 + AI Hub quantize lane yet
+  - keep the `B/C/D` AI Hub quantize fallback matrix active
 - if quantized-local steps stay aligned but compiled-cloud teacher-forced diverges:
   - treat `AI Hub compile / QNN execution` as the primary suspect
   - do not spend more time on quantize variants yet
@@ -191,6 +213,12 @@ Interpret the evidence this way:
   - treat stopping behavior or autoregressive drift as the next suspect
 - if both teacher-forced and free-run stay aligned for the bounded `5`-step window:
   - only then consider increasing `VPCD_HYBRID_MAX_STEPS`
+
+Current known result:
+
+- AI Hub quantize baseline `A` diverges at teacher-forced step `2`
+- the current local QDQ artifact matches FP32 locally for the bounded `5`-step teacher-forced probe
+- AI Hub compile rejects that same local QDQ artifact because `com.microsoft:DequantizeLinear` is unsupported in the input model
 
 ## Current Limits
 
