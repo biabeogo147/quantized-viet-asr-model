@@ -685,6 +685,80 @@ def test_vpcd_quantized_teacher_forced_diagnostics_records_fp32_vs_quantized_ste
     assert second_step["matches_fp32_argmax"] is False
 
 
+def test_vpcd_teacher_forced_diagnostics_reports_local_qdq_compile_lane_metadata(tmp_path):
+    from tools.aihub_option1_hybrid_pipeline import run_vpcd_teacher_forced_diagnostics
+    from tools.aihub_option1_pilots import build_option1_runtime_config, write_compile_run_record
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+
+    runtime_config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24",
+        repo_root=repo_root,
+    )
+    write_compile_run_record(
+        pilot_name="vpcd_option1_local_qdq",
+        runtime_config=runtime_config,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
+        target_model={"model_id": "vpcd-local-qdq-target", "url": "https://example/models/vpcd-local-qdq-target"},
+        source_strategy="local_qdq_compile_candidate",
+        quantize_stage="disabled",
+        compatibility={"aihub_compile_readiness": "experimental"},
+        run_label="phase3-local-qdq",
+    )
+
+    cpu_step_outputs: list[np.ndarray] = []
+    first_cpu_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    first_cpu_logits[0, 0, 5] = 9.0
+    second_cpu_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    second_cpu_logits[0, 1, 6] = 9.0
+    cpu_step_outputs.extend([first_cpu_logits, second_cpu_logits])
+
+    cloud_step_outputs: list[np.ndarray] = []
+    first_cloud_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    first_cloud_logits[0, 0, 5] = 8.0
+    second_cloud_logits = np.zeros((1, 4, 7), dtype=np.float32)
+    second_cloud_logits[0, 1, 4] = 8.0
+    cloud_step_outputs.extend([first_cloud_logits, second_cloud_logits])
+
+    def fake_decode_ids(text: str) -> tuple[dict[str, np.ndarray], list[int]]:
+        assert text == "xin chao"
+        return (
+            {
+                "input_ids": np.asarray([[0, 11, 12, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1, 1]], dtype=np.int64),
+            },
+            [2, 5, 6],
+        )
+
+    def fake_cpu_model_step_runner(feeds: dict[str, np.ndarray]) -> np.ndarray:
+        return cpu_step_outputs.pop(0)
+
+    def fake_inference_runner(*, target_model_id: str, runtime_config: object, inputs: dict[str, list[np.ndarray]], inference_name: str | None):
+        return (
+            {"output_0": [cloud_step_outputs.pop(0)]},
+            {"job_id": "teacher-job-local-qdq", "url": "https://example/jobs/teacher-job-local-qdq"},
+        )
+
+    report = run_vpcd_teacher_forced_diagnostics(
+        runtime_config=runtime_config,
+        run_label="phase3-local-qdq",
+        sample_index=0,
+        max_decode_steps=2,
+        inference_runner=fake_inference_runner,
+        cpu_model_step_runner=fake_cpu_model_step_runner,
+        decode_ids_fn=fake_decode_ids,
+        compile_pilot_name="vpcd_option1_local_qdq",
+    )
+
+    assert report["target_reference"].target_model_id == "vpcd-local-qdq-target"
+    assert report["results"][0]["reference_stats"]["compile_pilot_name"] == "vpcd_option1_local_qdq"
+    assert report["results"][0]["reference_stats"]["source_strategy"] == "local_qdq_compile_candidate"
+    assert report["results"][0]["reference_stats"]["quantize_stage"] == "disabled"
+
+
 def test_hybrid_record_writer_persists_sample_results_and_summary(tmp_path):
     from tools.aihub_option1_hybrid_pipeline import (
         ResolvedCompiledTarget,

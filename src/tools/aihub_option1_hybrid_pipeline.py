@@ -337,6 +337,7 @@ def run_vpcd_teacher_forced_diagnostics(
     runtime_config: Option1RuntimeConfig,
     run_label: str | None = None,
     explicit_target_model_id: str | None = None,
+    compile_pilot_name: str = VPCD_PHASE2_PILOT,
     sample_index: int = 0,
     max_decode_steps: int | None = None,
     top_k: int = 5,
@@ -351,7 +352,7 @@ def run_vpcd_teacher_forced_diagnostics(
 
     target_reference = resolve_compiled_target_reference(
         runtime_config=runtime_config,
-        compile_pilot_name=VPCD_PHASE2_PILOT,
+        compile_pilot_name=compile_pilot_name,
         explicit_target_model_id=explicit_target_model_id,
         run_label=run_label,
     )
@@ -363,7 +364,12 @@ def run_vpcd_teacher_forced_diagnostics(
         "session_providers": "injected" if cpu_model_step_runner is not None else None,
         "fp32_model_path": None,
         "model_dir": None,
+        "compile_pilot_name": target_reference.compile_pilot_name,
+        "source_strategy": None,
+        "quantize_stage": None,
+        "compile_compatibility": {},
     }
+    reference_stats.update(_load_compile_record_context(target_reference))
     if decode_ids_fn is None or cpu_model_step_runner is None:
         resolved_fp32_model_path = resolve_vpcd_fp32_source_model_path(source)
         if resolved_fp32_model_path is None:
@@ -669,6 +675,23 @@ def run_vpcd_quantized_teacher_forced_diagnostics(
         "summary": summary,
         "record_path": record_path,
         "decode_step_limit": int(decode_step_limit),
+    }
+
+
+def _load_compile_record_context(target_reference: ResolvedCompiledTarget) -> dict[str, Any]:
+    compile_record_path = target_reference.compile_record_path
+    if compile_record_path is None or not compile_record_path.exists():
+        return {}
+
+    payload = json.loads(compile_record_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        return {}
+
+    compatibility = payload.get("compatibility")
+    return {
+        "source_strategy": _normalize_optional_string(payload.get("source_strategy")),
+        "quantize_stage": _normalize_optional_string(payload.get("quantize_stage")),
+        "compile_compatibility": dict(compatibility) if isinstance(compatibility, Mapping) else {},
     }
 
 
