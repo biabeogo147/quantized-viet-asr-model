@@ -24,7 +24,14 @@ from model_bundle.projects.vpcd_shapes import (
     resolve_vpcd_model_input_shapes,
 )
 from model_bundle.projects.zipformer import ModelDirAcousticRuntime, prepare_encoder_inputs, resolve_fixed_encoder_frames
-from quantize.aimet import inspect_aimet_package, write_calibration_batches
+from quantize.aimet import (
+    build_matmul_only_aimet_config,
+    build_vpcd_local_quality_policy_manifest,
+    inspect_aimet_package,
+    write_aimet_config,
+    write_aimet_policy_manifest,
+    write_calibration_batches,
+)
 from quantize.calibration import (
     greedy_decode_ids,
     iter_calibration_texts,
@@ -35,6 +42,7 @@ from quantize.projects.vpcd import (
     DEFAULT_AIMET_ACTIVATION_TYPE,
     DEFAULT_AIMET_CONFIG_FILE,
     DEFAULT_AIMET_PARAM_TYPE,
+    DEFAULT_AIMET_POLICY_MODE,
     DEFAULT_AIMET_QUANT_SCHEME,
     DEFAULT_CALIBRATION_SOURCE as VPCD_DEFAULT_CALIBRATION_SOURCE,
     DEFAULT_PRESET as VPCD_DEFAULT_PRESET,
@@ -868,6 +876,18 @@ def _to_container_repo_path(path: Path, repo_root: Path) -> str:
     return Path(DEFAULT_AIMET_DOCKER_WORKSPACE, relative_path.as_posix()).as_posix()
 
 
+def _resolve_container_path_or_literal(argument: str | Path, repo_root: Path) -> str:
+    if isinstance(argument, Path):
+        return _to_container_repo_path(argument.resolve(), repo_root)
+    raw_text = str(argument).strip()
+    if not raw_text:
+        return raw_text
+    candidate = Path(raw_text)
+    if candidate.exists():
+        return _to_container_repo_path(candidate.resolve(), repo_root)
+    return raw_text
+
+
 def _ensure_aimet_docker_image(
     *,
     repo_root: Path,
@@ -917,6 +937,7 @@ def _run_aimet_export_in_docker(
     activation_type: str = DEFAULT_AIMET_ACTIVATION_TYPE,
     quant_scheme: str = DEFAULT_AIMET_QUANT_SCHEME,
     config_file: str = DEFAULT_AIMET_CONFIG_FILE,
+    policy_manifest_path: Path | None = None,
     image_tag: str = DEFAULT_AIMET_DOCKER_IMAGE_TAG,
 ) -> dict[str, Any]:
     _ensure_aimet_docker_image(repo_root=repo_root, image_tag=image_tag)
@@ -953,12 +974,53 @@ def _run_aimet_export_in_docker(
         "--quant-scheme",
         str(quant_scheme),
         "--config-file",
-        str(config_file),
+        _resolve_container_path_or_literal(config_file, repo_root),
         "--report-path",
         _to_container_repo_path(report_path, repo_root),
     ]
+    if policy_manifest_path is not None:
+        command.extend(
+            [
+                "--policy-manifest",
+                _to_container_repo_path(policy_manifest_path, repo_root),
+            ]
+        )
     subprocess.run(command, cwd=repo_root, env=docker_env, check=True)
     return json.loads(report_path.read_text(encoding="utf-8"))
+
+
+def _prepare_vpcd_aimet_variant_artifacts(
+    *,
+    aimet_root: Path,
+    recipe: Any,
+) -> dict[str, Path | None]:
+    variant_root = (aimet_root / str(recipe.variant_name)).resolve()
+    variant_root.mkdir(parents=True, exist_ok=True)
+    config_file_arg = str(recipe.config_file)
+    config_file_path: Path | None = None
+    policy_manifest_path: Path | None = None
+
+    if str(recipe.policy_mode).strip().lower() == "local_quality_parity":
+        config_file_path = write_aimet_config(
+            build_matmul_only_aimet_config(),
+            variant_root / "aimet.config.json",
+        )
+        policy_manifest_path = write_aimet_policy_manifest(
+            build_vpcd_local_quality_policy_manifest(
+                variant_name=str(recipe.variant_name),
+                policy_mode=str(recipe.policy_mode),
+                local_quality_policy=dict(recipe.local_quality_policy),
+            ),
+            variant_root / "aimet.policy.json",
+        )
+        config_file_arg = config_file_path.as_posix()
+
+    return {
+        "variant_root": variant_root,
+        "config_file_arg": Path(config_file_arg).resolve() if config_file_path is not None else None,
+        "config_file_value": config_file_path.as_posix() if config_file_path is not None else config_file_arg,
+        "policy_manifest_path": policy_manifest_path,
+    }
 
 
 def _build_local_aimet_compile_candidate_report(
@@ -987,9 +1049,12 @@ def _build_local_aimet_compile_candidate_report(
             "activation_type": str(aimet_recipe.get("activation_type") or DEFAULT_AIMET_ACTIVATION_TYPE),
             "quant_scheme": str(aimet_recipe.get("quant_scheme") or DEFAULT_AIMET_QUANT_SCHEME),
             "config_file": str(aimet_recipe.get("config_file") or DEFAULT_AIMET_CONFIG_FILE),
+            "variant_name": str(aimet_recipe.get("variant_name") or "unknown"),
+            "policy_mode": str(aimet_recipe.get("policy_mode") or DEFAULT_AIMET_POLICY_MODE),
         },
         "package_report": normalized_package_report,
         "calibration": dict(aimet_recipe.get("calibration_stats") or {}),
+        "local_quality_policy": dict(aimet_recipe.get("local_quality_policy") or {}),
         "readiness_flags": list(package_report.get("package_notes", [])),
     }
 
@@ -1015,6 +1080,7 @@ def prepare_vpcd_option1_source_model(
     aimet_activation_type: str = DEFAULT_AIMET_ACTIVATION_TYPE,
     aimet_quant_scheme: str = DEFAULT_AIMET_QUANT_SCHEME,
     aimet_config_file: str = DEFAULT_AIMET_CONFIG_FILE,
+    aimet_policy_mode: str = DEFAULT_AIMET_POLICY_MODE,
     aimet_docker_image_tag: str = DEFAULT_AIMET_DOCKER_IMAGE_TAG,
 ) -> PreparedVpcdOption1Source:
     normalized_strategy = _normalize_optional_string(strategy)
@@ -1055,13 +1121,25 @@ def prepare_vpcd_option1_source_model(
             activation_type=aimet_activation_type,
             quant_scheme=aimet_quant_scheme,
             config_file=aimet_config_file,
+            policy_mode=aimet_policy_mode,
         )
 
         aimet_root = prepared_output_path.parent
-        calibration_dir = (aimet_root / "calibration").resolve()
-        package_dir = (aimet_root / "model.option1.aimet").resolve()
-        qdq_reference_model_path = (aimet_root / "model.option1.qdq.onnx").resolve()
-        report_path = (aimet_root / "model.option1.aimet.report.json").resolve()
+        variant_artifacts = _prepare_vpcd_aimet_variant_artifacts(
+            aimet_root=aimet_root,
+            recipe=aimet_recipe,
+        )
+        variant_root = Path(variant_artifacts["variant_root"]).resolve()
+        calibration_dir = (variant_root / "calibration").resolve()
+        package_dir = (variant_root / "model.option1.aimet").resolve()
+        qdq_reference_model_path = (variant_root / "model.option1.qdq.onnx").resolve()
+        report_path = (variant_root / "model.option1.aimet.report.json").resolve()
+        config_file_value = str(variant_artifacts["config_file_value"])
+        policy_manifest_path = (
+            Path(variant_artifacts["policy_manifest_path"]).resolve()
+            if variant_artifacts["policy_manifest_path"] is not None
+            else None
+        )
         write_calibration_batches(aimet_recipe.calibration_inputs, calibration_dir)
         if package_dir.exists() and qdq_reference_model_path.exists() and report_path.exists():
             package_report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -1077,7 +1155,8 @@ def prepare_vpcd_option1_source_model(
                 param_type=aimet_recipe.param_type,
                 activation_type=aimet_recipe.activation_type,
                 quant_scheme=aimet_recipe.quant_scheme,
-                config_file=aimet_recipe.config_file,
+                config_file=config_file_value,
+                policy_manifest_path=policy_manifest_path,
                 image_tag=aimet_docker_image_tag,
             )
         report = _build_local_aimet_compile_candidate_report(
@@ -1085,7 +1164,10 @@ def prepare_vpcd_option1_source_model(
                 "param_type": aimet_recipe.param_type,
                 "activation_type": aimet_recipe.activation_type,
                 "quant_scheme": aimet_recipe.quant_scheme,
-                "config_file": aimet_recipe.config_file,
+                "config_file": config_file_value,
+                "variant_name": aimet_recipe.variant_name,
+                "policy_mode": aimet_recipe.policy_mode,
+                "local_quality_policy": aimet_recipe.local_quality_policy,
                 "calibration_stats": aimet_recipe.calibration_stats,
             },
             package_report=package_report,

@@ -627,9 +627,9 @@ def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(
         seen["recipe_kwargs"] = kwargs
         return AimetQuantizeRecipe(
             param_type="int8",
-            activation_type="int8",
+            activation_type="int16",
             quant_scheme="min_max",
-            config_file="default",
+            config_file="vpcd_matmul_only",
             calibration_inputs=(
                 CalibrationSample(
                     inputs={
@@ -641,6 +641,13 @@ def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(
                 ),
             ),
             calibration_stats={"dataset_fingerprint": "abc123"},
+            variant_name="wint8_aint16_min_max_local_quality_parity",
+            policy_mode="local_quality_parity",
+            local_quality_policy={
+                "preset": "sd8g2_quality",
+                "excluded_node_names": ["/model/decoder/Cast", "/lm_head/MatMul"],
+                "op_types_to_quantize": ["MatMul"],
+            },
         )
 
     def fake_run_aimet_export_in_docker(**kwargs):
@@ -680,15 +687,21 @@ def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(
     assert prepared.source_kind == "local_aimet"
     assert prepared.packaging_kind == "aimet_dir"
     assert prepared.packaging_path.name == "model.option1.aimet"
+    assert prepared.packaging_path.parent.name == "wint8_aint16_min_max_local_quality_parity"
     assert prepared.diagnostic_model_path.name == "model.option1.qdq.onnx"
     assert prepared.report["aihub_compile_readiness"] == "experimental"
     assert prepared.report["package_ready"] is True
     assert prepared.report["aimet"]["param_type"] == "int8"
+    assert prepared.report["aimet"]["activation_type"] == "int16"
+    assert prepared.report["aimet"]["variant_name"] == "wint8_aint16_min_max_local_quality_parity"
+    assert prepared.report["aimet"]["policy_mode"] == "local_quality_parity"
     assert prepared.report["packaging_path"] == prepared.packaging_path.resolve().as_posix()
     assert prepared.report["qdq_reference_model_path"] == prepared.diagnostic_model_path.resolve().as_posix()
     assert prepared.packaging_path.exists()
     assert prepared.diagnostic_model_path.exists()
     assert Path(seen["docker_kwargs"]["fp32_onnx_path"]).exists()
+    assert Path(seen["docker_kwargs"]["config_file"]).name == "aimet.config.json"
+    assert Path(seen["docker_kwargs"]["policy_manifest_path"]).name == "aimet.policy.json"
 
 
 def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):

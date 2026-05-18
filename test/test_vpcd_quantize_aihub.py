@@ -341,6 +341,19 @@ def test_inspect_aimet_package_reports_expected_structure(tmp_path):
     assert report["qdq_reference_model_path"] == qdq_path.resolve().as_posix()
 
 
+def test_build_matmul_only_aimet_config_disables_defaults_but_enables_matmul_weights():
+    from quantize.aimet import build_matmul_only_aimet_config
+
+    config = build_matmul_only_aimet_config()
+
+    assert config["defaults"]["ops"] == {}
+    assert config["defaults"]["params"] == {}
+    assert config["params"]["bias"]["is_quantized"] == "False"
+    assert config["op_type"]["MatMul"]["is_input_quantized"] == "True"
+    assert config["op_type"]["MatMul"]["is_output_quantized"] == "True"
+    assert config["op_type"]["MatMul"]["params"]["weight"]["is_quantized"] == "True"
+
+
 def test_summarize_vpcd_local_quality_policy_reports_decoder_heavy_exclusions(tmp_path):
     from quantize.projects.vpcd import summarize_vpcd_local_quality_policy
 

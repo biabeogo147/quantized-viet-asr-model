@@ -11,6 +11,73 @@ import onnx
 from quantize.types import AimetPackageReport, CalibrationSample
 
 
+def build_matmul_only_aimet_config() -> dict[str, Any]:
+    return {
+        "defaults": {
+            "ops": {},
+            "params": {},
+            "strict_symmetric": "False",
+            "unsigned_symmetric": "True",
+            "per_channel_quantization": "False",
+        },
+        "params": {
+            "bias": {
+                "is_quantized": "False",
+            }
+        },
+        "op_type": {
+            "MatMul": {
+                "is_input_quantized": "True",
+                "is_output_quantized": "True",
+                "params": {
+                    "weight": {
+                        "is_quantized": "True",
+                    }
+                },
+            }
+        },
+        "supergroups": [],
+        "model_input": {},
+        "model_output": {},
+    }
+
+
+def write_aimet_config(config: Mapping[str, Any], output_path: str | Path) -> Path:
+    resolved_output_path = Path(output_path).resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_output_path.write_text(json.dumps(dict(config), ensure_ascii=False, indent=2), encoding="utf-8")
+    return resolved_output_path
+
+
+def build_vpcd_local_quality_policy_manifest(
+    *,
+    variant_name: str,
+    policy_mode: str,
+    local_quality_policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        "variant_name": str(variant_name),
+        "policy_mode": str(policy_mode),
+        "disable_op_names": list(local_quality_policy.get("excluded_node_names", [])),
+        "expected_quantizable_op_types": list(local_quality_policy.get("op_types_to_quantize", [])),
+        "local_quality_policy": {
+            "preset": local_quality_policy.get("preset"),
+            "total_named_nodes": local_quality_policy.get("total_named_nodes"),
+            "excluded_node_count": local_quality_policy.get("excluded_node_count"),
+            "excluded_decoder_node_count": local_quality_policy.get("excluded_decoder_node_count"),
+            "excluded_lm_head_node_count": local_quality_policy.get("excluded_lm_head_node_count"),
+            "quantizable_matmul_node_count": local_quality_policy.get("quantizable_matmul_node_count"),
+        },
+    }
+
+
+def write_aimet_policy_manifest(policy_manifest: Mapping[str, Any], output_path: str | Path) -> Path:
+    resolved_output_path = Path(output_path).resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_output_path.write_text(json.dumps(dict(policy_manifest), ensure_ascii=False, indent=2), encoding="utf-8")
+    return resolved_output_path
+
+
 def write_calibration_batches(
     calibration_inputs: Sequence[CalibrationSample],
     output_dir: str | Path,
@@ -110,6 +177,50 @@ def inspect_aimet_package(package_dir: str | Path, *, qdq_reference_model_path: 
     }
 
 
+def _disable_quantizers_for_ops(sim, disabled_op_names: Sequence[str]) -> dict[str, Any]:
+    connected_graph = sim.connected_graph
+    all_ops = connected_graph.get_all_ops()
+    disabled_quantizer_count = 0
+    disabled_op_count = 0
+    missing_op_names: list[str] = []
+
+    for op_name in disabled_op_names:
+        op = all_ops.get(str(op_name))
+        if op is None:
+            missing_op_names.append(str(op_name))
+            continue
+        input_quantizers, output_quantizers, param_quantizers = sim.get_op_quantizers(op)
+        disabled_op_count += 1
+        for quantizer in [*input_quantizers, *output_quantizers, *param_quantizers.values()]:
+            if quantizer is None:
+                continue
+            if bool(getattr(quantizer, "enabled", False)):
+                quantizer.enabled = False
+                disabled_quantizer_count += 1
+
+    return {
+        "disabled_op_count": int(disabled_op_count),
+        "disabled_quantizer_count": int(disabled_quantizer_count),
+        "missing_op_names": missing_op_names,
+    }
+
+
+def apply_aimet_policy(sim, policy_manifest: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not policy_manifest:
+        return {
+            "policy_mode": "none",
+            "variant_name": None,
+            "disabled_op_count": 0,
+            "disabled_quantizer_count": 0,
+            "missing_op_names": [],
+        }
+    return {
+        "policy_mode": str(policy_manifest.get("policy_mode") or "custom"),
+        "variant_name": policy_manifest.get("variant_name"),
+        **_disable_quantizers_for_ops(sim, tuple(str(name) for name in policy_manifest.get("disable_op_names", []))),
+    }
+
+
 def _resolve_quant_scheme(quant_scheme: str):
     from aimet_common.defs import QuantScheme
 
@@ -149,6 +260,7 @@ def export_aimet_package(
     activation_type: str = "int8",
     quant_scheme: str = "min_max",
     config_file: str = "default",
+    policy_manifest_path: str | Path | None = None,
 ) -> dict[str, Any]:
     from aimet_onnx.quantsim import QuantizationSimModel
 
@@ -159,6 +271,10 @@ def export_aimet_package(
     calibration_batches = load_calibration_batches(calibration_dir)
     if not calibration_batches:
         raise ValueError("AIMET calibration batches must not be empty.")
+    policy_manifest = None
+    if policy_manifest_path is not None:
+        resolved_policy_manifest_path = Path(policy_manifest_path).resolve()
+        policy_manifest = json.loads(resolved_policy_manifest_path.read_text(encoding="utf-8"))
 
     model = onnx.load(resolved_fp32_path.as_posix())
     normalized_config_file = str(config_file).strip()
@@ -170,6 +286,7 @@ def export_aimet_package(
         default_activation_bw=8 if str(activation_type).strip().lower() == "int8" else 16,
         config_file=sim_config_file,
     )
+    policy_report = apply_aimet_policy(sim, policy_manifest)
     sim.compute_encodings(calibration_batches)
 
     export_root = resolved_package_dir.parent / f"{resolved_package_dir.name}.export"
@@ -190,7 +307,11 @@ def export_aimet_package(
 
     qdq_model = sim.to_onnx_qdq(prequantize_constants=False)
     _save_model_with_external_data(qdq_model, resolved_qdq_reference_path)
-    return inspect_aimet_package(resolved_package_dir, qdq_reference_model_path=resolved_qdq_reference_path)
+    report = inspect_aimet_package(resolved_package_dir, qdq_reference_model_path=resolved_qdq_reference_path)
+    report["policy_report"] = policy_report
+    if policy_manifest is not None:
+        report["policy_manifest_path"] = Path(policy_manifest_path).resolve().as_posix()
+    return report
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -207,6 +328,7 @@ def _build_parser() -> argparse.ArgumentParser:
     export_parser.add_argument("--activation-type", default="int8")
     export_parser.add_argument("--quant-scheme", default="min_max")
     export_parser.add_argument("--config-file", default="default")
+    export_parser.add_argument("--policy-manifest")
     export_parser.add_argument("--report-path", required=True)
     return parser
 
@@ -227,6 +349,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         activation_type=args.activation_type,
         quant_scheme=args.quant_scheme,
         config_file=args.config_file,
+        policy_manifest_path=args.policy_manifest,
     )
     report_path = Path(args.report_path).resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
