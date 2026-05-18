@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
+import onnx
 
 from quantize.calibration import build_calibration_records
 from quantize.config import (
@@ -33,7 +34,7 @@ from quantize.runner import (
     run_dynamic_quantization,
     run_static_quantization,
 )
-from quantize.types import AimetQuantizeRecipe, AiHubQuantizeRecipe, CalibrationSample
+from quantize.types import AimetQuantizeRecipe, AiHubQuantizeRecipe, CalibrationSample, VpcdLocalQualityPolicySummary
 
 NAME = 'vpcd'
 DEFAULT_PRESET = 'sd8g2_quality'
@@ -47,6 +48,7 @@ DEFAULT_AIMET_PARAM_TYPE = "int8"
 DEFAULT_AIMET_ACTIVATION_TYPE = "int8"
 DEFAULT_AIMET_QUANT_SCHEME = "min_max"
 DEFAULT_AIMET_CONFIG_FILE = "default"
+DEFAULT_AIMET_POLICY_MODE = "broad_default"
 
 
 def inspect_vpcd_qdq_compile_candidate(model_path: str | Path) -> dict[str, object]:
@@ -104,6 +106,67 @@ def resolve_vpcd_aihub_quantize_dtype_names(*, preset: str = DEFAULT_PRESET) -> 
         "weights_dtype_name": resolved_weight_dtype,
         "activations_dtype_name": resolved_activation_dtype,
     }
+
+
+def summarize_vpcd_local_quality_policy(
+    fp32_onnx_path: str | Path,
+    *,
+    preset: str = DEFAULT_PRESET,
+    extra_exclude_patterns: Sequence[str] | None = None,
+) -> VpcdLocalQualityPolicySummary:
+    resolved_model_path = Path(fp32_onnx_path).resolve()
+    node_names = load_model_node_names(resolved_model_path)
+    plan = build_quantization_plan(
+        node_names=node_names,
+        preset=preset,
+        extra_exclude_patterns=extra_exclude_patterns,
+    )
+    excluded_node_names = tuple(str(node_name) for node_name in plan.nodes_to_exclude)
+    excluded_node_set = set(excluded_node_names)
+    model = onnx.load(resolved_model_path.as_posix(), load_external_data=False)
+    quantizable_matmul_node_names = tuple(
+        str(node.name)
+        for node in model.graph.node
+        if node.name and node.op_type in plan.op_types_to_quantize and node.name not in excluded_node_set
+    )
+    return VpcdLocalQualityPolicySummary(
+        preset=str(plan.preset),
+        total_named_nodes=len(node_names),
+        excluded_node_count=len(excluded_node_names),
+        excluded_decoder_node_count=sum(1 for node_name in excluded_node_names if "/decoder/" in node_name),
+        excluded_lm_head_node_count=sum(1 for node_name in excluded_node_names if "/lm_head/" in node_name),
+        quantizable_matmul_node_count=len(quantizable_matmul_node_names),
+        op_types_to_quantize=tuple(str(op_type) for op_type in plan.op_types_to_quantize),
+        excluded_node_names=excluded_node_names,
+        quantizable_matmul_node_names=quantizable_matmul_node_names,
+    )
+
+
+def _build_aimet_variant_name(
+    *,
+    param_type: str,
+    activation_type: str,
+    quant_scheme: str,
+    policy_mode: str,
+) -> str:
+    def _normalize_fragment(value: str) -> str:
+        return (
+            str(value)
+            .strip()
+            .lower()
+            .replace("post_training_", "")
+            .replace(" ", "_")
+            .replace("-", "_")
+        )
+
+    return "_".join(
+        (
+            f"w{_normalize_fragment(param_type)}",
+            f"a{_normalize_fragment(activation_type)}",
+            _normalize_fragment(quant_scheme),
+            _normalize_fragment(policy_mode),
+        )
+    )
 
 
 def _pad_array_to_target_shape(
@@ -295,6 +358,7 @@ def build_vpcd_aimet_quantize_recipe(
     activation_type: str = DEFAULT_AIMET_ACTIVATION_TYPE,
     quant_scheme: str = DEFAULT_AIMET_QUANT_SCHEME,
     config_file: str = DEFAULT_AIMET_CONFIG_FILE,
+    policy_mode: str = DEFAULT_AIMET_POLICY_MODE,
 ) -> AimetQuantizeRecipe:
     records, stats = build_calibration_records(
         model_dir=Path(model_dir),
@@ -323,6 +387,17 @@ def build_vpcd_aimet_quantize_recipe(
     recipe_stats["activation_type"] = str(activation_type)
     recipe_stats["quant_scheme"] = str(quant_scheme)
     recipe_stats["config_file"] = str(config_file)
+    recipe_stats["policy_mode"] = str(policy_mode)
+    local_quality_policy = summarize_vpcd_local_quality_policy(fp32_onnx_path, preset=DEFAULT_PRESET)
+    recipe_stats["local_quality_policy"] = {
+        "preset": local_quality_policy.preset,
+        "total_named_nodes": int(local_quality_policy.total_named_nodes),
+        "excluded_node_count": int(local_quality_policy.excluded_node_count),
+        "excluded_decoder_node_count": int(local_quality_policy.excluded_decoder_node_count),
+        "excluded_lm_head_node_count": int(local_quality_policy.excluded_lm_head_node_count),
+        "quantizable_matmul_node_count": int(local_quality_policy.quantizable_matmul_node_count),
+        "op_types_to_quantize": list(local_quality_policy.op_types_to_quantize),
+    }
     recipe_stats.update(
         summarize_aihub_calibration_dataset(
             {
@@ -338,6 +413,24 @@ def build_vpcd_aimet_quantize_recipe(
         config_file=str(config_file),
         calibration_inputs=calibration_inputs,
         calibration_stats=recipe_stats,
+        variant_name=_build_aimet_variant_name(
+            param_type=str(param_type),
+            activation_type=str(activation_type),
+            quant_scheme=str(quant_scheme),
+            policy_mode=str(policy_mode),
+        ),
+        policy_mode=str(policy_mode),
+        local_quality_policy={
+            "preset": local_quality_policy.preset,
+            "total_named_nodes": int(local_quality_policy.total_named_nodes),
+            "excluded_node_count": int(local_quality_policy.excluded_node_count),
+            "excluded_decoder_node_count": int(local_quality_policy.excluded_decoder_node_count),
+            "excluded_lm_head_node_count": int(local_quality_policy.excluded_lm_head_node_count),
+            "quantizable_matmul_node_count": int(local_quality_policy.quantizable_matmul_node_count),
+            "op_types_to_quantize": list(local_quality_policy.op_types_to_quantize),
+            "excluded_node_names": list(local_quality_policy.excluded_node_names),
+            "quantizable_matmul_node_names": list(local_quality_policy.quantizable_matmul_node_names),
+        },
     )
 
 

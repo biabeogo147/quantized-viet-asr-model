@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -48,6 +48,19 @@ class AiHubQuantizeRecipe:
 
 
 @dataclass(frozen=True)
+class VpcdLocalQualityPolicySummary:
+    preset: str
+    total_named_nodes: int
+    excluded_node_count: int
+    excluded_decoder_node_count: int
+    excluded_lm_head_node_count: int
+    quantizable_matmul_node_count: int
+    op_types_to_quantize: tuple[str, ...]
+    excluded_node_names: tuple[str, ...]
+    quantizable_matmul_node_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class AimetQuantizeRecipe:
     param_type: str
     activation_type: str
@@ -55,6 +68,9 @@ class AimetQuantizeRecipe:
     config_file: str
     calibration_inputs: tuple[CalibrationSample, ...]
     calibration_stats: dict[str, Any]
+    variant_name: str = "w8a8_min_max_default"
+    policy_mode: str = "broad_default"
+    local_quality_policy: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

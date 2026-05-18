@@ -6,6 +6,43 @@ import onnx
 from quantize.types import CalibrationSample
 
 
+def _write_minimal_vpcd_fp32_model(model_path: Path) -> None:
+    from onnx import TensorProto, helper, numpy_helper
+
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    lm_head_weight = numpy_helper.from_array(np.asarray([[1.0], [1.0]], dtype=np.float32), name="lm_head_weight")
+    graph = helper.make_graph(
+        nodes=[
+            helper.make_node(
+                "Cast",
+                inputs=["decoder_input_ids"],
+                outputs=["decoder_hidden"],
+                to=TensorProto.FLOAT,
+                name="/model/decoder/Cast",
+            ),
+            helper.make_node(
+                "MatMul",
+                inputs=["decoder_hidden", "lm_head_weight"],
+                outputs=["logits"],
+                name="/lm_head/MatMul",
+            ),
+        ],
+        name="vpcd-fp32-minimal",
+        inputs=[
+            helper.make_tensor_value_info("input_ids", TensorProto.INT64, ["batch", "encoder_sequence"]),
+            helper.make_tensor_value_info("attention_mask", TensorProto.INT64, ["batch", "encoder_sequence"]),
+            helper.make_tensor_value_info("decoder_input_ids", TensorProto.INT64, ["batch", "decoder_sequence"]),
+            helper.make_tensor_value_info("decoder_attention_mask", TensorProto.INT64, ["batch", "decoder_sequence"]),
+        ],
+        outputs=[
+            helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["batch", "decoder_sequence"]),
+        ],
+        initializer=[lm_head_weight],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    onnx.save(model, model_path.as_posix())
+
+
 def _write_vpcd_compile_candidate_model(
     model_path: Path,
     *,
@@ -304,6 +341,23 @@ def test_inspect_aimet_package_reports_expected_structure(tmp_path):
     assert report["qdq_reference_model_path"] == qdq_path.resolve().as_posix()
 
 
+def test_summarize_vpcd_local_quality_policy_reports_decoder_heavy_exclusions(tmp_path):
+    from quantize.projects.vpcd import summarize_vpcd_local_quality_policy
+
+    model_path = tmp_path / "model.fp32.onnx"
+    _write_minimal_vpcd_fp32_model(model_path)
+
+    summary = summarize_vpcd_local_quality_policy(model_path)
+
+    assert summary.preset == "sd8g2_quality"
+    assert summary.total_named_nodes > 0
+    assert summary.excluded_node_count == 2
+    assert summary.excluded_decoder_node_count == 1
+    assert summary.excluded_lm_head_node_count == 1
+    assert summary.op_types_to_quantize == ("MatMul",)
+    assert summary.quantizable_matmul_node_count == 0
+
+
 def test_build_vpcd_aimet_quantize_recipe_reuses_fixed_shape_calibration(monkeypatch, tmp_path):
     from quantize.projects.vpcd import build_vpcd_aimet_quantize_recipe
 
@@ -341,6 +395,7 @@ def test_build_vpcd_aimet_quantize_recipe_reuses_fixed_shape_calibration(monkeyp
         )
 
     monkeypatch.setattr("quantize.projects.vpcd.build_calibration_records", fake_build_calibration_records)
+    _write_minimal_vpcd_fp32_model(tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx")
 
     recipe = build_vpcd_aimet_quantize_recipe(
         model_dir=tmp_path / "assets" / "vpcd",
@@ -356,13 +411,23 @@ def test_build_vpcd_aimet_quantize_recipe_reuses_fixed_shape_calibration(monkeyp
             "decoder_attention_mask": (1, 4),
         },
         pad_token_id=1,
+        policy_mode="local_quality_parity",
+        activation_type="int16",
+        config_file="vpcd_matmul_only",
     )
 
     assert recipe.param_type == "int8"
-    assert recipe.activation_type == "int8"
+    assert recipe.activation_type == "int16"
     assert recipe.quant_scheme == "min_max"
+    assert recipe.config_file == "vpcd_matmul_only"
+    assert recipe.policy_mode == "local_quality_parity"
+    assert recipe.variant_name == "wint8_aint16_min_max_local_quality_parity"
     assert recipe.calibration_stats["dataset_fingerprint"]
     assert recipe.calibration_stats["quantize_backend"] == "aimet"
+    assert recipe.calibration_stats["policy_mode"] == "local_quality_parity"
+    assert recipe.calibration_stats["local_quality_policy"]["preset"] == "sd8g2_quality"
+    assert "excluded_node_count" in recipe.local_quality_policy
+    assert "quantizable_matmul_node_names" in recipe.local_quality_policy
     assert len(recipe.calibration_inputs) == 2
     assert recipe.calibration_inputs[0].inputs["input_ids"].shape == (1, 8)
     assert recipe.calibration_inputs[0].inputs["decoder_input_ids"].shape == (1, 4)
