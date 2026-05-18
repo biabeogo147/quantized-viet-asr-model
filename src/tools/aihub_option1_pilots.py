@@ -1010,11 +1010,17 @@ def write_prepared_artifact_record(
     prepared_model_path: str | Path,
     input_specs: InputSpecs | None,
     compile_options: str,
+    source_strategy: str | None = None,
+    source_kind: str | None = None,
+    packaging_kind: str | None = None,
+    packaging_path: str | Path | None = None,
+    compatibility: Mapping[str, Any] | None = None,
     run_label: str | None = None,
     output_path: str | Path | None = None,
 ) -> Path:
     resolved_source_model_path = Path(source_model_path).resolve()
     resolved_prepared_model_path = Path(prepared_model_path).resolve()
+    resolved_packaging_path = Path(packaging_path).resolve() if packaging_path is not None else None
     record_path = _resolve_record_path(
         runtime_config=runtime_config,
         pilot_name=pilot_name,
@@ -1032,6 +1038,11 @@ def write_prepared_artifact_record(
         "input_specs": _serialize_input_specs(input_specs),
         "source_model": _build_file_metadata(resolved_source_model_path),
         "prepared_model": _build_file_metadata(resolved_prepared_model_path),
+        "source_strategy": _normalize_optional_string(source_strategy),
+        "source_kind": _normalize_optional_string(source_kind),
+        "packaging_kind": _normalize_optional_string(packaging_kind),
+        "packaging_path": resolved_packaging_path.as_posix() if resolved_packaging_path is not None else None,
+        "compatibility": dict(compatibility or {}),
         "record_path": record_path.as_posix(),
         "created_at_utc": _utc_now_isoformat(),
     }
@@ -1045,6 +1056,9 @@ def write_compile_run_record(
     compile_options: str,
     compile_job: Any = None,
     target_model: Any = None,
+    source_strategy: str | None = None,
+    quantize_stage: str | None = None,
+    compatibility: Mapping[str, Any] | None = None,
     run_label: str | None = None,
     output_path: str | Path | None = None,
 ) -> Path:
@@ -1062,6 +1076,9 @@ def write_compile_run_record(
         "qairt_version": runtime_config.qairt_version,
         "compute_unit": runtime_config.compute_unit,
         "compile_options": compile_options,
+        "source_strategy": _normalize_optional_string(source_strategy),
+        "quantize_stage": _normalize_optional_string(quantize_stage),
+        "compatibility": dict(compatibility or {}),
         "jobs": {
             "compile": _extract_job_metadata(compile_job),
         },

@@ -928,6 +928,54 @@ def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path
     assert payload["input_specs"]["x_lens"]["dtype"] == "int64"
 
 
+def test_write_prepared_artifact_record_captures_local_qdq_compile_probe_metadata(tmp_path):
+    from tools.aihub_option1_pilots import (
+        build_option1_runtime_config,
+        write_prepared_artifact_record,
+    )
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    source_model_path = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128" / "model.mobile.onnx"
+    source_model_path.parent.mkdir(parents=True, exist_ok=True)
+    source_model_path.write_bytes(b"source-model")
+
+    prepared_model_path = repo_root / "build" / "aihub" / "vpcd_option1_local_qdq" / "model.option1.qdq.onnx"
+    prepared_model_path.parent.mkdir(parents=True, exist_ok=True)
+    prepared_model_path.write_bytes(b"prepared-model")
+
+    config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        qairt_version="2.46.0",
+        repo_root=repo_root,
+    )
+    record_path = write_prepared_artifact_record(
+        pilot_name="vpcd_option1_local_qdq",
+        runtime_config=config,
+        source_model_path=source_model_path,
+        prepared_model_path=prepared_model_path,
+        input_specs=None,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io --qairt_version 2.46.0",
+        source_strategy="local_qdq_compile_candidate",
+        source_kind="local_qdq",
+        packaging_kind="onnx_file",
+        packaging_path=prepared_model_path,
+        compatibility={
+            "aihub_compile_readiness": "experimental",
+            "graph_aihub_compile_readiness": "unsafe",
+        },
+        run_label="unit-test",
+    )
+
+    payload = json.loads(record_path.read_text(encoding="utf-8"))
+    assert payload["record_kind"] == "prepared_artifact"
+    assert payload["source_strategy"] == "local_qdq_compile_candidate"
+    assert payload["source_kind"] == "local_qdq"
+    assert payload["packaging_kind"] == "onnx_file"
+    assert payload["packaging_path"].endswith("build/aihub/vpcd_option1_local_qdq/model.option1.qdq.onnx")
+    assert payload["compatibility"]["aihub_compile_readiness"] == "experimental"
+
+
 def test_write_live_run_record_summarizes_jobs_and_outputs(tmp_path):
     from tools.aihub_option1_pilots import (
         build_option1_runtime_config,
@@ -1029,6 +1077,52 @@ def test_write_compile_run_record_captures_target_model_metadata(tmp_path):
     assert payload["target_model"]["model_id"] == "model-1"
     assert payload["target_model"]["url"] == "https://aihub/models/model-1"
     assert payload["target_model"]["name"] == "zipformer-target"
+
+
+def test_write_compile_run_record_marks_local_qdq_lane_as_quantize_disabled(tmp_path):
+    from tools.aihub_option1_pilots import (
+        build_option1_runtime_config,
+        write_compile_run_record,
+    )
+
+    class FakeJob:
+        def __init__(self, job_id: str, url: str, status: str) -> None:
+            self.job_id = job_id
+            self.url = url
+            self.status = status
+
+    class FakeModel:
+        def __init__(self, model_id: str, url: str, name: str) -> None:
+            self.model_id = model_id
+            self.url = url
+            self.name = name
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        qairt_version="2.46.0",
+        repo_root=repo_root,
+    )
+
+    record_path = write_compile_run_record(
+        pilot_name="vpcd_option1_local_qdq",
+        runtime_config=config,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io --qairt_version 2.46.0",
+        compile_job=FakeJob("compile-1", "https://aihub/jobs/compile-1", "SUCCESS"),
+        target_model=FakeModel("model-1", "https://aihub/models/model-1", "vpcd-local-qdq-target"),
+        source_strategy="local_qdq_compile_candidate",
+        quantize_stage="disabled",
+        compatibility={"aihub_compile_readiness": "experimental"},
+        run_label="unit-test",
+    )
+
+    payload = json.loads(record_path.read_text(encoding="utf-8"))
+    assert payload["record_kind"] == "compile_run"
+    assert payload["pilot_name"] == "vpcd_option1_local_qdq"
+    assert payload["source_strategy"] == "local_qdq_compile_candidate"
+    assert payload["quantize_stage"] == "disabled"
+    assert payload["compatibility"]["aihub_compile_readiness"] == "experimental"
 
 
 def test_write_quantize_run_record_captures_downloaded_quantized_artifact(tmp_path):
