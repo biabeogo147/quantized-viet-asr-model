@@ -1,8 +1,57 @@
 from pathlib import Path
 
 import numpy as np
+import onnx
 
 from quantize.types import CalibrationSample
+
+
+def _write_vpcd_compile_candidate_model(
+    model_path: Path,
+    *,
+    use_ms_domain: bool = True,
+    main_opset: int = 17,
+    quantized_weight_dtype: int = 0,
+) -> None:
+    from onnx import TensorProto, helper, numpy_helper
+
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    scale = numpy_helper.from_array(np.asarray([0.125], dtype=np.float32), name="weight_scale")
+    zero_point_dtype = np.uint16 if quantized_weight_dtype == TensorProto.UINT16 else np.uint8
+    zero_point_type = TensorProto.UINT16 if quantized_weight_dtype == TensorProto.UINT16 else TensorProto.UINT8
+    quantized_weight = numpy_helper.from_array(
+        np.asarray([[1, 2, 3, 4]], dtype=zero_point_dtype),
+        name="quantized_weight",
+    )
+    zero_point = numpy_helper.from_array(np.asarray([0], dtype=zero_point_dtype), name="weight_zero_point")
+    float_bias = numpy_helper.from_array(np.asarray([[0.0, 0.0, 0.0, 0.0]], dtype=np.float32), name="float_bias")
+    qdq_domain = "com.microsoft" if use_ms_domain else ""
+    graph = helper.make_graph(
+        nodes=[
+            helper.make_node(
+                "DequantizeLinear",
+                ["quantized_weight", "weight_scale", "weight_zero_point"],
+                ["weight_float"],
+                name="weight_dequantize",
+                domain=qdq_domain,
+            ),
+            helper.make_node(
+                "Add",
+                ["weight_float", "float_bias"],
+                ["logits"],
+                name="add_bias",
+            ),
+        ],
+        name="vpcd-compile-candidate-test",
+        inputs=[helper.make_tensor_value_info("decoder_input_ids", TensorProto.FLOAT, [1, 4])],
+        outputs=[helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 4])],
+        initializer=[scale, zero_point, quantized_weight, float_bias],
+    )
+    opsets = [helper.make_opsetid("", main_opset)]
+    if use_ms_domain:
+        opsets.append(helper.make_opsetid("com.microsoft", 1))
+    model = helper.make_model(graph, opset_imports=opsets)
+    onnx.save(model, model_path.as_posix())
 
 
 def test_resolve_vpcd_aihub_quantize_dtype_names_follows_preset_policy():
@@ -206,3 +255,24 @@ def test_build_vpcd_aihub_quantize_recipe_fingerprint_is_stable(monkeypatch, tmp
     recipe_b = build_vpcd_aihub_quantize_recipe(**common_kwargs)
 
     assert recipe_a.calibration_stats["dataset_fingerprint"] == recipe_b.calibration_stats["dataset_fingerprint"]
+
+
+def test_inspect_vpcd_qdq_compile_candidate_reports_conservative_aihub_readiness(tmp_path):
+    from quantize.projects.vpcd import inspect_vpcd_qdq_compile_candidate
+
+    model_path = tmp_path / "model.mobile.onnx"
+    _write_vpcd_compile_candidate_model(
+        model_path,
+        use_ms_domain=True,
+        main_opset=17,
+        quantized_weight_dtype=onnx.TensorProto.UINT16,
+    )
+
+    report = inspect_vpcd_qdq_compile_candidate(model_path)
+
+    assert report["opsets"]["main"] == 17
+    assert report["ms_qdq_node_count"] > 0
+    assert report["uses_uint16_qdq"] is True
+    assert report["uses_quantized_weight_initializers"] is True
+    assert report["aihub_compile_readiness"] == "unsafe"
+    assert "com.microsoft_qdq" in report["readiness_flags"]

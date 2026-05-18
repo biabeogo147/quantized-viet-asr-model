@@ -24,7 +24,7 @@ from quantize.config import (
 )
 from quantize.model_introspection import load_model_node_names, summarize_quantization_plan
 from quantize.presets import build_quantization_plan, get_preset_spec, list_supported_presets
-from quantize.qnn import run_qnn_static_quantization
+from quantize.qnn import inspect_qdq_compile_candidate, run_qnn_static_quantization
 from quantize.runner import (
     build_size_budget_message,
     file_size_mb,
@@ -43,6 +43,10 @@ AIHUB_DTYPE_NAME_BY_QUANT_TYPE = {
     "quint16": "INT16",
     "qint16": "INT16",
 }
+
+
+def inspect_vpcd_qdq_compile_candidate(model_path: str | Path) -> dict[str, object]:
+    return inspect_qdq_compile_candidate(model_path)
 
 
 def apply_default_arguments(parser) -> None:
