@@ -197,6 +197,43 @@ def _write_minimal_vpcd_ms_qdq_model(model_path: Path) -> None:
     onnx.save(model, model_path.as_posix())
 
 
+def _write_minimal_vpcd_ms_uint16_qdq_model(model_path: Path) -> None:
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    scale = helper.make_tensor("scale", TensorProto.FLOAT, [1], [0.1])
+    zero_point = helper.make_tensor("zero_point", TensorProto.UINT16, [1], [0])
+    graph = helper.make_graph(
+        nodes=[
+            helper.make_node(
+                "QuantizeLinear",
+                inputs=["decoder_input_ids", "scale", "zero_point"],
+                outputs=["quantized"],
+                domain="com.microsoft",
+                name="ms_quantize",
+            ),
+            helper.make_node(
+                "DequantizeLinear",
+                inputs=["quantized", "scale", "zero_point"],
+                outputs=["logits"],
+                domain="com.microsoft",
+                name="ms_dequantize",
+            ),
+        ],
+        name="vpcd-ms-u16-qdq-minimal",
+        inputs=[
+            helper.make_tensor_value_info("decoder_input_ids", TensorProto.FLOAT, [1, 4]),
+        ],
+        outputs=[
+            helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 4]),
+        ],
+        initializer=[scale, zero_point],
+    )
+    model = helper.make_model(
+        graph,
+        opset_imports=[helper.make_opsetid("", 17), helper.make_opsetid("com.microsoft", 1)],
+    )
+    onnx.save(model, model_path.as_posix())
+
+
 def _build_ms_qdq_with_ms_gelu_model() -> onnx.ModelProto:
     scale = helper.make_tensor("scale", TensorProto.FLOAT, [1], [0.1])
     zero_point = helper.make_tensor("zero_point", TensorProto.UINT8, [1], [0])
@@ -538,6 +575,34 @@ def test_prepare_vpcd_option1_source_model_builds_local_qdq_compile_candidate_wi
     prepared_model = onnx.load(prepared.prepared_model_path.as_posix())
     assert all(
         node.domain == ""
+        for node in prepared_model.graph.node
+        if node.op_type in {"QuantizeLinear", "DequantizeLinear"}
+    )
+
+
+def test_prepare_vpcd_option1_source_model_keeps_uint16_ms_qdq_as_is_for_compile_probe(tmp_path):
+    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+    qdq_model_path = bundle_dir / "model.mobile.onnx"
+    _write_minimal_vpcd_ms_uint16_qdq_model(qdq_model_path)
+
+    source = resolve_vpcd_pilot_source(repo_root)
+    prepared = prepare_vpcd_option1_source_model(
+        source,
+        output_path=repo_root / "build" / "aihub" / "vpcd_option1_local_qdq" / "model.option1.qdq.onnx",
+        strategy="local_qdq_compile_candidate",
+    )
+
+    prepared_model = onnx.load(prepared.prepared_model_path.as_posix())
+    assert prepared.transformation_kind == "as_is"
+    assert prepared.report["aihub_compile_readiness"] == "experimental"
+    assert prepared.report["graph_aihub_compile_readiness"] == "unsafe"
+    assert any(
+        node.domain == "com.microsoft"
         for node in prepared_model.graph.node
         if node.op_type in {"QuantizeLinear", "DequantizeLinear"}
     )

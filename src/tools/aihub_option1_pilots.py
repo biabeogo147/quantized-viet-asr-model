@@ -810,6 +810,18 @@ def _package_aihub_onnx_upload(model_path: Path) -> tuple[str, Path]:
     return "onnx_dir", package_dir
 
 
+def _copy_onnx_artifact(source_model_path: Path, destination_model_path: Path) -> None:
+    source_path = source_model_path.resolve()
+    destination_path = destination_model_path.resolve()
+    destination_path.parent.mkdir(parents=True, exist_ok=True)
+    copy2(source_path, destination_path)
+
+    source_data_path = source_path.with_suffix(f"{source_path.suffix}.data")
+    if source_data_path.exists():
+        destination_data_path = destination_path.with_suffix(f"{destination_path.suffix}.data")
+        copy2(source_data_path, destination_data_path)
+
+
 def _build_local_qdq_compile_candidate_report(
     *,
     graph_report: Mapping[str, Any],
@@ -846,26 +858,38 @@ def prepare_vpcd_option1_source_model(
         source.repo_root / "build" / "aihub" / "vpcd_fp32_fixed" / "model.fp32.fixed.onnx"
     ).resolve()
     if normalized_strategy in {"direct_qdq_sanitized", "local_qdq_compile_candidate"}:
+        raw_graph_report = inspect_vpcd_qdq_compile_candidate(source.model_path)
+        preserve_as_is_for_compile_probe = (
+            normalized_strategy == "local_qdq_compile_candidate"
+            and (
+                bool(raw_graph_report.get("uses_uint16_qdq"))
+                or bool(raw_graph_report.get("uses_int16_qdq"))
+            )
+            and int(dict(raw_graph_report.get("opsets", {})).get("main", 0)) < 21
+        )
         prepared_output_path.parent.mkdir(parents=True, exist_ok=True)
-        model = onnx.load(source.model_path.as_posix())
-        rewritten_domains = {
-            (node.name, node.op_type): node.domain
-            for node in model.graph.node
-            if node.op_type in MS_QDQ_OP_TYPES
-        }
-        rewrite_aihub_compatible_qdq_domains(model)
         transformation_kind = "as_is"
-        rewritten_domain_count = 0
-        for node in model.graph.node:
-            if node.op_type not in MS_QDQ_OP_TYPES:
-                continue
-            previous_domain = rewritten_domains.get((node.name, node.op_type))
-            if previous_domain == "com.microsoft" and node.domain == "":
-                rewritten_domain_count += 1
-        if rewritten_domain_count > 0:
-            transformation_kind = "domain_rewritten"
-        onnx.checker.check_model(model, full_check=True)
-        onnx.save(model, prepared_output_path.as_posix())
+        if preserve_as_is_for_compile_probe:
+            _copy_onnx_artifact(source.model_path, prepared_output_path)
+        else:
+            model = onnx.load(source.model_path.as_posix())
+            rewritten_domains = {
+                (node.name, node.op_type): node.domain
+                for node in model.graph.node
+                if node.op_type in MS_QDQ_OP_TYPES
+            }
+            rewrite_aihub_compatible_qdq_domains(model)
+            rewritten_domain_count = 0
+            for node in model.graph.node:
+                if node.op_type not in MS_QDQ_OP_TYPES:
+                    continue
+                previous_domain = rewritten_domains.get((node.name, node.op_type))
+                if previous_domain == "com.microsoft" and node.domain == "":
+                    rewritten_domain_count += 1
+            if rewritten_domain_count > 0:
+                transformation_kind = "domain_rewritten"
+            onnx.checker.check_model(model, full_check=True)
+            onnx.save(model, prepared_output_path.as_posix())
         packaging_kind, packaging_path = _package_aihub_onnx_upload(prepared_output_path)
         graph_report = inspect_vpcd_qdq_compile_candidate(prepared_output_path)
         report: dict[str, Any] | None = None
