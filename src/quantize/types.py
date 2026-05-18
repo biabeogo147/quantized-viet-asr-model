@@ -48,6 +48,16 @@ class AiHubQuantizeRecipe:
 
 
 @dataclass(frozen=True)
+class AimetQuantizeRecipe:
+    param_type: str
+    activation_type: str
+    quant_scheme: str
+    config_file: str
+    calibration_inputs: tuple[CalibrationSample, ...]
+    calibration_stats: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class LocalQdqCompatibilityReport:
     model_path: str
     opsets: dict[str, int]
@@ -64,3 +74,14 @@ class LocalQdqCompatibilityReport:
     packaging_notes: tuple[str, ...]
     aihub_compile_readiness: str
     readiness_flags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AimetPackageReport:
+    package_dir: str
+    onnx_files: tuple[str, ...]
+    encodings_files: tuple[str, ...]
+    data_files: tuple[str, ...]
+    package_ready: bool
+    package_notes: tuple[str, ...]
+    qdq_reference_model_path: str | None

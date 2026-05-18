@@ -250,6 +250,7 @@ def run_vpcd_hybrid_evaluation(
     runtime_config: Option1RuntimeConfig,
     run_label: str | None = None,
     explicit_target_model_id: str | None = None,
+    compile_pilot_name: str = VPCD_PHASE2_PILOT,
     max_samples: int = DEFAULT_VPCD_MAX_SAMPLES,
     max_decode_steps: int | None = None,
     inference_runner: Callable[..., object] | None = None,
@@ -258,7 +259,7 @@ def run_vpcd_hybrid_evaluation(
     source = resolve_vpcd_pilot_source(runtime_config.repo_root)
     target_reference = resolve_compiled_target_reference(
         runtime_config=runtime_config,
-        compile_pilot_name=VPCD_PHASE2_PILOT,
+        compile_pilot_name=compile_pilot_name,
         explicit_target_model_id=explicit_target_model_id,
         run_label=run_label,
     )
@@ -511,6 +512,7 @@ def run_vpcd_quantized_teacher_forced_diagnostics(
     max_decode_steps: int | None = None,
     top_k: int = 5,
     explicit_quantized_model_path: str | Path | None = None,
+    compile_pilot_name: str = VPCD_PHASE2_PILOT,
     cpu_model_step_runner: Callable[[dict[str, np.ndarray]], object] | None = None,
     quantized_model_step_runner: Callable[[dict[str, np.ndarray]], object] | None = None,
     decode_ids_fn: Callable[[str], tuple[dict[str, np.ndarray], list[int]]] | None = None,
@@ -564,7 +566,7 @@ def run_vpcd_quantized_teacher_forced_diagnostics(
 
     if quantized_model_step_runner is None:
         resolved_quantized_model_path = resolve_downloaded_quantized_model_path(
-            pilot_name=VPCD_PHASE2_PILOT,
+            pilot_name=compile_pilot_name,
             runtime_config=runtime_config,
             explicit_quantized_model_path=explicit_quantized_model_path,
             run_label=run_label,
@@ -653,7 +655,7 @@ def run_vpcd_quantized_teacher_forced_diagnostics(
         "steps": step_results,
     }
     synthetic_reference = ResolvedCompiledTarget(
-        compile_pilot_name=VPCD_PHASE2_PILOT,
+        compile_pilot_name=compile_pilot_name,
         target_model_id=reference_stats["quantized_model_path"] or "local-quantized-vpcd",
         compile_record_path=None,
         run_label=_normalize_optional_string(run_label),

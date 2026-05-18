@@ -26,6 +26,14 @@ Update after the local-QDQ compile probe on `2026-05-18`:
 - however, AI Hub compile rejects that same artifact before runtime because the graph still contains `com.microsoft:DequantizeLinear`
 - this means the local-QDQ lane is currently semantically healthier than the AI Hub-quantized baseline for the bounded `5`-step check, but it is not yet a valid AI Hub compile input
 
+Update after the official AIMET local-quantize probe on `2026-05-18`:
+
+- the new Docker-backed `AIMET w8a8 + min_max` lane exported a valid `.aimet` package locally
+- AI Hub compile accepted that `.aimet` package and produced target model `mn40gpyrq`
+- however, the locally exported AIMET QDQ reference already diverged from FP32 at teacher-forced step `2`
+- the compiled cloud target reproduced the same divergence pattern, so this AIMET variant solved compile compatibility but did not solve correctness
+- bounded hybrid no longer collapsed into punctuation; instead it exited almost immediately with EOS and empty text
+
 ## Notebook Status
 
 The VPCD notebook path completed successfully and wrote outputs back into:
@@ -64,6 +72,39 @@ Important implementation note:
   - [On_device_Ai_option1_pilots.local_qdq_probe.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_qdq_probe.executed.ipynb)
 - probe log:
   - [local_qdq_probe.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_qdq_probe.log)
+
+Local AIMET probe run:
+
+- executed notebook copy:
+  - [On_device_Ai_option1_pilots.local_aimet.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet.executed.ipynb)
+- reduced notebook input used for the VPCD-only run:
+  - [On_device_Ai_option1_pilots.local_aimet.input.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet.input.ipynb)
+- probe log:
+  - [local_aimet.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet.log)
+
+Docker-backed AIMET prep used for that run:
+
+- Dockerfile:
+  - [docker/aimet-onnx-ubuntu2204/Dockerfile](/D:/DS-AI/BKMeeting-Research/python-model-test/docker/aimet-onnx-ubuntu2204/Dockerfile)
+- reusable image tag:
+  - `bkmeeting-vpcd-aimet:ubuntu22.04-py310`
+- host-side calibration artifact root:
+  - `build/aihub/vpcd_option1_local_aimet/`
+- export command used:
+
+```bash
+docker --config build/docker-config run --rm \
+  -v D:/DS-AI/BKMeeting-Research/python-model-test:/workspace \
+  -w /workspace \
+  -e PYTHONPATH=/workspace/src \
+  bkmeeting-vpcd-aimet:ubuntu22.04-py310 \
+  python3 -m quantize.aimet export \
+    --fp32-onnx /workspace/build/aihub/vpcd_option1_local_aimet/model.fp32.fixed.onnx \
+    --calibration-dir /workspace/build/aihub/vpcd_option1_local_aimet/calibration \
+    --package-dir /workspace/build/aihub/vpcd_option1_local_aimet/model.option1.aimet \
+    --qdq-reference-model /workspace/build/aihub/vpcd_option1_local_aimet/model.option1.qdq.onnx \
+    --report-path /workspace/build/aihub/vpcd_option1_local_aimet/model.option1.aimet.report.json
+```
 
 ## Primary Evidence
 
@@ -104,6 +145,21 @@ Compiled cloud record for the failing production lane:
   - [hybrid-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260513-1am.json)
 - bounded hybrid record:
   - [hybrid-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260513-1am.json)
+
+Official AIMET local-quantize probe:
+
+- prepared artifact record:
+  - [prepared-artifact-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-20260518-aimet-local-w8a8-minmax.json)
+- compile record:
+  - [compile-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/compile-run-20260518-aimet-local-w8a8-minmax.json)
+- live run record:
+  - [live-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/live-run-20260518-aimet-local-w8a8-minmax.json)
+- local quantized teacher-forced record:
+  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
+- compiled-cloud teacher-forced record:
+  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
+- bounded hybrid record:
+  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
 
 ## Attribution Result
 
@@ -276,6 +332,59 @@ Conclusion:
 - the current local VPCD QDQ artifact is useful as evidence and as a semantically healthier local reference
 - it is not yet a valid replacement for AI Hub quantize because AI Hub compile rejects the artifact format before runtime
 
+### Approach 6: Official AIMET Local Quantize With Docker
+
+What changed:
+
+- added a reusable Docker-backed AIMET export lane
+- kept the same `24`-sample autoregressive calibration fingerprint
+- exported:
+  - a local `.aimet` package for AI Hub compile
+  - a local QDQ reference model for bounded ONNX Runtime CPU diagnostics
+- ran:
+  - local quantized teacher-forced
+  - compiled-cloud teacher-forced
+  - bounded hybrid free-run
+
+Observed packaging result:
+
+- `.aimet` package contract satisfied:
+  - one `.onnx`
+  - one `.encodings`
+- no `.data` file was needed inside the `.aimet` package
+- the local QDQ reference model was emitted separately with external data:
+  - `model.option1.qdq.onnx`
+  - `model.option1.qdq.onnx.data`
+
+Observed correctness result:
+
+- local quantized teacher-forced:
+  - step `1` matched FP32 argmax
+  - step `2` diverged immediately
+  - FP32 argmax: `2232`
+  - AIMET local QDQ argmax: `2`
+- compiled-cloud teacher-forced:
+  - step `1` matched FP32 argmax
+  - step `2` diverged with the same EOS-heavy pattern
+  - compiled cloud argmax: `2`
+- bounded hybrid:
+  - sample `0`: empty string
+  - sample `1`: empty string
+  - generated ids:
+    - `[0, 2]`
+
+Compile compatibility result:
+
+- AI Hub compile succeeded
+- compile target model id:
+  - `mn40gpyrq`
+
+Conclusion:
+
+- this is the first official local-quantize path here that is clearly AI Hub compile-compatible
+- however, the current default AIMET variant `w8a8 + min_max` is not semantically healthy enough for VPCD
+- because the local AIMET QDQ reference already fails at step `2`, the fault is still attributable to quantization, not to AI Hub compile
+
 ## Matrix Status
 
 The bounded follow-up matrix is only partially exercised.
@@ -285,6 +394,10 @@ Completed:
 - `A`: `w8a16 + auto + calibration giữ nguyên`
   - historical quantize job `jp8wwq1op`: fails at local quantized step `2`
   - current quantize job `jp0ekj665`: fails at local quantized step `2`
+- official local AIMET:
+  - `w8a8 + min_max + same calibration fingerprint`
+  - compiles on AI Hub
+  - still fails at local quantized step `2`
 
 Not yet executed:
 
@@ -307,6 +420,8 @@ Reason not yet executed:
 - the failure signature is now reproducible and documented
 - the notebook now completes cleanly even when the local-QDQ compile probe fails to produce a target model
 - the repo now records an explicit compatibility report for local-QDQ compile candidates
+- the repo now has a reusable Docker image and command path for AIMET export
+- the repo now has an official `.aimet -> AI Hub compile` lane that is proven compile-compatible
 
 ## What Is Not Fixed Yet
 
@@ -314,6 +429,8 @@ Reason not yet executed:
 - baseline `A` remains bad even with the current calibration fingerprint
 - no passing quantized variant has been found yet
 - the current local QDQ artifact still cannot be compiled by AI Hub in its present ORT/QNN-specific format
+- the current official AIMET variant `w8a8 + min_max` still diverges at local teacher-forced step `2`
+- compiled cloud currently inherits that same AIMET divergence, so AIMET is not ready to replace the default lane
 
 ## Recommended Next Steps
 
@@ -348,8 +465,12 @@ Interpretation rules:
 
 If the team continues pursuing local quantization as the default source lane, the next work should target an artifact format that is closer to what AI Hub documents as officially supported:
 
-1. standard main-domain QDQ with `main` opset `21+`, without `com.microsoft` Q/DQ
-2. or an official `.aimet` package lane containing ONNX plus encodings
+1. keep the official `.aimet` packaging route
+2. rerun AIMET with a higher-fidelity activation lane first:
+   - `w8a16 + min_max`
+3. if needed after that, try another official AIMET quantization scheme:
+   - `w8a8 + tf_enhanced`
+4. only after exhausting official AIMET variants, revisit standard main-domain QDQ with `main` opset `21+`
 
 Do not keep spending time on blind domain rewriting of the current `opset 17 + com.microsoft + uint16` graph. The compile probe already showed that AI Hub rejects it as input.
 
@@ -370,3 +491,10 @@ For the current local-QDQ compile probe, the verdict is now:
 
 - local semantics in the bounded teacher-forced check: `promising`
 - AI Hub compile compatibility: `rejected`
+
+For the current official AIMET probe, the verdict is now:
+
+- AI Hub compile compatibility: `accepted`
+- local quantized step-`2` correctness: `failed`
+- compiled-cloud step-`2` correctness: `failed`
+- switch-default decision: `do not switch yet`

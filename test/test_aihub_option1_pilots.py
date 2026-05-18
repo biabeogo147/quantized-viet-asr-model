@@ -9,6 +9,7 @@ from onnx import TensorProto, helper
 
 from model_bundle.manifest import ModelBundleManifest
 from model_bundle.fixtures import AudioSampleFixture, serialize_jsonl
+from quantize.types import AimetQuantizeRecipe, CalibrationSample
 
 
 def _init_repo_root(repo_root: Path) -> None:
@@ -606,6 +607,88 @@ def test_prepare_vpcd_option1_source_model_keeps_uint16_ms_qdq_as_is_for_compile
         for node in prepared_model.graph.node
         if node.op_type in {"QuantizeLinear", "DequantizeLinear"}
     )
+
+
+def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(tmp_path, monkeypatch):
+    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+    fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
+    _write_minimal_vpcd_fp32_model(fp32_model_path)
+    tokenizer_dir = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1"
+    tokenizer_dir.mkdir(parents=True, exist_ok=True)
+
+    seen: dict[str, object] = {}
+
+    def fake_build_vpcd_aimet_quantize_recipe(**kwargs):
+        seen["recipe_kwargs"] = kwargs
+        return AimetQuantizeRecipe(
+            param_type="int8",
+            activation_type="int8",
+            quant_scheme="min_max",
+            config_file="default",
+            calibration_inputs=(
+                CalibrationSample(
+                    inputs={
+                        "input_ids": np.asarray([[1, 2, 3]], dtype=np.int64),
+                        "attention_mask": np.asarray([[1, 1, 1]], dtype=np.int64),
+                        "decoder_input_ids": np.asarray([[2, 1]], dtype=np.int64),
+                        "decoder_attention_mask": np.asarray([[1, 0]], dtype=np.int64),
+                    }
+                ),
+            ),
+            calibration_stats={"dataset_fingerprint": "abc123"},
+        )
+
+    def fake_run_aimet_export_in_docker(**kwargs):
+        seen["docker_kwargs"] = kwargs
+        package_dir = Path(kwargs["package_dir"])
+        package_dir.mkdir(parents=True, exist_ok=True)
+        (package_dir / "model.option1.onnx").write_bytes(b"onnx")
+        (package_dir / "model.option1.encodings").write_text("{}", encoding="utf-8")
+        qdq_path = Path(kwargs["qdq_reference_model_path"])
+        qdq_path.parent.mkdir(parents=True, exist_ok=True)
+        qdq_path.write_bytes(b"qdq")
+        report_path = Path(kwargs["report_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "package_dir": package_dir.resolve().as_posix(),
+            "onnx_files": ["model.option1.onnx"],
+            "encodings_files": ["model.option1.encodings"],
+            "data_files": [],
+            "package_ready": True,
+            "package_notes": [],
+            "qdq_reference_model_path": qdq_path.resolve().as_posix(),
+        }
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return report
+
+    monkeypatch.setattr("tools.aihub_option1_pilots.build_vpcd_aimet_quantize_recipe", fake_build_vpcd_aimet_quantize_recipe)
+    monkeypatch.setattr("tools.aihub_option1_pilots._run_aimet_export_in_docker", fake_run_aimet_export_in_docker)
+
+    source = resolve_vpcd_pilot_source(repo_root)
+    prepared = prepare_vpcd_option1_source_model(
+        source,
+        output_path=repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx",
+        strategy="local_aimet_compile_candidate",
+    )
+
+    assert prepared.source_strategy == "local_aimet_compile_candidate"
+    assert prepared.source_kind == "local_aimet"
+    assert prepared.packaging_kind == "aimet_dir"
+    assert prepared.packaging_path.name == "model.option1.aimet"
+    assert prepared.diagnostic_model_path.name == "model.option1.qdq.onnx"
+    assert prepared.report["aihub_compile_readiness"] == "experimental"
+    assert prepared.report["package_ready"] is True
+    assert prepared.report["aimet"]["param_type"] == "int8"
+    assert prepared.report["packaging_path"] == prepared.packaging_path.resolve().as_posix()
+    assert prepared.report["qdq_reference_model_path"] == prepared.diagnostic_model_path.resolve().as_posix()
+    assert prepared.packaging_path.exists()
+    assert prepared.diagnostic_model_path.exists()
+    assert Path(seen["docker_kwargs"]["fp32_onnx_path"]).exists()
 
 
 def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):

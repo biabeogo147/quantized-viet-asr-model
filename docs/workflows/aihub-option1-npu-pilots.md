@@ -16,6 +16,7 @@ Use `On_device_Ai_option1_phase5_contract.ipynb` for package creation only.
 Use `docs/plans/archive/2026-05-11-aihub-option1-npu-pilots.md` for the historical roadmap behind this workflow.
 Use `docs/plans/active/2026-05-14-vpcd-quantize-vs-compile-isolation-plan.md` for the active AI Hub quantize investigation, including the `B/C/D` fallback variants.
 Use `docs/plans/active/2026-05-18-vpcd-local-qdq-aihub-compile-plan.md` for the current local-QDQ-to-AI-Hub compile migration plan.
+Use `docs/plans/active/2026-05-18-vpcd-aimet-local-quantize-aihub-compile-plan.md` for the official local AIMET quantize lane and its current switch decision.
 
 ## Why This Workflow Exists
 
@@ -35,6 +36,7 @@ This workflow intentionally moves upstream:
    - source: fixed-shape FP32 ONNX prepared locally, then quantized on AI Hub by default
    - goal: prove the first-slice punctuation model session can compile and run on NPU
    - optional probe: direct local-QDQ compile candidate, only for compatibility investigation
+   - optional probe: local AIMET `.aimet` package, only for official local-quantize investigation
 
 ## Prerequisites
 
@@ -139,6 +141,28 @@ Current status of the local-QDQ probe:
   - `Layer 'DequantizeLinear' with domain 'com.microsoft' in input model is not supported by Qualcomm AI Hub Workbench.`
 - because of that rejection, local QDQ is still an investigation lane, not the default notebook source
 
+Experimental local-AIMET probe lane:
+
+- strategy flag:
+  - `VPCD_SOURCE_STRATEGY = "local_aimet_compile_candidate"`
+- Dockerfile:
+  - `docker/aimet-onnx-ubuntu2204/Dockerfile`
+- reusable image tag:
+  - `bkmeeting-vpcd-aimet:ubuntu22.04-py310`
+- prepared package root:
+  - `build/aihub/vpcd_option1_local_aimet/`
+- exported compile input:
+  - `build/aihub/vpcd_option1_local_aimet/model.option1.aimet/`
+- exported local QDQ diagnostic model:
+  - `build/aihub/vpcd_option1_local_aimet/model.option1.qdq.onnx`
+
+Current status of the local-AIMET probe:
+
+- AI Hub compile accepts the exported `.aimet` package
+- the current default official variant `w8a8 + min_max` already diverges at local teacher-forced step `2`
+- compiled cloud reproduces the same step-`2` divergence
+- because of that, local AIMET is still an investigation lane, not the default notebook source
+
 ## Canonical Run Outputs
 
 Each successful Phase 2 run should leave behind a predictable set of local outputs.
@@ -175,6 +199,21 @@ Local-QDQ compile probe outputs:
   - `build/aihub/records/vpcd_option1_local_qdq/compile-run-latest.json`
 - local quantized teacher-forced record:
   - `build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-latest.json`
+
+Local-AIMET probe outputs:
+
+- prepared upload model:
+  - `build/aihub/vpcd_option1_local_aimet/model.fp32.fixed.onnx`
+- exported AIMET package:
+  - `build/aihub/vpcd_option1_local_aimet/model.option1.aimet/`
+- exported local QDQ diagnostic model:
+  - `build/aihub/vpcd_option1_local_aimet/model.option1.qdq.onnx`
+- prepared artifact record:
+  - `build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-latest.json`
+- compile record:
+  - `build/aihub/records/vpcd_option1_local_aimet/compile-run-latest.json`
+- live run record:
+  - `build/aihub/records/vpcd_option1_local_aimet/live-run-latest.json`
 
 ### What The Records Contain
 
@@ -256,6 +295,7 @@ Operator note:
 - the pilot notebook no longer includes the old mandatory `pip install` cell
 - for the current VPCD failure, use quantized-local teacher-forced before cloud teacher-forced, and both before any free-run hybrid rerun
 - if `VPCD_SOURCE_STRATEGY = "local_qdq_compile_candidate"` and AI Hub compile fails, the notebook now skips target resolution, live run, compiled-cloud teacher-forced, and hybrid cells cleanly while still preserving the compatibility and local teacher-forced evidence
+- if `VPCD_SOURCE_STRATEGY = "local_aimet_compile_candidate"`, the notebook reuses the local QDQ diagnostic model for quantized-local teacher-forced checks and now preserves the local AIMET compile pilot name across teacher-forced and hybrid records
 
 ## Notebook Outputs To Preserve
 

@@ -37,6 +37,10 @@ For VPCD, a fourth bounded probe path now also exists:
 
 - `local QDQ compile candidate -> local teacher-forced diagnostics`
 
+A fifth bounded probe path now also exists:
+
+- `local AIMET .aimet compile candidate -> local teacher-forced diagnostics -> compiled-cloud teacher-forced -> bounded hybrid`
+
 That probe is used only to answer whether the current local VPCD quantized artifact is semantically healthier than the AI Hub-quantized artifact and whether AI Hub compile will even accept it.
 
 The same notebook now continues into:
@@ -101,12 +105,16 @@ Notes:
 - the quantized-local teacher-forced section is the first bounded diagnostic step and should run before the compiled-cloud teacher-forced section
 - the compiled-cloud teacher-forced section should run before the free-run hybrid loop
 - when `VPCD_SOURCE_STRATEGY = "local_qdq_compile_candidate"`, the notebook still runs the local quantized teacher-forced section even if AI Hub compile fails
+- when `VPCD_SOURCE_STRATEGY = "local_aimet_compile_candidate"`, the notebook uses the exported local QDQ diagnostic model for the quantized-local teacher-forced section
 - in that local-QDQ failure case, the notebook intentionally skips:
   - compiled target resolution
   - live run
   - compiled-cloud teacher-forced
   - hybrid free-run
   - final compare
+- in the local-AIMET reuse case, the notebook now preserves:
+  - the local AIMET compile pilot name in teacher-forced and hybrid records
+  - the local QDQ diagnostic model path when compile records are reused
 - the final pass/fail decision comes from punctuated outputs compared against `golden_samples.jsonl`
 - recommended knobs for the current runaway decode failure are:
   - `VPCD_HYBRID_MAX_SAMPLES = 2`
@@ -125,6 +133,12 @@ Notes:
   - [prepared-artifact-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_qdq/prepared-artifact-20260518-local-qdq-probe.json)
   - [compile-run-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_qdq/compile-run-20260518-local-qdq-probe.json)
   - [hybrid-run-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260518-local-qdq-probe.json)
+- a recent local-AIMET probe completed with:
+  - [prepared-artifact-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-20260518-aimet-local-w8a8-minmax.json)
+  - [compile-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/compile-run-20260518-aimet-local-w8a8-minmax.json)
+  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
+  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
+  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
 
 ## Evidence Contract
 
@@ -219,6 +233,9 @@ Current known result:
 - AI Hub quantize baseline `A` diverges at teacher-forced step `2`
 - the current local QDQ artifact matches FP32 locally for the bounded `5`-step teacher-forced probe
 - AI Hub compile rejects that same local QDQ artifact because `com.microsoft:DequantizeLinear` is unsupported in the input model
+- the current official AIMET variant `w8a8 + min_max` compiles on AI Hub
+- that same AIMET variant already diverges at local teacher-forced step `2`
+- compiled cloud reproduces the same AIMET divergence and bounded hybrid exits early with empty text
 
 ## Current Limits
 

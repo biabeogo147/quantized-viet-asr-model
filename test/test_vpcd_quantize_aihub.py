@@ -257,6 +257,121 @@ def test_build_vpcd_aihub_quantize_recipe_fingerprint_is_stable(monkeypatch, tmp
     assert recipe_a.calibration_stats["dataset_fingerprint"] == recipe_b.calibration_stats["dataset_fingerprint"]
 
 
+def test_write_and_load_aimet_calibration_batches_round_trip(tmp_path):
+    from quantize.aimet import load_calibration_batches, write_calibration_batches
+
+    calibration_inputs = (
+        CalibrationSample(
+            inputs={
+                "input_ids": np.asarray([[1, 2, 3]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1]], dtype=np.int64),
+            }
+        ),
+        CalibrationSample(
+            inputs={
+                "input_ids": np.asarray([[4, 5, 1]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 0]], dtype=np.int64),
+            }
+        ),
+    )
+
+    manifest_path = write_calibration_batches(calibration_inputs, tmp_path / "calibration")
+    loaded = load_calibration_batches(manifest_path.parent)
+
+    assert manifest_path.exists()
+    assert len(loaded) == 2
+    assert list(loaded[0].keys()) == ["input_ids", "attention_mask"]
+    np.testing.assert_array_equal(loaded[1]["input_ids"], np.asarray([[4, 5, 1]], dtype=np.int64))
+
+
+def test_inspect_aimet_package_reports_expected_structure(tmp_path):
+    from quantize.aimet import inspect_aimet_package
+
+    package_dir = tmp_path / "model.option1.aimet"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / "model.option1.onnx").write_bytes(b"onnx")
+    (package_dir / "model.option1.encodings").write_text("{}", encoding="utf-8")
+    (package_dir / "model.option1.onnx.data").write_bytes(b"data")
+    qdq_path = tmp_path / "model.option1.qdq.onnx"
+    qdq_path.write_bytes(b"qdq")
+
+    report = inspect_aimet_package(package_dir, qdq_reference_model_path=qdq_path)
+
+    assert report["package_ready"] is True
+    assert report["onnx_files"] == ["model.option1.onnx"]
+    assert report["encodings_files"] == ["model.option1.encodings"]
+    assert report["data_files"] == ["model.option1.onnx.data"]
+    assert report["qdq_reference_model_path"] == qdq_path.resolve().as_posix()
+
+
+def test_build_vpcd_aimet_quantize_recipe_reuses_fixed_shape_calibration(monkeypatch, tmp_path):
+    from quantize.projects.vpcd import build_vpcd_aimet_quantize_recipe
+
+    records = [
+        CalibrationSample(
+            inputs={
+                "input_ids": np.asarray([[7, 8, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1]], dtype=np.int64),
+                "decoder_input_ids": np.asarray([[2, 9]], dtype=np.int64),
+                "decoder_attention_mask": np.asarray([[1, 1]], dtype=np.int64),
+            }
+        ),
+        CalibrationSample(
+            inputs={
+                "input_ids": np.asarray([[7, 8, 1]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 0]], dtype=np.int64),
+                "decoder_input_ids": np.asarray([[2, 5]], dtype=np.int64),
+                "decoder_attention_mask": np.asarray([[1, 1]], dtype=np.int64),
+            }
+        ),
+    ]
+
+    def fake_build_calibration_records(**_kwargs):
+        return (
+            records,
+            {
+                "requested_provider": "cpu",
+                "session_providers": "CPUExecutionProvider",
+                "source_files": 1,
+                "text_samples": 2,
+                "records": 2,
+                "max_encoder_len": 3,
+                "max_decoder_len": 2,
+            },
+        )
+
+    monkeypatch.setattr("quantize.projects.vpcd.build_calibration_records", fake_build_calibration_records)
+
+    recipe = build_vpcd_aimet_quantize_recipe(
+        model_dir=tmp_path / "assets" / "vpcd",
+        fp32_onnx_path=tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx",
+        calibration_source_path=tmp_path / "build" / "calibration" / "vpcd_transcriptions.txt",
+        max_calibration_samples=16,
+        max_generation_length=32,
+        ort_provider="cpu",
+        fixed_input_shapes={
+            "input_ids": (1, 8),
+            "attention_mask": (1, 8),
+            "decoder_input_ids": (1, 4),
+            "decoder_attention_mask": (1, 4),
+        },
+        pad_token_id=1,
+    )
+
+    assert recipe.param_type == "int8"
+    assert recipe.activation_type == "int8"
+    assert recipe.quant_scheme == "min_max"
+    assert recipe.calibration_stats["dataset_fingerprint"]
+    assert recipe.calibration_stats["quantize_backend"] == "aimet"
+    assert len(recipe.calibration_inputs) == 2
+    assert recipe.calibration_inputs[0].inputs["input_ids"].shape == (1, 8)
+    assert recipe.calibration_inputs[0].inputs["decoder_input_ids"].shape == (1, 4)
+    np.testing.assert_array_equal(
+        recipe.calibration_inputs[1].inputs["decoder_attention_mask"][0],
+        np.asarray([1, 1, 0, 0], dtype=np.int64),
+    )
+
+
 def test_inspect_vpcd_qdq_compile_candidate_reports_conservative_aihub_readiness(tmp_path):
     from quantize.projects.vpcd import inspect_vpcd_qdq_compile_candidate
 

@@ -33,7 +33,7 @@ from quantize.runner import (
     run_dynamic_quantization,
     run_static_quantization,
 )
-from quantize.types import AiHubQuantizeRecipe, CalibrationSample
+from quantize.types import AimetQuantizeRecipe, AiHubQuantizeRecipe, CalibrationSample
 
 NAME = 'vpcd'
 DEFAULT_PRESET = 'sd8g2_quality'
@@ -43,6 +43,10 @@ AIHUB_DTYPE_NAME_BY_QUANT_TYPE = {
     "quint16": "INT16",
     "qint16": "INT16",
 }
+DEFAULT_AIMET_PARAM_TYPE = "int8"
+DEFAULT_AIMET_ACTIVATION_TYPE = "int8"
+DEFAULT_AIMET_QUANT_SCHEME = "min_max"
+DEFAULT_AIMET_CONFIG_FILE = "default"
 
 
 def inspect_vpcd_qdq_compile_candidate(model_path: str | Path) -> dict[str, object]:
@@ -157,6 +161,32 @@ def calibration_records_to_aihub_dataset(
     return dataset
 
 
+def calibration_records_to_fixed_input_batches(
+    records: Sequence[CalibrationSample],
+    *,
+    fixed_input_shapes: dict[str, Sequence[int]] | None = None,
+    pad_values: dict[str, int] | None = None,
+) -> tuple[CalibrationSample, ...]:
+    dataset = calibration_records_to_aihub_dataset(
+        records,
+        fixed_input_shapes=fixed_input_shapes,
+        pad_values=pad_values,
+    )
+    input_order = list(dataset.keys())
+    batch_count = len(dataset[input_order[0]]) if input_order else 0
+    batches: list[CalibrationSample] = []
+    for batch_index in range(batch_count):
+        batches.append(
+            CalibrationSample(
+                inputs={
+                    input_name: np.asarray(dataset[input_name][batch_index])
+                    for input_name in input_order
+                }
+            )
+        )
+    return tuple(batches)
+
+
 def summarize_aihub_calibration_dataset(
     dataset: dict[str, list[np.ndarray]],
 ) -> dict[str, object]:
@@ -247,6 +277,66 @@ def build_vpcd_aihub_quantize_recipe(
         activations_dtype_name=dtype_names["activations_dtype_name"],
         weights_dtype_name=dtype_names["weights_dtype_name"],
         calibration_dataset=calibration_dataset,
+        calibration_stats=recipe_stats,
+    )
+
+
+def build_vpcd_aimet_quantize_recipe(
+    *,
+    model_dir: str | Path,
+    fp32_onnx_path: str | Path,
+    calibration_source_path: str | Path,
+    max_calibration_samples: int = DEFAULT_MAX_CALIBRATION_SAMPLES,
+    max_generation_length: int = DEFAULT_MAX_GENERATION_LENGTH,
+    ort_provider: str = DEFAULT_ORT_PROVIDER,
+    fixed_input_shapes: dict[str, Sequence[int]] | None = None,
+    pad_token_id: int = 1,
+    param_type: str = DEFAULT_AIMET_PARAM_TYPE,
+    activation_type: str = DEFAULT_AIMET_ACTIVATION_TYPE,
+    quant_scheme: str = DEFAULT_AIMET_QUANT_SCHEME,
+    config_file: str = DEFAULT_AIMET_CONFIG_FILE,
+) -> AimetQuantizeRecipe:
+    records, stats = build_calibration_records(
+        model_dir=Path(model_dir),
+        fp32_onnx_path=Path(fp32_onnx_path),
+        calibration_source_path=Path(calibration_source_path),
+        max_calibration_samples=max_calibration_samples,
+        max_generation_length=max_generation_length,
+        ort_provider=ort_provider,
+    )
+    if not records:
+        raise ValueError("Khong tao duoc calibration records tu file dau vao.")
+
+    calibration_inputs = calibration_records_to_fixed_input_batches(
+        records,
+        fixed_input_shapes=fixed_input_shapes,
+        pad_values={
+            "input_ids": int(pad_token_id),
+            "attention_mask": 0,
+            "decoder_input_ids": int(pad_token_id),
+            "decoder_attention_mask": 0,
+        },
+    )
+    recipe_stats = dict(stats)
+    recipe_stats["quantize_backend"] = "aimet"
+    recipe_stats["param_type"] = str(param_type)
+    recipe_stats["activation_type"] = str(activation_type)
+    recipe_stats["quant_scheme"] = str(quant_scheme)
+    recipe_stats["config_file"] = str(config_file)
+    recipe_stats.update(
+        summarize_aihub_calibration_dataset(
+            {
+                input_name: [np.asarray(sample.inputs[input_name]) for sample in calibration_inputs]
+                for input_name in calibration_inputs[0].inputs.keys()
+            }
+        )
+    )
+    return AimetQuantizeRecipe(
+        param_type=str(param_type),
+        activation_type=str(activation_type),
+        quant_scheme=str(quant_scheme),
+        config_file=str(config_file),
+        calibration_inputs=calibration_inputs,
         calibration_stats=recipe_stats,
     )
 

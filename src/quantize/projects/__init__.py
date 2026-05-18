@@ -1,19 +1,21 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-from . import vpcd, zipformer
+from importlib import import_module
 
-_PROJECTS = {
-    'vpcd': vpcd,
-    'zipformer': zipformer,
+
+_PROJECT_MODULES = {
+    "vpcd": "quantize.projects.vpcd",
+    "zipformer": "quantize.projects.zipformer",
 }
 
 
 def resolve_quantize_project(name: str):
     try:
-        return _PROJECTS[name]
+        module_name = _PROJECT_MODULES[name]
     except KeyError as exc:
-        raise ValueError(f'Unsupported quantize project: {name}') from exc
+        raise ValueError(f"Unsupported quantize project: {name}") from exc
+    return import_module(module_name)
 
 
 def list_quantize_projects() -> tuple[str, ...]:
-    return tuple(_PROJECTS.keys())
+    return tuple(_PROJECT_MODULES.keys())
