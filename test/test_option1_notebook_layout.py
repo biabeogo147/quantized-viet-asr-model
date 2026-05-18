@@ -80,6 +80,15 @@ def test_pilot_notebook_runs_vpcd_quantized_local_teacher_forced_before_cloud_te
     assert quantized_local_heading_index < teacher_heading_index
 
 
+def test_pilot_notebook_supports_local_qdq_vpcd_source_strategy() -> None:
+    notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
+    code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
+
+    assert "VPCD_SOURCE_STRATEGY = \"prefer_fp32_fixed\"" in code_text
+    assert "local_qdq_compile_candidate" in code_text
+    assert "Skipping AI Hub quantize for local QDQ lane" in code_text
+
+
 def test_phase4_notebook_exists_with_phase4_sections() -> None:
     notebook = _load_notebook("On_device_Ai_option1_phase4_gate.ipynb")
     markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
