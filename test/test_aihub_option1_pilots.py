@@ -512,6 +512,37 @@ def test_prepare_vpcd_option1_source_model_can_prepare_sanitized_qdq_source_even
     assert all(node.domain == "" for node in prepared_model.graph.node if node.op_type in {"QuantizeLinear", "DequantizeLinear"})
 
 
+def test_prepare_vpcd_option1_source_model_builds_local_qdq_compile_candidate_with_packaging_report(tmp_path):
+    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+    qdq_model_path = bundle_dir / "model.mobile.onnx"
+    _write_minimal_vpcd_ms_qdq_model(qdq_model_path)
+
+    source = resolve_vpcd_pilot_source(repo_root)
+    prepared = prepare_vpcd_option1_source_model(
+        source,
+        output_path=repo_root / "build" / "aihub" / "vpcd_option1_local_qdq" / "model.option1.qdq.onnx",
+        strategy="local_qdq_compile_candidate",
+    )
+
+    assert prepared.report["aihub_compile_readiness"] in {"experimental", "ready"}
+    assert prepared.source_kind == "local_qdq"
+    assert prepared.packaging_kind in {"onnx_file", "onnx_dir"}
+    assert prepared.transformation_kind == "domain_rewritten"
+    assert prepared.packaging_path.exists()
+
+    prepared_model = onnx.load(prepared.prepared_model_path.as_posix())
+    assert all(
+        node.domain == ""
+        for node in prepared_model.graph.node
+        if node.op_type in {"QuantizeLinear", "DequantizeLinear"}
+    )
+
+
 def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):
     from tools.aihub_option1_pilots import VpcdPilotSource, build_vpcd_single_step_inputs
 
