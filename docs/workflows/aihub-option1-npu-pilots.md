@@ -13,7 +13,9 @@ Use `On_device_Ai.ipynb` as the minimal Qualcomm sample reference.
 Use `On_device_Ai_option1_pilots.ipynb` for the day-to-day `Phase 2 + Phase 3` pilot flow.
 Use `On_device_Ai_option1_phase4_gate.ipynb` for benchmark and recommendation reruns.
 Use `On_device_Ai_option1_phase5_contract.ipynb` for package creation only.
-Use `docs/plans/active/2026-05-11-aihub-option1-npu-pilots.md` for the execution plan behind this workflow.
+Use `docs/plans/archive/2026-05-11-aihub-option1-npu-pilots.md` for the historical roadmap behind this workflow.
+Use `docs/plans/active/2026-05-14-vpcd-quantize-vs-compile-isolation-plan.md` for the active AI Hub quantize investigation, including the `B/C/D` fallback variants.
+Use `docs/plans/active/2026-05-18-vpcd-local-qdq-aihub-compile-plan.md` for the current local-QDQ-to-AI-Hub compile migration plan.
 
 ## Why This Workflow Exists
 
