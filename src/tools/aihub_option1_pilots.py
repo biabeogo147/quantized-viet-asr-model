@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timezone
@@ -23,14 +22,6 @@ from model_bundle.projects.vpcd_shapes import (
     resolve_vpcd_model_input_shapes,
 )
 from model_bundle.projects.zipformer import ModelDirAcousticRuntime, prepare_encoder_inputs, resolve_fixed_encoder_frames
-from quantize.aimet import (
-    build_matmul_only_aimet_config,
-    build_vpcd_local_quality_policy_manifest,
-    inspect_aimet_package,
-    write_aimet_config,
-    write_aimet_policy_manifest,
-    write_calibration_batches,
-)
 from quantize.calibration import (
     greedy_decode_ids,
     iter_calibration_texts,
@@ -38,16 +29,11 @@ from quantize.calibration import (
     resolve_ort_providers,
 )
 from quantize.projects.vpcd import (
-    DEFAULT_AIMET_ACTIVATION_TYPE,
-    DEFAULT_AIMET_CONFIG_FILE,
-    DEFAULT_AIMET_PARAM_TYPE,
-    DEFAULT_AIMET_POLICY_MODE,
-    DEFAULT_AIMET_QUANT_SCHEME,
+    DEFAULT_AIMET_OUTPUT_ROOT,
     DEFAULT_CALIBRATION_SOURCE as VPCD_DEFAULT_CALIBRATION_SOURCE,
-    DEFAULT_PRESET as VPCD_DEFAULT_PRESET,
     build_vpcd_aimet_quantize_recipe,
-    build_vpcd_aihub_quantize_recipe,
-    resolve_vpcd_aihub_quantize_dtype_names as resolve_vpcd_quantize_dtype_names_from_preset,
+    build_vpcd_aimet_variant_name,
+    calibration_records_to_fixed_input_dataset,
 )
 from quantize.fixed_shapes import freeze_model_inputs
 from tools.paths import resolve_repo_path
@@ -55,8 +41,6 @@ from transformers import AutoTokenizer
 
 DEFAULT_TARGET_RUNTIME = "precompiled_qnn_onnx"
 DEFAULT_COMPUTE_UNIT = "npu"
-DEFAULT_AIMET_DOCKER_IMAGE_TAG = "bkmeeting-vpcd-aimet:ubuntu22.04-py310"
-DEFAULT_AIMET_DOCKER_WORKSPACE = "/workspace"
 InputSpecs = dict[str, tuple[tuple[int, ...], str]]
 ZIPFORMER_BOOL_SLICE_NODE_NAMES = (
     "/encoder/Slice_1",
@@ -603,14 +587,6 @@ def resolve_vpcd_calibration_text_path(source: VpcdPilotSource) -> Path | None:
     )
 
 
-def resolve_vpcd_aihub_quantize_dtype_names(source: VpcdPilotSource) -> dict[str, str]:
-    manifest = ModelBundleManifest.from_path(source.bundle_manifest_path)
-    metadata = manifest.metadata if isinstance(manifest.metadata, dict) else {}
-    quantization = metadata.get("quantization", {}) if isinstance(metadata, dict) else {}
-    preset = _normalize_optional_string(str(quantization.get("preset", ""))) or VPCD_DEFAULT_PRESET
-    return resolve_vpcd_quantize_dtype_names_from_preset(preset=preset)
-
-
 def build_vpcd_autoregressive_calibration_entries(
     source: VpcdPilotSource,
     *,
@@ -644,17 +620,12 @@ def build_vpcd_autoregressive_calibration_entries(
             if calibration_source_path is not None
             else resolve_vpcd_calibration_text_path(source)
         )
-        manifest = ModelBundleManifest.from_path(source.bundle_manifest_path)
-        metadata = manifest.metadata if isinstance(manifest.metadata, dict) else {}
-        quantization = metadata.get("quantization", {}) if isinstance(metadata, dict) else {}
-        preset = _normalize_optional_string(str(quantization.get("preset", ""))) or VPCD_DEFAULT_PRESET
         if resolved_calibration_source_path is not None:
-            recipe = build_vpcd_aihub_quantize_recipe(
+            recipe = build_vpcd_aimet_quantize_recipe(
                 model_dir=resolved_model_dir,
                 fp32_onnx_path=resolved_fp32_model_path,
                 calibration_source_path=resolved_calibration_source_path,
-                preset=preset,
-                max_calibration_samples=max(0, int(max_samples)) if max_samples is not None else 128,
+                max_calibration_samples=max(1, int(max_samples)) if max_samples is not None else 24,
                 max_generation_length=max(1, int(max_generation_length or source.decoder_sequence)),
                 ort_provider=ort_provider,
                 fixed_input_shapes={
@@ -665,7 +636,7 @@ def build_vpcd_autoregressive_calibration_entries(
                 },
                 pad_token_id=int(source.pad_token_id),
             )
-            return recipe.calibration_dataset, dict(recipe.calibration_stats)
+            return calibration_records_to_fixed_input_dataset(recipe.calibration_inputs), dict(recipe.calibration_stats)
 
         tokenizer = AutoTokenizer.from_pretrained(resolved_model_dir, local_files_only=True)
         decoder_start_token_id = load_decoder_start_token_id(resolved_model_dir, tokenizer)
@@ -711,9 +682,6 @@ def build_vpcd_autoregressive_calibration_entries(
         "calibration_source_path": None,
         "fp32_model_path": None,
         "model_dir": None,
-        "quantize_preset": None,
-        "activation_type": None,
-        "weight_type": None,
     }
     stats.update(stats_fallback)
 
@@ -795,200 +763,78 @@ def _resolve_default_vpcd_calibration_source_path(repo_root: Path) -> Path:
     return (repo_root / candidate).resolve()
 
 
-def _to_container_repo_path(path: Path, repo_root: Path) -> str:
-    relative_path = path.resolve().relative_to(repo_root.resolve())
-    return Path(DEFAULT_AIMET_DOCKER_WORKSPACE, relative_path.as_posix()).as_posix()
+def _resolve_default_vpcd_local_aimet_output_root(repo_root: Path) -> Path:
+    candidate = Path(DEFAULT_AIMET_OUTPUT_ROOT)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (repo_root / candidate).resolve()
 
 
-def _resolve_container_path_or_literal(argument: str | Path, repo_root: Path) -> str:
-    if isinstance(argument, Path):
-        return _to_container_repo_path(argument.resolve(), repo_root)
-    raw_text = str(argument).strip()
-    if not raw_text:
-        return raw_text
-    candidate = Path(raw_text)
-    if candidate.exists():
-        return _to_container_repo_path(candidate.resolve(), repo_root)
-    return raw_text
-
-
-def _ensure_aimet_docker_image(
+def _build_vpcd_local_aimet_quantize_command_hint(
     *,
-    repo_root: Path,
-    image_tag: str = DEFAULT_AIMET_DOCKER_IMAGE_TAG,
-) -> None:
-    docker_env = _build_docker_env(repo_root)
-    inspect_result = subprocess.run(
-        ["docker", "image", "inspect", image_tag],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        env=docker_env,
-        check=False,
-    )
-    if inspect_result.returncode == 0:
-        return
-
-    dockerfile_path = (repo_root / "docker" / "aimet-onnx-ubuntu2204" / "Dockerfile").resolve()
-    if not dockerfile_path.exists():
-        raise FileNotFoundError(f"Could not resolve AIMET Dockerfile: {dockerfile_path}")
-    subprocess.run(
-        [
-            "docker",
-            "build",
-            "-t",
-            image_tag,
-            "-f",
-            dockerfile_path.as_posix(),
-            repo_root.as_posix(),
-        ],
-        cwd=repo_root,
-        env=docker_env,
-        check=True,
+    source: VpcdPilotSource,
+    calibration_source_path: Path,
+    aimet_param_type: str,
+    aimet_activation_type: str,
+    aimet_quant_scheme: str,
+    aimet_config_file: str,
+    aimet_policy_mode: str,
+    aimet_service_url: str,
+) -> str:
+    model_dir = resolve_vpcd_model_dir(source)
+    fp32_source_path = resolve_vpcd_fp32_source_model_path(source)
+    return (
+        "python -m quantize "
+        "--project vpcd "
+        f"--model-dir {model_dir} "
+        f"--fp32-onnx {fp32_source_path} "
+        f"--calibration-text {calibration_source_path} "
+        f"--output-root {_resolve_default_vpcd_local_aimet_output_root(source.repo_root)} "
+        f"--aimet-param-type {aimet_param_type} "
+        f"--aimet-activation-type {aimet_activation_type} "
+        f"--aimet-quant-scheme {aimet_quant_scheme} "
+        f"--aimet-config-file {aimet_config_file} "
+        f"--aimet-policy-mode {aimet_policy_mode} "
+        f"--aimet-service-url {aimet_service_url}"
     )
 
 
-def _run_aimet_export_in_docker(
+def _resolve_vpcd_local_aimet_quantize_report(
     *,
-    repo_root: Path,
-    fp32_onnx_path: Path,
-    calibration_dir: Path,
-    package_dir: Path,
-    qdq_reference_model_path: Path,
-    report_path: Path,
-    model_prefix: str = "model.option1",
-    param_type: str = DEFAULT_AIMET_PARAM_TYPE,
-    activation_type: str = DEFAULT_AIMET_ACTIVATION_TYPE,
-    quant_scheme: str = DEFAULT_AIMET_QUANT_SCHEME,
-    config_file: str = DEFAULT_AIMET_CONFIG_FILE,
-    policy_manifest_path: Path | None = None,
-    image_tag: str = DEFAULT_AIMET_DOCKER_IMAGE_TAG,
-) -> dict[str, Any]:
-    _ensure_aimet_docker_image(repo_root=repo_root, image_tag=image_tag)
-    docker_env = _build_docker_env(repo_root)
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{repo_root.as_posix()}:{DEFAULT_AIMET_DOCKER_WORKSPACE}",
-        "-w",
-        DEFAULT_AIMET_DOCKER_WORKSPACE,
-        "-e",
-        f"PYTHONPATH={Path(DEFAULT_AIMET_DOCKER_WORKSPACE, 'src').as_posix()}",
-        image_tag,
-        "python3",
-        "-m",
-        "quantize.aimet",
-        "export",
-        "--fp32-onnx",
-        _to_container_repo_path(fp32_onnx_path, repo_root),
-        "--calibration-dir",
-        _to_container_repo_path(calibration_dir, repo_root),
-        "--package-dir",
-        _to_container_repo_path(package_dir, repo_root),
-        "--qdq-reference-model",
-        _to_container_repo_path(qdq_reference_model_path, repo_root),
-        "--model-prefix",
-        model_prefix,
-        "--param-type",
-        str(param_type),
-        "--activation-type",
-        str(activation_type),
-        "--quant-scheme",
-        str(quant_scheme),
-        "--config-file",
-        _resolve_container_path_or_literal(config_file, repo_root),
-        "--report-path",
-        _to_container_repo_path(report_path, repo_root),
-    ]
-    if policy_manifest_path is not None:
-        command.extend(
-            [
-                "--policy-manifest",
-                _to_container_repo_path(policy_manifest_path, repo_root),
-            ]
+    source: VpcdPilotSource,
+    aimet_param_type: str,
+    aimet_activation_type: str,
+    aimet_quant_scheme: str,
+    aimet_policy_mode: str,
+    aimet_config_file: str,
+    aimet_service_url: str,
+    calibration_source_path: Path,
+) -> tuple[Path, dict[str, Any]]:
+    variant_name = build_vpcd_aimet_variant_name(
+        param_type=aimet_param_type,
+        activation_type=aimet_activation_type,
+        quant_scheme=aimet_quant_scheme,
+        policy_mode=aimet_policy_mode,
+    )
+    variant_root = (_resolve_default_vpcd_local_aimet_output_root(source.repo_root) / variant_name).resolve()
+    report_path = (variant_root / "quantize_report.json").resolve()
+    if not report_path.exists():
+        command_hint = _build_vpcd_local_aimet_quantize_command_hint(
+            source=source,
+            calibration_source_path=calibration_source_path,
+            aimet_param_type=aimet_param_type,
+            aimet_activation_type=aimet_activation_type,
+            aimet_quant_scheme=aimet_quant_scheme,
+            aimet_config_file=aimet_config_file,
+            aimet_policy_mode=aimet_policy_mode,
+            aimet_service_url=aimet_service_url,
         )
-    subprocess.run(command, cwd=repo_root, env=docker_env, check=True)
-    return json.loads(report_path.read_text(encoding="utf-8"))
-
-
-def _prepare_vpcd_aimet_variant_artifacts(
-    *,
-    aimet_root: Path,
-    recipe: Any,
-) -> dict[str, Path | None]:
-    variant_root = (aimet_root / str(recipe.variant_name)).resolve()
-    variant_root.mkdir(parents=True, exist_ok=True)
-    config_file_arg = str(recipe.config_file)
-    config_file_path: Path | None = None
-    policy_manifest_path: Path | None = None
-
-    if str(recipe.policy_mode).strip().lower() == "local_quality_parity":
-        config_file_path = write_aimet_config(
-            build_matmul_only_aimet_config(),
-            variant_root / "aimet.config.json",
+        raise FileNotFoundError(
+            "Missing prebuilt VPCD AIMET quantize artifact. "
+            f"Expected quantize report: {report_path}. "
+            f"Run: {command_hint}"
         )
-        policy_manifest_path = write_aimet_policy_manifest(
-            build_vpcd_local_quality_policy_manifest(
-                variant_name=str(recipe.variant_name),
-                policy_mode=str(recipe.policy_mode),
-                local_quality_policy=dict(recipe.local_quality_policy),
-            ),
-            variant_root / "aimet.policy.json",
-        )
-        config_file_arg = config_file_path.as_posix()
-
-    return {
-        "variant_root": variant_root,
-        "config_file_arg": Path(config_file_arg).resolve() if config_file_path is not None else None,
-        "config_file_value": config_file_path.as_posix() if config_file_path is not None else config_file_arg,
-        "policy_manifest_path": policy_manifest_path,
-    }
-
-
-def _build_local_aimet_compile_candidate_report(
-    *,
-    aimet_recipe: Mapping[str, Any],
-    package_report: Mapping[str, Any],
-    packaging_path: Path,
-    qdq_reference_model_path: Path,
-    docker_image_tag: str,
-    transformation_kind: str,
-) -> dict[str, Any]:
-    package_ready = bool(package_report.get("package_ready", False))
-    normalized_package_report = dict(package_report)
-    normalized_package_report["package_dir"] = packaging_path.resolve().as_posix()
-    normalized_package_report["qdq_reference_model_path"] = qdq_reference_model_path.resolve().as_posix()
-    return {
-        "aihub_compile_readiness": "experimental" if package_ready else "unsafe",
-        "package_ready": package_ready,
-        "packaging_kind": "aimet_dir",
-        "packaging_path": packaging_path.resolve().as_posix(),
-        "transformation_kind": transformation_kind,
-        "qdq_reference_model_path": qdq_reference_model_path.resolve().as_posix(),
-        "docker_image_tag": docker_image_tag,
-        "aimet": {
-            "param_type": str(aimet_recipe.get("param_type") or DEFAULT_AIMET_PARAM_TYPE),
-            "activation_type": str(aimet_recipe.get("activation_type") or DEFAULT_AIMET_ACTIVATION_TYPE),
-            "quant_scheme": str(aimet_recipe.get("quant_scheme") or DEFAULT_AIMET_QUANT_SCHEME),
-            "config_file": str(aimet_recipe.get("config_file") or DEFAULT_AIMET_CONFIG_FILE),
-            "variant_name": str(aimet_recipe.get("variant_name") or "unknown"),
-            "policy_mode": str(aimet_recipe.get("policy_mode") or DEFAULT_AIMET_POLICY_MODE),
-        },
-        "package_report": normalized_package_report,
-        "calibration": dict(aimet_recipe.get("calibration_stats") or {}),
-        "local_quality_policy": dict(aimet_recipe.get("local_quality_policy") or {}),
-        "readiness_flags": list(package_report.get("package_notes", [])),
-    }
-
-
-def _build_docker_env(repo_root: Path) -> dict[str, str]:
-    docker_config_dir = (repo_root / "build" / "docker-config").resolve()
-    docker_config_dir.mkdir(parents=True, exist_ok=True)
-    docker_env = dict(os.environ)
-    docker_env["DOCKER_CONFIG"] = docker_config_dir.as_posix()
-    return docker_env
+    return variant_root, json.loads(report_path.read_text(encoding="utf-8"))
 
 
 def prepare_vpcd_option1_source_model(
@@ -1000,106 +846,43 @@ def prepare_vpcd_option1_source_model(
     max_calibration_samples: int = 24,
     max_generation_length: int = 32,
     ort_provider: str = "cpu",
-    aimet_param_type: str = DEFAULT_AIMET_PARAM_TYPE,
-    aimet_activation_type: str = DEFAULT_AIMET_ACTIVATION_TYPE,
-    aimet_quant_scheme: str = DEFAULT_AIMET_QUANT_SCHEME,
-    aimet_config_file: str = DEFAULT_AIMET_CONFIG_FILE,
-    aimet_policy_mode: str = DEFAULT_AIMET_POLICY_MODE,
-    aimet_docker_image_tag: str = DEFAULT_AIMET_DOCKER_IMAGE_TAG,
+    aimet_param_type: str = "int8",
+    aimet_activation_type: str = "int16",
+    aimet_quant_scheme: str = "min_max",
+    aimet_config_file: str = "vpcd_matmul_only",
+    aimet_policy_mode: str = "local_quality_parity",
+    aimet_service_url: str = "http://127.0.0.1:18080",
 ) -> PreparedVpcdOption1Source:
     normalized_strategy = _normalize_optional_string(strategy)
     if normalized_strategy is None:
         normalized_strategy = "local_aimet_compile_candidate"
-    prepared_output_path = Path(output_path).resolve() if output_path is not None else (
-        source.repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx"
-    ).resolve()
     if normalized_strategy == "local_aimet_compile_candidate":
-        fp32_source_path = resolve_vpcd_fp32_source_model_path(source)
-        if fp32_source_path is None:
-            raise FileNotFoundError(
-                "Could not resolve a VPCD FP32 ONNX source model for the AIMET local quantize lane."
-            )
-
-        input_shapes = {name: spec[0] for name, spec in build_vpcd_input_specs(source).items()}
-        freeze_model_inputs(fp32_source_path, prepared_output_path, input_shapes)
-
         resolved_calibration_source_path = (
             Path(calibration_source_path).resolve()
             if calibration_source_path is not None
             else _resolve_default_vpcd_calibration_source_path(source.repo_root)
         )
-        resolved_model_dir = resolve_vpcd_model_dir(source)
-        if resolved_model_dir is None:
-            raise FileNotFoundError("Could not resolve a VPCD model directory for the AIMET local quantize lane.")
-
-        aimet_recipe = build_vpcd_aimet_quantize_recipe(
-            model_dir=resolved_model_dir,
-            fp32_onnx_path=fp32_source_path,
+        variant_root, quantize_report = _resolve_vpcd_local_aimet_quantize_report(
+            source=source,
+            aimet_param_type=aimet_param_type,
+            aimet_activation_type=aimet_activation_type,
+            aimet_quant_scheme=aimet_quant_scheme,
+            aimet_policy_mode=aimet_policy_mode,
+            aimet_config_file=aimet_config_file,
+            aimet_service_url=aimet_service_url,
             calibration_source_path=resolved_calibration_source_path,
-            max_calibration_samples=int(max_calibration_samples),
-            max_generation_length=int(max_generation_length),
-            ort_provider=ort_provider,
-            fixed_input_shapes=input_shapes,
-            pad_token_id=int(source.pad_token_id),
-            param_type=aimet_param_type,
-            activation_type=aimet_activation_type,
-            quant_scheme=aimet_quant_scheme,
-            config_file=aimet_config_file,
-            policy_mode=aimet_policy_mode,
         )
-
-        aimet_root = prepared_output_path.parent
-        variant_artifacts = _prepare_vpcd_aimet_variant_artifacts(
-            aimet_root=aimet_root,
-            recipe=aimet_recipe,
-        )
-        variant_root = Path(variant_artifacts["variant_root"]).resolve()
-        calibration_dir = (variant_root / "calibration").resolve()
-        package_dir = (variant_root / "model.option1.aimet").resolve()
-        qdq_reference_model_path = (variant_root / "model.option1.qdq.onnx").resolve()
-        report_path = (variant_root / "model.option1.aimet.report.json").resolve()
-        config_file_value = str(variant_artifacts["config_file_value"])
-        policy_manifest_path = (
-            Path(variant_artifacts["policy_manifest_path"]).resolve()
-            if variant_artifacts["policy_manifest_path"] is not None
-            else None
-        )
-        write_calibration_batches(aimet_recipe.calibration_inputs, calibration_dir)
-        if package_dir.exists() and qdq_reference_model_path.exists() and report_path.exists():
-            package_report = json.loads(report_path.read_text(encoding="utf-8"))
-        else:
-            package_report = _run_aimet_export_in_docker(
-                repo_root=source.repo_root,
-                fp32_onnx_path=prepared_output_path,
-                calibration_dir=calibration_dir,
-                package_dir=package_dir,
-                qdq_reference_model_path=qdq_reference_model_path,
-                report_path=report_path,
-                model_prefix="model.option1",
-                param_type=aimet_recipe.param_type,
-                activation_type=aimet_recipe.activation_type,
-                quant_scheme=aimet_recipe.quant_scheme,
-                config_file=config_file_value,
-                policy_manifest_path=policy_manifest_path,
-                image_tag=aimet_docker_image_tag,
-            )
-        report = _build_local_aimet_compile_candidate_report(
-            aimet_recipe={
-                "param_type": aimet_recipe.param_type,
-                "activation_type": aimet_recipe.activation_type,
-                "quant_scheme": aimet_recipe.quant_scheme,
-                "config_file": config_file_value,
-                "variant_name": aimet_recipe.variant_name,
-                "policy_mode": aimet_recipe.policy_mode,
-                "local_quality_policy": aimet_recipe.local_quality_policy,
-                "calibration_stats": aimet_recipe.calibration_stats,
-            },
-            package_report=package_report,
-            packaging_path=package_dir,
-            qdq_reference_model_path=qdq_reference_model_path,
-            docker_image_tag=aimet_docker_image_tag,
-            transformation_kind="aimet_export_docker",
-        )
+        prepared_output_path = Path(str(quantize_report["fixed_model_path"])).resolve()
+        package_dir = Path(str(quantize_report["package_dir"])).resolve()
+        qdq_reference_model_path = Path(str(quantize_report["qdq_reference_model_path"])).resolve()
+        report = dict(quantize_report)
+        report.setdefault("packaging_path", package_dir.resolve().as_posix())
+        report.setdefault("qdq_reference_model_path", qdq_reference_model_path.resolve().as_posix())
+        report.setdefault("source_strategy", normalized_strategy)
+        report.setdefault("source_kind", "local_aimet")
+        report.setdefault("packaging_kind", "aimet_dir")
+        report.setdefault("transformation_kind", "aimet_service_export")
+        report.setdefault("quantize_root", variant_root.resolve().as_posix())
         return PreparedVpcdOption1Source(
             prepared_model_path=prepared_output_path,
             is_quantized_source=True,
@@ -1107,7 +890,7 @@ def prepare_vpcd_option1_source_model(
             source_kind="local_aimet",
             packaging_kind="aimet_dir",
             packaging_path=package_dir,
-            transformation_kind="aimet_export_docker",
+            transformation_kind="aimet_service_export",
             diagnostic_model_path=qdq_reference_model_path,
             report=report,
             graph_report=None,

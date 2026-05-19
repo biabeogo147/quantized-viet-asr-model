@@ -157,7 +157,7 @@ It does not prove:
 ## Related docs
 
 - `docs/workflows/export-verify-smoke.md`
-- `docs/workflows/quantize-qnn-candidates.md`
+- `docs/workflows/option1-overview.md`
 - `docs/workflows/option1-promotion-handoff.md`
 - `docs/qnn/model-quantization.md`
 - `docs/qnn/preflight.md`

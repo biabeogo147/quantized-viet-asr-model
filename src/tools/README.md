@@ -1,151 +1,34 @@
 # Tools Module
 
-`src/tools/` contains small reusable helper scripts that do not belong to the main export, bundle, quantize, or verify flows.
+`src/tools/` keeps small repo utilities that sit around the main export, quantize, verify, and Android handoff flows.
 
-For the canonical repo-wide workflows that call these helpers, use:
+## Retained Option 1 rule
 
-- `docs/workflows/quantize-qnn-candidates.md`
-- `docs/workflows/android-handoff.md`
+For `VPCD`, local quantization is no longer built in the notebook helpers.
 
-## File map
-
-```text
-python-model-test/src/tools/
-  __init__.py
-  convert_bpe2token.py
-  extract_vlsp2020_calibration_subset.py
-  prepare_vpcd_qnn_candidate.py
-  paths.py
-  sync_android_bundle.py
-  README.md
-```
-
-## `paths.py`
-
-Role:
-- resolves the `python-model-test/` repo root from code running anywhere under `src/`
-- converts repo-relative fixture paths into stable absolute paths
-- prevents regressions when packages move deeper or shallower inside `src/`
-
-Main functions:
-- `find_repo_root(anchor)`
-  - walks upward from a file or directory until it finds the repo root
-- `resolve_repo_path(path_like, anchor=...)`
-  - returns `<repo-root>/<path_like>`
-
-Use it when:
-- sample manifests store paths like `assets/speech/sample-1.mp3`
-- calibration logic needs to open repo assets from inside `src/quantize/...`
-- bundle verification needs to re-open fixtures from inside `src/model_bundle/...`
-
-## `extract_vlsp2020_calibration_subset.py`
-
-Role:
-- reads VLSP 2020 Hugging Face parquet shards from a user-provided dataset root
-- selects a deterministic subset in lexical shard order and original row order
-- materializes embedded audio bytes into local WAV files under `build/calibration/vlsp2020/audio/`
-- emits:
-  - `zipformer_audio_manifest.txt`
-  - `vpcd_transcriptions.txt`
-  - `subset_manifest.json`
-
-Main classes and functions:
-- `VlspCalibrationRow`
-  - normalized in-memory row used by the extractor
-- `iter_vlsp_parquet_rows(dataset_root, batch_size=32)`
-  - streams parquet rows with `audio.bytes`, `audio.path`, and `transcription`
-- `select_subset_rows(rows, max_samples)`
-  - keeps deterministic order and truncates to the requested subset size
-- `write_subset_outputs(rows, output_dir)`
-  - writes audio files and the two calibration artifacts
-- `extract_subset(dataset_root, output_dir, max_samples)`
-  - end-to-end helper used by the CLI
-- `main(argv=None)`
-  - CLI entrypoint
-
-Example command:
+Run the producer first:
 
 ```bash
-python -m tools.extract_vlsp2020_calibration_subset \
-  --dataset-root <vlsp_dataset_root> \
-  --max-samples 24 \
-  --output-dir build/calibration/vlsp2020
+python -m quantize --project vpcd ...
 ```
 
-The emitted artifacts can be fed directly into:
-- `python -m quantize --project zipformer --audio-manifest ...`
-- `python -m quantize --project vpcd --calibration-text ...`
+Then the AI Hub notebooks only consume the prebuilt artifact from:
 
-## `prepare_vpcd_qnn_candidate.py`
+- `build/quantize/vpcd/local_aimet/wint8_aint16_min_max_local_quality_parity/`
 
-Role:
-- copies an exported VPCD bundle
-- freezes `model.mobile.onnx` model input shapes
-- updates manifest `fixed_input_shapes`, `quantization.fixed_shapes`, and `qnn_readiness.fixed_shapes_ready`
-- keeps tokenizer graphs unchanged because they stay CPU-only in the first Android QNN slice
+## Key helpers
 
-Example command:
+- `extract_vlsp2020_calibration_subset.py`
+  - emits a shared calibration subset for `zipformer` and `vpcd`
+- `prepare_vpcd_qnn_candidate.py`
+  - freezes VPCD bundle input shapes for the Android/NPU candidate bundle
+- `sync_android_bundle.py`
+  - copies verified bundles or contract packages into BKMeeting asset namespaces
+- `paths.py`
+  - stable repo-root path resolution used from inside `src/`
 
-```bash
-python -m tools.prepare_vpcd_qnn_candidate \
-  --source-bundle build/model_bundle/vpcd/vpcd_balanced \
-  --output-dir build/model_bundle/vpcd/qnn_fixed_1024x128 \
-  --encoder-sequence 1024 \
-  --decoder-sequence 128
-```
+## Related workflow docs
 
-## `sync_android_bundle.py`
-
-Role:
-- copies a verified Python model bundle into the correct BKMeeting Android asset pack
-- rewrites `bundle_manifest.json` handoff fields so `asset_namespace`, Zipformer `model_name`, and canonical variants match Android
-- keeps VPCD variants under one Android family folder: `models/punctuation/vpcd/<variant>`
-
-Supported targets:
-- `zipformer/fp32` -> `BKMeeting/modelassets/src/main/assets/models/asr/zipformer/fp32`
-- `zipformer/qnn_u16u8` -> `BKMeeting/modelassets/src/main/assets/models/asr/zipformer/qnn_u16u8`
-- `vpcd/vpcd_balanced` -> `BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/vpcd_balanced`
-- `vpcd/qnn_fixed_1024x128` -> `BKMeeting/modelassets/src/main/assets/models/punctuation/vpcd/qnn_fixed_1024x128`
-
-Example commands:
-
-```bash
-python -m tools.sync_android_bundle \
-  --project zipformer \
-  --variant fp32 \
-  --bkmeeting-root <BKMEETING_ROOT> \
-  --overwrite
-```
-
-```bash
-python -m tools.sync_android_bundle \
-  --project vpcd \
-  --variant qnn_fixed_1024x128 \
-  --bkmeeting-root <BKMEETING_ROOT> \
-  --overwrite
-```
-
-## `convert_bpe2token.py`
-
-Role:
-- reads a SentencePiece `bpe.model`
-- generates a `tokens.txt` table in the format expected by the Zipformer pipeline
-
-Main functions:
-- `build_argument_parser()`
-  - defines `--bpe-model` and `--output`
-- `main(argv=None)`
-  - loads the SentencePiece model
-  - writes one token per line as `<piece> <id>`
-
-## Command setup
-
-Examples below assume you run commands from `python-model-test/`.
-
-## Example command
-
-```bash
-python -m tools.convert_bpe2token \
-  --bpe-model assets/zipformer/bpe.model \
-  --output assets/zipformer/tokens.txt
-```
+- [option1-overview.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/option1-overview.md)
+- [option1-rerun.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/option1-rerun.md)
+- [android-handoff.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/android-handoff.md)

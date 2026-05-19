@@ -23,9 +23,8 @@ DEFAULT_MODEL_DIR = Path('assets') / 'zipformer'
 DEFAULT_OUTPUT_ROOT = Path('build') / 'quantize' / 'zipformer' / 'qnn_u16u8'
 DEFAULT_BUNDLE_OUTPUT_DIR = Path('build') / 'model_bundle' / 'zipformer' / 'qnn_u16u8'
 DEFAULT_REFERENCE_BUNDLE_DIR = Path('build') / 'model_bundle' / 'zipformer' / 'fp32'
-DEFAULT_PRESET = 'zipformer_sd8g2_qnn_u16u8'
-BALANCED_PRESET = 'zipformer_sd8g2_balanced'
-SUPPORTED_PRESETS = (DEFAULT_PRESET, BALANCED_PRESET)
+DEFAULT_PRESET = 'zipformer_sd8g2_balanced'
+SUPPORTED_PRESETS = (DEFAULT_PRESET,)
 
 
 def apply_default_arguments(parser) -> None:
@@ -151,12 +150,8 @@ def _build_component_plan(component_model: Path, preset: str) -> QuantizationPla
     _ = load_model_node_names(component_model)
     return QuantizationPlan(
         preset=preset,
-        runner_kind='qnn_static',
         op_types_to_quantize=('MatMul',),
-        exclusion_patterns=(),
         nodes_to_exclude=(),
-        calibration_method='minmax',
-        percentile=99.99,
         per_channel=False,
         activation_type='quint16',
         weight_type='quint8',

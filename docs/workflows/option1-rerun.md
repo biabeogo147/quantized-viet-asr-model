@@ -1,87 +1,51 @@
-# Option 1 Rerun Workflow
+# Option 1 Rerun
 
-This is the canonical current `Phase 2 + Phase 3` operator workflow for `Option 1`.
+Use this doc when you want one fresh retained-lane rerun before Phase 4 and Phase 5.
 
-Run it in:
+Run in:
 
-- `On_device_Ai_option1_pilots.ipynb`
-
-Use this doc after the local bundle and quantization flows are already in place and you want one fresh AI Hub rerun before Android handoff work.
+- [On_device_Ai_option1_pilots.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_pilots.ipynb)
 
 ## Prerequisites
 
-Prepare a Python environment that can already run the local bundle logic:
+1. install the Python env used by this repo
+2. have a valid `QAI_HUB_API_TOKEN`
+3. build the retained local artifacts first:
+   - `python -m quantize --project zipformer ...`
+   - `python -m quantize --project vpcd ...`
+4. for VPCD, keep the AIMET service alive on `http://127.0.0.1:18080` while producing the local artifact
 
-```bash
-python -m pip install -e .
-python -m pip install qai-hub "qai-hub[torch]"
-```
-
-You also need:
-
-- a valid `QAI_HUB_API_TOKEN`
-- access to at least one Snapdragon device family in AI Hub
-- a compatible local `torch` and `torchaudio` setup for the Zipformer path
-
-## Retained lanes
-
-Use only the retained lanes:
+## Retained defaults
 
 - `Zipformer`
   - compile pilot: `zipformer_encoder_option1`
 - `VPCD`
   - source strategy: `local_aimet_compile_candidate`
   - compile pilot: `vpcd_option1_local_aimet`
+- bounded VPCD guardrails:
+  - `VPCD_HYBRID_MAX_SAMPLES = 2`
+  - `VPCD_HYBRID_MAX_STEPS = 5`
+  - `VPCD_TEACHER_FORCED_SAMPLE_INDEX = 0`
 
-Lane history and rationale live in:
-
-- `docs/qnn/option1-retained-lanes.md`
-
-## Current clean rerun baseline
-
-Keep these defaults aligned with the current retained proof:
-
-- `RUN_LABEL = "20260519-option1-final-rerun"`
-- `ENABLE_ZIPFORMER = True`
-- `ENABLE_VPCD = True`
-- `VPCD_HYBRID_MAX_SAMPLES = 2`
-- `VPCD_HYBRID_MAX_STEPS = 5`
-- `VPCD_TEACHER_FORCED_SAMPLE_INDEX = 0`
-
-Do not raise the bounded VPCD limits until the retained lane is clean again.
-
-## Notebook run order
+## Run order
 
 ### Zipformer
 
-Run the retained encoder-first path in this order:
-
-1. prepare the encoder upload artifact
+1. prepare encoder upload artifact
 2. compile on AI Hub
-3. run the compiled target
-4. run the hybrid transcript comparison
+3. run compiled target
+4. run hybrid transcript comparison
 
 ### VPCD
 
-Run the retained AIMET parity path in this order:
+1. resolve the prebuilt local AIMET artifact
+2. compile that artifact on AI Hub
+3. run local quantized teacher-forced diagnostics
+4. run compiled teacher-forced diagnostics
+5. run bounded hybrid
+6. run final compare
 
-1. freeze the fixed-shape FP32 source
-2. export the local AIMET package in Docker
-3. compile that package on AI Hub
-4. run quantized-local teacher-forced diagnostics
-5. run compiled-cloud teacher-forced diagnostics
-6. run the bounded hybrid flow
-7. run the final compare cell
-
-That ordering matters:
-
-- local quantized teacher-forced checks whether the retained local artifact is semantically healthy
-- compiled-cloud teacher-forced checks whether compile changed that behavior
-- the bounded hybrid run is the final end-to-end proof for the current retained window
-
-## Expected fresh records
-
-After a clean rerun, expect these record roots:
+## Expected record roots
 
 - `build/aihub/records/zipformer_encoder_option1/`
 - `build/aihub/records/zipformer_hybrid_option1/`
@@ -90,20 +54,11 @@ After a clean rerun, expect these record roots:
 - `build/aihub/records/vpcd_teacher_forced_option1/`
 - `build/aihub/records/vpcd_hybrid_option1/`
 
-Those records are the inputs for `Phase 4` and `Phase 5`.
+## Stop conditions
 
-## When to stop and investigate
+Stop and investigate if:
 
-Stop the rerun and investigate if:
-
-- the notebook falls back to a retired VPCD lane
-- the VPCD teacher-forced path diverges before the retained `5`-step window is complete
-- the rerun writes records under stale pilot names such as `vpcd_option1`
-- the notebook no longer produces one fresh record set per retained pilot
-
-## Related docs
-
-- `docs/workflows/option1-overview.md`
-- `docs/workflows/option1-promotion-handoff.md`
-- `docs/qnn/option1-retained-lanes.md`
-- `docs/qnn/model-quantization.md`
+- the notebook asks for a retired VPCD lane
+- the retained local AIMET artifact is missing
+- VPCD diverges before the retained `5`-step window
+- records are written under stale VPCD pilot names such as `vpcd_option1`

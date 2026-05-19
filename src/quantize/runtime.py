@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 from typing import Iterator
 
+DEFAULT_TEMP_ROOT = Path("test") / "_tmp" / "ort_quant_temp"
+
 
 class ManualTemporaryDirectory:
     def __init__(

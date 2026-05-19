@@ -1,14 +1,21 @@
 from __future__ import annotations
 
-import argparse
 import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib import error as urllib_error
+from urllib import parse as urllib_parse
+from urllib import request as urllib_request
 
 import numpy as np
 import onnx
 
 from quantize.types import AimetPackageReport, CalibrationSample
+
+DEFAULT_AIMET_SERVICE_URL = "http://127.0.0.1:18080"
+DEFAULT_AIMET_SERVICE_WORKSPACE_ROOT = "/workspace"
+DEFAULT_AIMET_HEALTH_TIMEOUT_SECONDS = 30.0
+DEFAULT_AIMET_EXPORT_TIMEOUT_SECONDS = 3600.0
 
 
 def build_matmul_only_aimet_config() -> dict[str, Any]:
@@ -51,6 +58,78 @@ def write_aimet_config(config: Mapping[str, Any], output_path: str | Path) -> Pa
     resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
     resolved_output_path.write_text(json.dumps(dict(config), ensure_ascii=False, indent=2), encoding="utf-8")
     return resolved_output_path
+
+
+def map_local_path_to_service_workspace(
+    local_path: str | Path,
+    *,
+    repo_root: str | Path,
+    service_workspace_root: str = DEFAULT_AIMET_SERVICE_WORKSPACE_ROOT,
+) -> str:
+    resolved_local_path = Path(local_path).resolve()
+    resolved_repo_root = Path(repo_root).resolve()
+    relative_path = resolved_local_path.relative_to(resolved_repo_root)
+    normalized_root = str(service_workspace_root).rstrip("/")
+    return f"{normalized_root}/{relative_path.as_posix()}"
+
+
+def _service_json_request(
+    service_url: str,
+    *,
+    endpoint: str,
+    payload: Mapping[str, Any] | None = None,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+    normalized_base_url = str(service_url).rstrip("/")
+    url = urllib_parse.urljoin(f"{normalized_base_url}/", endpoint.lstrip("/"))
+    data = None
+    headers: dict[str, str] = {}
+    method = "GET"
+    if payload is not None:
+        data = json.dumps(dict(payload), ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+        method = "POST"
+    request = urllib_request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib_request.urlopen(request, timeout=float(timeout_seconds)) as response:
+            body = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"AIMET service request failed: {exc.code} {exc.reason}: {error_body}") from exc
+    except urllib_error.URLError as exc:
+        raise RuntimeError(f"Could not reach AIMET service at {url}: {exc.reason}") from exc
+    if not body:
+        return {}
+    return json.loads(body)
+
+
+def healthcheck_aimet_service(
+    service_url: str = DEFAULT_AIMET_SERVICE_URL,
+    *,
+    timeout_seconds: float = DEFAULT_AIMET_HEALTH_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    payload = _service_json_request(
+        service_url,
+        endpoint="/healthz",
+        timeout_seconds=float(timeout_seconds),
+    )
+    if str(payload.get("status", "")).strip().lower() != "ok":
+        raise RuntimeError(f"AIMET service healthcheck returned an unexpected payload: {payload!r}")
+    return payload
+
+
+def request_aimet_service_export(
+    *,
+    service_url: str = DEFAULT_AIMET_SERVICE_URL,
+    export_payload: Mapping[str, Any],
+    timeout_seconds: float = DEFAULT_AIMET_EXPORT_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    return _service_json_request(
+        service_url,
+        endpoint="/export",
+        payload=export_payload,
+        timeout_seconds=float(timeout_seconds),
+    )
 
 
 def build_vpcd_local_quality_policy_manifest(
@@ -316,51 +395,3 @@ def export_aimet_package(
     if policy_manifest is not None:
         report["policy_manifest_path"] = Path(policy_manifest_path).resolve().as_posix()
     return report
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="AIMET export helpers")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    export_parser = subparsers.add_parser("export", help="Export an AIMET package and local QDQ reference model.")
-    export_parser.add_argument("--fp32-onnx", required=True)
-    export_parser.add_argument("--calibration-dir", required=True)
-    export_parser.add_argument("--package-dir", required=True)
-    export_parser.add_argument("--qdq-reference-model", required=True)
-    export_parser.add_argument("--model-prefix", default="model.option1")
-    export_parser.add_argument("--param-type", default="int8")
-    export_parser.add_argument("--activation-type", default="int8")
-    export_parser.add_argument("--quant-scheme", default="min_max")
-    export_parser.add_argument("--config-file", default="default")
-    export_parser.add_argument("--policy-manifest")
-    export_parser.add_argument("--report-path", required=True)
-    return parser
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-    if args.command != "export":
-        raise ValueError(f"Unsupported command: {args.command!r}")
-
-    report = export_aimet_package(
-        fp32_onnx_path=args.fp32_onnx,
-        calibration_dir=args.calibration_dir,
-        package_dir=args.package_dir,
-        qdq_reference_model_path=args.qdq_reference_model,
-        model_prefix=args.model_prefix,
-        param_type=args.param_type,
-        activation_type=args.activation_type,
-        quant_scheme=args.quant_scheme,
-        config_file=args.config_file,
-        policy_manifest_path=args.policy_manifest,
-    )
-    report_path = Path(args.report_path).resolve()
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

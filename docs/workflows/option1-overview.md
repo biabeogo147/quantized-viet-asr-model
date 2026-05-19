@@ -1,74 +1,53 @@
 # Option 1 Overview
 
-This is the canonical reader guide for the current `Option 1` AI Hub workflow.
+This is the shortest current map for `Option 1`.
 
-Use it when you need to understand:
-
-- which retained lanes are active right now
-- which notebook runs which phase
-- where the current proof stops before BKMeeting takes over
-
-## Current retained lanes
-
-Read the QNN-side decision docs first:
-
-- `docs/qnn/option1-retained-lanes.md`
-- `docs/qnn/model-quantization.md`
-
-Short version:
+## Retained lanes
 
 - `Zipformer`
   - retained lane: `zipformer_encoder_option1`
-  - read: encoder-first NPU proof only
+  - producer: local quantize bundle under `build/quantize/zipformer/qnn_u16u8/`
+  - notebook proof: encoder-first AI Hub compile/run plus hybrid comparison
 - `VPCD`
   - retained lane: `local_aimet_compile_candidate`
   - compile pilot: `vpcd_option1_local_aimet`
-  - read: bounded AIMET parity proof
+  - producer: local AIMET package under `build/quantize/vpcd/local_aimet/wint8_aint16_min_max_local_quality_parity/`
+  - notebook proof: local teacher-forced, compiled teacher-forced, bounded hybrid
 
-## Evidence chain
+Lane history and retirement rationale live in:
 
-The current `Option 1` flow is:
+- [option1-retained-lanes.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/qnn/option1-retained-lanes.md)
 
-1. `Phase 2`
-   - prepare the retained source artifact
-   - compile on AI Hub
-   - run the compiled target
-2. `Phase 3`
-   - run the hybrid host-plus-NPU flow
-   - keep the bounded VPCD diagnostics
-3. `Phase 4`
-   - turn the rerun evidence into a gate verdict
-4. `Phase 5`
-   - package that evidence into contract directories
-5. `BKMeeting`
-   - sync assets
-   - prove device-side runtime behavior
+## Producer then notebook
 
-## Which doc to open next
+The notebook does not quantize locally anymore.
 
-If you need to rerun the active notebook path:
+Do this first:
 
-- `docs/workflows/option1-rerun.md`
+1. run `python -m quantize --project zipformer ...`
+2. run `python -m quantize --project vpcd ...`
 
-If you already have fresh rerun evidence and need promotion packaging plus handoff:
+Then run the AI Hub notebooks.
 
-- `docs/workflows/option1-promotion-handoff.md`
+## Notebook phases
 
-If you need generic BKMeeting sync commands outside the `Option 1` packaging flow:
+1. `On_device_Ai_option1_pilots.ipynb`
+   - Phase 2 and Phase 3
+2. `On_device_Ai_option1_phase4_gate.ipynb`
+   - Phase 4 gate verdicts
+3. `On_device_Ai_option1_phase5_contract.ipynb`
+   - Phase 5 contract packaging
 
-- `docs/workflows/android-handoff.md`
+## Current proof boundary
 
-## What this workflow does not prove
-
-`python-model-test` can prove:
+`python-model-test` proves:
 
 - compile-ready artifacts
-- AI Hub compile success
+- AI Hub compile/run evidence
 - bounded hybrid evidence
-- packaging into Phase 5 contracts
+- Phase 5 contract packaging
 
 It does not prove:
 
-- BKMeeting runtime packaging
-- physical Snapdragon HTP execution
-- final device promotion
+- BKMeeting asset integration
+- physical Snapdragon NPU behavior on the final app build

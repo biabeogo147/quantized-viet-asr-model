@@ -161,6 +161,6 @@ Why this step exists:
 ## Related docs
 
 - `docs/architecture/bundle-contract.md`
-- `docs/workflows/quantize-qnn-candidates.md`
+- `docs/workflows/option1-overview.md`
 - `docs/workflows/android-handoff.md`
 - `test/README.md`

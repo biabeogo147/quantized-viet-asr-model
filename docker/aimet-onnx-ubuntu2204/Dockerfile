@@ -23,5 +23,9 @@ RUN python3 -m pip install \
     onnxsim
 
 WORKDIR /workspace
+ENV PYTHONPATH=/workspace/src
+EXPOSE 8080
 
-CMD ["bash"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD python3 -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=5).read()"
+
+CMD ["python3", "-m", "quantize.aimet_service", "--host", "0.0.0.0", "--port", "8080"]

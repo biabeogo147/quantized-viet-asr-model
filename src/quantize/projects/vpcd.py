@@ -1,167 +1,148 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-from types import SimpleNamespace
 import hashlib
+import json
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import numpy as np
 import onnx
 
+from model_bundle.manifest import ModelBundleManifest
+from model_bundle.projects.vpcd_shapes import resolve_vpcd_model_input_shapes
+from quantize.aimet import (
+    DEFAULT_AIMET_HEALTH_TIMEOUT_SECONDS,
+    DEFAULT_AIMET_SERVICE_URL,
+    DEFAULT_AIMET_SERVICE_WORKSPACE_ROOT,
+    build_matmul_only_aimet_config,
+    build_vpcd_local_quality_policy_manifest,
+    healthcheck_aimet_service,
+    map_local_path_to_service_workspace,
+    request_aimet_service_export,
+    write_aimet_config,
+    write_aimet_policy_manifest,
+    write_calibration_batches,
+)
 from quantize.calibration import build_calibration_records
-from quantize.config import (
-    DEFAULT_BALANCED_OUTPUT_ONNX,
-    DEFAULT_CALIBRATION_CHUNK_SIZE,
-    DEFAULT_CALIBRATION_SOURCE,
-    DEFAULT_DYNAMIC_OUTPUT_ONNX,
-    DEFAULT_FP32_ONNX,
-    DEFAULT_MAX_CALIBRATION_SAMPLES,
-    DEFAULT_MAX_GENERATION_LENGTH,
-    DEFAULT_MODEL_DIR,
-    DEFAULT_ORT_PROVIDER,
-    DEFAULT_OUTPUT_ONNX,
-    DEFAULT_PERCENTILE,
-    DEFAULT_SIZE_BUDGET_MB,
-)
-from quantize.model_introspection import load_model_node_names, summarize_quantization_plan
-from quantize.presets import build_quantization_plan, get_preset_spec, list_supported_presets
-from quantize.qnn import run_qnn_static_quantization
-from quantize.runner import (
-    build_size_budget_message,
-    file_size_mb,
-    recommend_next_steps,
-    resolve_calibration_method,
-    run_dynamic_quantization,
-    run_static_quantization,
-)
-from quantize.types import AimetQuantizeRecipe, AiHubQuantizeRecipe, CalibrationSample, VpcdLocalQualityPolicySummary
+from quantize.fixed_shapes import freeze_model_inputs
+from quantize.model_introspection import load_model_node_names
+from quantize.types import AimetQuantizeRecipe, CalibrationSample, VpcdLocalQualityPolicySummary
+from tools.paths import find_repo_root
 
-NAME = 'vpcd'
-DEFAULT_PRESET = 'sd8g2_quality'
-AIHUB_DTYPE_NAME_BY_QUANT_TYPE = {
-    "quint8": "INT8",
-    "qint8": "INT8",
-    "quint16": "INT16",
-    "qint16": "INT16",
-}
+NAME = "vpcd"
+DEFAULT_MODEL_DIR = Path("assets") / "vietnamese-punc-cap-denorm-v1"
+DEFAULT_FP32_ONNX = DEFAULT_MODEL_DIR / "onnx" / "model.fp32.onnx"
+DEFAULT_CALIBRATION_SOURCE = Path("build") / "calibration" / "vlsp2020" / "vpcd_transcriptions.txt"
+DEFAULT_ORT_PROVIDER = "cpu"
+DEFAULT_MAX_CALIBRATION_SAMPLES = 24
+DEFAULT_MAX_GENERATION_LENGTH = 32
 DEFAULT_AIMET_PARAM_TYPE = "int8"
-DEFAULT_AIMET_ACTIVATION_TYPE = "int8"
+DEFAULT_AIMET_ACTIVATION_TYPE = "int16"
 DEFAULT_AIMET_QUANT_SCHEME = "min_max"
-DEFAULT_AIMET_CONFIG_FILE = "default"
-DEFAULT_AIMET_POLICY_MODE = "broad_default"
+DEFAULT_AIMET_CONFIG_FILE = "vpcd_matmul_only"
+DEFAULT_AIMET_POLICY_MODE = "local_quality_parity"
+DEFAULT_AIMET_OUTPUT_ROOT = Path("build") / "quantize" / "vpcd" / "local_aimet"
+DEFAULT_FIXED_BUNDLE_MANIFEST = Path("build") / "model_bundle" / "vpcd" / "qnn_fixed_1024x128" / "bundle_manifest.json"
+LOCAL_QUALITY_POLICY_REFERENCE = "local_quality_parity"
+LOCAL_QUALITY_QUANTIZABLE_OP_TYPES = ("MatMul",)
 
 
 def apply_default_arguments(parser) -> None:
-    parser.add_argument('--model-dir', default=str(DEFAULT_MODEL_DIR))
-    parser.add_argument('--fp32-onnx', default=str(DEFAULT_FP32_ONNX))
-    parser.add_argument('--output')
-    parser.add_argument('--calibration-text', '--calibration-source', dest='calibration_text', default=str(DEFAULT_CALIBRATION_SOURCE), help='Duong dan toi file txt hoac thu muc chua nhieu file txt calibration.')
-    parser.add_argument('--preset', default=DEFAULT_PRESET)
-    parser.add_argument('--max-calibration-samples', type=int, default=DEFAULT_MAX_CALIBRATION_SAMPLES)
-    parser.add_argument('--max-generation-length', type=int, default=DEFAULT_MAX_GENERATION_LENGTH)
-    parser.add_argument('--calibration-chunk-size', type=int, default=DEFAULT_CALIBRATION_CHUNK_SIZE)
-    parser.add_argument('--ort-provider', choices=('cuda', 'cpu'), default=DEFAULT_ORT_PROVIDER)
-    parser.add_argument('--size-budget-mb', type=float, default=DEFAULT_SIZE_BUDGET_MB)
-    parser.add_argument('--percentile', type=float, default=DEFAULT_PERCENTILE)
-    parser.add_argument('--calibration-method', choices=('minmax', 'entropy', 'percentile', 'distribution'))
-    parser.add_argument('--per-channel', action='store_true', default=None)
-    parser.add_argument('--no-per-channel', dest='per_channel', action='store_false')
-    parser.add_argument('--extra-exclude-pattern', action='append', default=[])
-    parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument("--model-dir", default=str(DEFAULT_MODEL_DIR))
+    parser.add_argument("--fp32-onnx", default=str(DEFAULT_FP32_ONNX))
+    parser.add_argument("--output-root", default=str(DEFAULT_AIMET_OUTPUT_ROOT))
+    parser.add_argument(
+        "--calibration-text",
+        "--calibration-source",
+        dest="calibration_text",
+        default=str(DEFAULT_CALIBRATION_SOURCE),
+        help="Duong dan toi file txt hoac thu muc chua nhieu file txt calibration.",
+    )
+    parser.add_argument("--max-calibration-samples", type=int, default=DEFAULT_MAX_CALIBRATION_SAMPLES)
+    parser.add_argument("--max-generation-length", type=int, default=DEFAULT_MAX_GENERATION_LENGTH)
+    parser.add_argument("--ort-provider", choices=("cuda", "cpu"), default=DEFAULT_ORT_PROVIDER)
+    parser.add_argument("--fixed-bundle-manifest", default=str(DEFAULT_FIXED_BUNDLE_MANIFEST))
+    parser.add_argument("--aimet-param-type", default=DEFAULT_AIMET_PARAM_TYPE)
+    parser.add_argument("--aimet-activation-type", default=DEFAULT_AIMET_ACTIVATION_TYPE)
+    parser.add_argument("--aimet-quant-scheme", default=DEFAULT_AIMET_QUANT_SCHEME)
+    parser.add_argument("--aimet-config-file", default=DEFAULT_AIMET_CONFIG_FILE)
+    parser.add_argument("--aimet-policy-mode", default=DEFAULT_AIMET_POLICY_MODE)
+    parser.add_argument("--aimet-service-url", default=DEFAULT_AIMET_SERVICE_URL)
+    parser.add_argument("--aimet-service-workspace-root", default=DEFAULT_AIMET_SERVICE_WORKSPACE_ROOT)
+    parser.add_argument("--aimet-health-timeout-seconds", type=float, default=DEFAULT_AIMET_HEALTH_TIMEOUT_SECONDS)
+    parser.add_argument("--dry-run", action="store_true")
 
 
 def validate_args(args) -> None:
-    if args.preset not in list_supported_presets():
-        raise ValueError(f'Unsupported vpcd preset: {args.preset}')
-    if args.calibration_chunk_size is not None and args.calibration_chunk_size < 1:
-        raise ValueError('--calibration-chunk-size phai >= 1.')
+    if int(args.max_calibration_samples) < 1:
+        raise ValueError("--max-calibration-samples phai >= 1.")
+    if int(args.max_generation_length) < 1:
+        raise ValueError("--max-generation-length phai >= 1.")
+    if str(args.aimet_param_type).strip().lower() not in {"int8", "int16"}:
+        raise ValueError(f"Unsupported AIMET param type: {args.aimet_param_type!r}")
+    if str(args.aimet_activation_type).strip().lower() not in {"int8", "int16"}:
+        raise ValueError(f"Unsupported AIMET activation type: {args.aimet_activation_type!r}")
+    if not str(args.aimet_service_url).strip():
+        raise ValueError("--aimet-service-url must not be empty.")
 
 
-def _resolve_output_path(args) -> Path:
-    if args.output:
-        return Path(args.output)
-    if args.preset == 'sd8g2_balanced':
-        return DEFAULT_BALANCED_OUTPUT_ONNX
-    if args.preset == 'baseline_dynamic_int8':
-        return DEFAULT_DYNAMIC_OUTPUT_ONNX
-    return DEFAULT_OUTPUT_ONNX
-
-
-def resolve_vpcd_aihub_quantize_dtype_names(*, preset: str = DEFAULT_PRESET) -> dict[str, str]:
-    spec = get_preset_spec(preset)
-    activation_type = str(spec.activation_type).strip().lower()
-    weight_type = str(spec.weight_type).strip().lower()
-    resolved_activation_dtype = AIHUB_DTYPE_NAME_BY_QUANT_TYPE.get(activation_type)
-    resolved_weight_dtype = AIHUB_DTYPE_NAME_BY_QUANT_TYPE.get(weight_type)
-    if resolved_activation_dtype is None or resolved_weight_dtype is None:
-        raise ValueError(
-            "Unsupported VPCD quantization types for AI Hub mapping: "
-            f"activation_type={activation_type!r}, weight_type={weight_type!r}"
-        )
-    return {
-        "weights_dtype_name": resolved_weight_dtype,
-        "activations_dtype_name": resolved_activation_dtype,
-    }
-
-
-def summarize_vpcd_local_quality_policy(
-    fp32_onnx_path: str | Path,
-    *,
-    preset: str = DEFAULT_PRESET,
-    extra_exclude_patterns: Sequence[str] | None = None,
-) -> VpcdLocalQualityPolicySummary:
-    resolved_model_path = Path(fp32_onnx_path).resolve()
-    node_names = load_model_node_names(resolved_model_path)
-    plan = build_quantization_plan(
-        node_names=node_names,
-        preset=preset,
-        extra_exclude_patterns=extra_exclude_patterns,
-    )
-    excluded_node_names = tuple(str(node_name) for node_name in plan.nodes_to_exclude)
-    excluded_node_set = set(excluded_node_names)
-    model = onnx.load(resolved_model_path.as_posix(), load_external_data=False)
-    quantizable_matmul_node_names = tuple(
-        str(node.name)
-        for node in model.graph.node
-        if node.name and node.op_type in plan.op_types_to_quantize and node.name not in excluded_node_set
-    )
-    return VpcdLocalQualityPolicySummary(
-        preset=str(plan.preset),
-        total_named_nodes=len(node_names),
-        excluded_node_count=len(excluded_node_names),
-        excluded_decoder_node_count=sum(1 for node_name in excluded_node_names if "/decoder/" in node_name),
-        excluded_lm_head_node_count=sum(1 for node_name in excluded_node_names if "/lm_head/" in node_name),
-        quantizable_matmul_node_count=len(quantizable_matmul_node_names),
-        op_types_to_quantize=tuple(str(op_type) for op_type in plan.op_types_to_quantize),
-        excluded_node_names=excluded_node_names,
-        quantizable_matmul_node_names=quantizable_matmul_node_names,
+def _normalize_variant_fragment(value: str) -> str:
+    return (
+        str(value)
+        .strip()
+        .lower()
+        .replace("post_training_", "")
+        .replace(" ", "_")
+        .replace("-", "_")
     )
 
 
-def _build_aimet_variant_name(
+def build_vpcd_aimet_variant_name(
     *,
     param_type: str,
     activation_type: str,
     quant_scheme: str,
     policy_mode: str,
 ) -> str:
-    def _normalize_fragment(value: str) -> str:
-        return (
-            str(value)
-            .strip()
-            .lower()
-            .replace("post_training_", "")
-            .replace(" ", "_")
-            .replace("-", "_")
-        )
-
     return "_".join(
         (
-            f"w{_normalize_fragment(param_type)}",
-            f"a{_normalize_fragment(activation_type)}",
-            _normalize_fragment(quant_scheme),
-            _normalize_fragment(policy_mode),
+            f"w{_normalize_variant_fragment(param_type)}",
+            f"a{_normalize_variant_fragment(activation_type)}",
+            _normalize_variant_fragment(quant_scheme),
+            _normalize_variant_fragment(policy_mode),
         )
+    )
+
+
+def _is_excluded_from_local_quality_policy(node_name: str) -> bool:
+    normalized_name = str(node_name)
+    return "/decoder/" in normalized_name or normalized_name == "/lm_head/MatMul"
+
+
+def summarize_vpcd_local_quality_policy(
+    fp32_onnx_path: str | Path,
+) -> VpcdLocalQualityPolicySummary:
+    resolved_model_path = Path(fp32_onnx_path).resolve()
+    node_names = load_model_node_names(resolved_model_path)
+    excluded_node_names = tuple(node_name for node_name in node_names if _is_excluded_from_local_quality_policy(node_name))
+    excluded_node_set = set(excluded_node_names)
+
+    model = onnx.load(resolved_model_path.as_posix(), load_external_data=False)
+    quantizable_matmul_node_names = tuple(
+        str(node.name)
+        for node in model.graph.node
+        if node.name and node.op_type in LOCAL_QUALITY_QUANTIZABLE_OP_TYPES and node.name not in excluded_node_set
+    )
+    return VpcdLocalQualityPolicySummary(
+        preset=LOCAL_QUALITY_POLICY_REFERENCE,
+        total_named_nodes=len(node_names),
+        excluded_node_count=len(excluded_node_names),
+        excluded_decoder_node_count=sum(1 for node_name in excluded_node_names if "/decoder/" in node_name),
+        excluded_lm_head_node_count=sum(1 for node_name in excluded_node_names if node_name == "/lm_head/MatMul"),
+        quantizable_matmul_node_count=len(quantizable_matmul_node_names),
+        op_types_to_quantize=LOCAL_QUALITY_QUANTIZABLE_OP_TYPES,
+        excluded_node_names=excluded_node_names,
+        quantizable_matmul_node_names=quantizable_matmul_node_names,
     )
 
 
@@ -177,9 +158,7 @@ def _pad_array_to_target_shape(
             f"Expected array with rank {len(normalized_target_shape)}, got shape {tuple(array.shape)}."
         )
     if any(current > target for current, target in zip(array.shape, normalized_target_shape)):
-        raise ValueError(
-            f"Input shape {tuple(array.shape)} exceeds fixed target shape {normalized_target_shape}."
-        )
+        raise ValueError(f"Input shape {tuple(array.shape)} exceeds fixed target shape {normalized_target_shape}.")
     if tuple(array.shape) == normalized_target_shape:
         return array
 
@@ -189,7 +168,7 @@ def _pad_array_to_target_shape(
     return padded
 
 
-def calibration_records_to_aihub_dataset(
+def calibration_records_to_fixed_input_dataset(
     records: Sequence[CalibrationSample],
     *,
     fixed_input_shapes: dict[str, Sequence[int]] | None = None,
@@ -226,7 +205,7 @@ def calibration_records_to_fixed_input_batches(
     fixed_input_shapes: dict[str, Sequence[int]] | None = None,
     pad_values: dict[str, int] | None = None,
 ) -> tuple[CalibrationSample, ...]:
-    dataset = calibration_records_to_aihub_dataset(
+    dataset = calibration_records_to_fixed_input_dataset(
         records,
         fixed_input_shapes=fixed_input_shapes,
         pad_values=pad_values,
@@ -246,9 +225,7 @@ def calibration_records_to_fixed_input_batches(
     return tuple(batches)
 
 
-def summarize_aihub_calibration_dataset(
-    dataset: dict[str, list[np.ndarray]],
-) -> dict[str, object]:
+def summarize_fixed_input_calibration_dataset(dataset: dict[str, list[np.ndarray]]) -> dict[str, object]:
     input_order = list(dataset.keys())
     fingerprint = hashlib.sha256()
     fingerprint.update(len(input_order).to_bytes(8, "little", signed=False))
@@ -287,57 +264,6 @@ def summarize_aihub_calibration_dataset(
         "input_shapes": input_shapes,
         "dataset_fingerprint": fingerprint.hexdigest(),
     }
-
-
-def build_vpcd_aihub_quantize_recipe(
-    *,
-    model_dir: str | Path,
-    fp32_onnx_path: str | Path,
-    calibration_source_path: str | Path,
-    preset: str = DEFAULT_PRESET,
-    max_calibration_samples: int = DEFAULT_MAX_CALIBRATION_SAMPLES,
-    max_generation_length: int = DEFAULT_MAX_GENERATION_LENGTH,
-    ort_provider: str = DEFAULT_ORT_PROVIDER,
-    fixed_input_shapes: dict[str, Sequence[int]] | None = None,
-    pad_token_id: int = 1,
-) -> AiHubQuantizeRecipe:
-    records, stats = build_calibration_records(
-        model_dir=Path(model_dir),
-        fp32_onnx_path=Path(fp32_onnx_path),
-        calibration_source_path=Path(calibration_source_path),
-        max_calibration_samples=max_calibration_samples,
-        max_generation_length=max_generation_length,
-        ort_provider=ort_provider,
-    )
-    if not records:
-        raise ValueError('Khong tao duoc calibration records tu file dau vao.')
-
-    spec = get_preset_spec(preset)
-    dtype_names = resolve_vpcd_aihub_quantize_dtype_names(preset=spec.name)
-    calibration_dataset = calibration_records_to_aihub_dataset(
-        records,
-        fixed_input_shapes=fixed_input_shapes,
-        pad_values={
-            "input_ids": int(pad_token_id),
-            "attention_mask": 0,
-            "decoder_input_ids": int(pad_token_id),
-            "decoder_attention_mask": 0,
-        },
-    )
-    recipe_stats = dict(stats)
-    recipe_stats["quantize_preset"] = spec.name
-    recipe_stats["activation_type"] = spec.activation_type
-    recipe_stats["weight_type"] = spec.weight_type
-    recipe_stats.update(summarize_aihub_calibration_dataset(calibration_dataset))
-    return AiHubQuantizeRecipe(
-        preset=spec.name,
-        activation_type=spec.activation_type,
-        weight_type=spec.weight_type,
-        activations_dtype_name=dtype_names["activations_dtype_name"],
-        weights_dtype_name=dtype_names["weights_dtype_name"],
-        calibration_dataset=calibration_dataset,
-        calibration_stats=recipe_stats,
-    )
 
 
 def build_vpcd_aimet_quantize_recipe(
@@ -384,7 +310,7 @@ def build_vpcd_aimet_quantize_recipe(
     recipe_stats["quant_scheme"] = str(quant_scheme)
     recipe_stats["config_file"] = str(config_file)
     recipe_stats["policy_mode"] = str(policy_mode)
-    local_quality_policy = summarize_vpcd_local_quality_policy(fp32_onnx_path, preset=DEFAULT_PRESET)
+    local_quality_policy = summarize_vpcd_local_quality_policy(fp32_onnx_path)
     recipe_stats["local_quality_policy"] = {
         "preset": local_quality_policy.preset,
         "total_named_nodes": int(local_quality_policy.total_named_nodes),
@@ -395,11 +321,8 @@ def build_vpcd_aimet_quantize_recipe(
         "op_types_to_quantize": list(local_quality_policy.op_types_to_quantize),
     }
     recipe_stats.update(
-        summarize_aihub_calibration_dataset(
-            {
-                input_name: [np.asarray(sample.inputs[input_name]) for sample in calibration_inputs]
-                for input_name in calibration_inputs[0].inputs.keys()
-            }
+        summarize_fixed_input_calibration_dataset(
+            calibration_records_to_fixed_input_dataset(calibration_inputs)
         )
     )
     return AimetQuantizeRecipe(
@@ -409,7 +332,7 @@ def build_vpcd_aimet_quantize_recipe(
         config_file=str(config_file),
         calibration_inputs=calibration_inputs,
         calibration_stats=recipe_stats,
-        variant_name=_build_aimet_variant_name(
+        variant_name=build_vpcd_aimet_variant_name(
             param_type=str(param_type),
             activation_type=str(activation_type),
             quant_scheme=str(quant_scheme),
@@ -430,81 +353,219 @@ def build_vpcd_aimet_quantize_recipe(
     )
 
 
-def run(args) -> int:
-    validate_args(args)
-    fp32_onnx_path = Path(args.fp32_onnx)
-    output_path = _resolve_output_path(args)
-    model_dir = Path(args.model_dir)
+def _resolve_repo_root() -> Path:
+    return find_repo_root(__file__)
 
-    if not fp32_onnx_path.exists():
-        raise FileNotFoundError(f'Khong tim thay FP32 ONNX: {fp32_onnx_path}')
 
-    node_names = load_model_node_names(fp32_onnx_path)
-    plan = build_quantization_plan(node_names=node_names, preset=args.preset, extra_exclude_patterns=args.extra_exclude_pattern)
+def _resolve_fixed_bundle_manifest_path(path_like: str | Path) -> Path:
+    candidate = Path(path_like)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (_resolve_repo_root() / candidate).resolve()
+
+
+def _resolve_vpcd_fixed_input_shapes_from_bundle(manifest_path: Path) -> tuple[dict[str, tuple[int, int]], int]:
+    manifest = ModelBundleManifest.from_path(manifest_path)
+    if manifest.project != "vpcd":
+        raise ValueError(f"Expected a vpcd bundle manifest, got: {manifest.project}")
+    shapes = resolve_vpcd_model_input_shapes(manifest.metadata)
+    if shapes is None:
+        raise ValueError("VPCD fixed bundle manifest does not expose fixed input shapes.")
+    pad_token_id = int(manifest.metadata.get("pad_token_id", 1))
+    return {
+        "input_ids": tuple(int(value) for value in shapes.input_ids),
+        "attention_mask": tuple(int(value) for value in shapes.attention_mask),
+        "decoder_input_ids": tuple(int(value) for value in shapes.decoder_input_ids),
+        "decoder_attention_mask": tuple(int(value) for value in shapes.decoder_attention_mask),
+    }, pad_token_id
+
+
+def _resolve_output_root(args) -> Path:
+    return Path(args.output_root).resolve()
+
+
+def _write_vpcd_aimet_quantize_report(
+    *,
+    report_path: Path,
+    fixed_model_path: Path,
+    package_dir: Path,
+    qdq_reference_model_path: Path,
+    variant_root: Path,
+    recipe: AimetQuantizeRecipe,
+    package_report: dict[str, Any],
+    service_url: str,
+    config_file_value: str,
+    policy_manifest_path: Path | None,
+) -> dict[str, Any]:
+    payload = {
+        "project": NAME,
+        "source_strategy": "local_aimet_compile_candidate",
+        "source_kind": "local_aimet",
+        "packaging_kind": "aimet_dir",
+        "transformation_kind": "aimet_service_export",
+        "variant_name": recipe.variant_name,
+        "fixed_model_path": fixed_model_path.resolve().as_posix(),
+        "package_dir": package_dir.resolve().as_posix(),
+        "packaging_path": package_dir.resolve().as_posix(),
+        "qdq_reference_model_path": qdq_reference_model_path.resolve().as_posix(),
+        "quantize_root": variant_root.resolve().as_posix(),
+        "quantize_report_path": report_path.resolve().as_posix(),
+        "aimet_service_url": str(service_url),
+        "aimet": {
+            "param_type": recipe.param_type,
+            "activation_type": recipe.activation_type,
+            "quant_scheme": recipe.quant_scheme,
+            "config_file": str(config_file_value),
+            "variant_name": recipe.variant_name,
+            "policy_mode": recipe.policy_mode,
+        },
+        "calibration": dict(recipe.calibration_stats),
+        "local_quality_policy": dict(recipe.local_quality_policy),
+        "package_report": dict(package_report),
+    }
+    if policy_manifest_path is not None:
+        payload["policy_manifest_path"] = policy_manifest_path.resolve().as_posix()
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return payload
+
+
+def _run_retained_aimet_pipeline(args) -> int:
+    repo_root = _resolve_repo_root()
+    fixed_bundle_manifest_path = _resolve_fixed_bundle_manifest_path(args.fixed_bundle_manifest)
+    fixed_input_shapes, pad_token_id = _resolve_vpcd_fixed_input_shapes_from_bundle(fixed_bundle_manifest_path)
+    output_root = _resolve_output_root(args)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    recipe = build_vpcd_aimet_quantize_recipe(
+        model_dir=Path(args.model_dir),
+        fp32_onnx_path=Path(args.fp32_onnx),
+        calibration_source_path=Path(args.calibration_text),
+        max_calibration_samples=args.max_calibration_samples,
+        max_generation_length=args.max_generation_length,
+        ort_provider=args.ort_provider,
+        fixed_input_shapes=fixed_input_shapes,
+        pad_token_id=pad_token_id,
+        param_type=args.aimet_param_type,
+        activation_type=args.aimet_activation_type,
+        quant_scheme=args.aimet_quant_scheme,
+        config_file=args.aimet_config_file,
+        policy_mode=args.aimet_policy_mode,
+    )
+
+    variant_root = (output_root / str(recipe.variant_name)).resolve()
+    variant_root.mkdir(parents=True, exist_ok=True)
+    fixed_model_path = (variant_root / "model.fp32.fixed.onnx").resolve()
+    calibration_dir = (variant_root / "calibration").resolve()
+    package_dir = (variant_root / "model.option1.aimet").resolve()
+    qdq_reference_model_path = (variant_root / "model.option1.qdq.onnx").resolve()
+    report_path = (variant_root / "model.option1.aimet.report.json").resolve()
+    quantize_report_path = (variant_root / "quantize_report.json").resolve()
+
+    freeze_model_inputs(Path(args.fp32_onnx), fixed_model_path, fixed_input_shapes)
+    write_calibration_batches(recipe.calibration_inputs, calibration_dir)
+
+    config_file_value = str(recipe.config_file)
+    policy_manifest_path: Path | None = None
+    if str(recipe.policy_mode).strip().lower() == "local_quality_parity":
+        config_path = write_aimet_config(
+            build_matmul_only_aimet_config(),
+            variant_root / "aimet.config.json",
+        )
+        policy_manifest_path = write_aimet_policy_manifest(
+            build_vpcd_local_quality_policy_manifest(
+                variant_name=recipe.variant_name,
+                policy_mode=recipe.policy_mode,
+                local_quality_policy=recipe.local_quality_policy,
+            ),
+            variant_root / "aimet.policy.json",
+        )
+        config_file_value = config_path.resolve().as_posix()
 
     if args.dry_run:
-        print(summarize_quantization_plan(plan, node_names))
-        print(f'Project: {NAME}')
-        print(f'FP32 ONNX: {fp32_onnx_path}')
-        print(f'Output: {output_path}')
+        print(f"Project: {NAME}")
+        print(f"Fixed bundle manifest: {fixed_bundle_manifest_path}")
+        print(f"Output root: {output_root}")
+        print(f"Variant root: {variant_root}")
+        print(f"AIMET service URL: {args.aimet_service_url}")
+        print(f"Variant: {recipe.variant_name}")
         return 0
 
-    if not model_dir.exists():
-        raise FileNotFoundError(f'Khong tim thay model dir: {model_dir}')
+    healthcheck_aimet_service(
+        args.aimet_service_url,
+        timeout_seconds=float(args.aimet_health_timeout_seconds),
+    )
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    print(summarize_quantization_plan(plan, node_names))
-
-    if plan.runner_kind == 'dynamic':
-        run_dynamic_quantization(fp32_onnx_path=fp32_onnx_path, output_path=output_path, plan=plan)
-    else:
-        records, stats = build_calibration_records(
-            model_dir=model_dir,
-            fp32_onnx_path=fp32_onnx_path,
-            calibration_source_path=Path(args.calibration_text),
-            max_calibration_samples=args.max_calibration_samples,
-            max_generation_length=args.max_generation_length,
-            ort_provider=args.ort_provider,
-        )
-        if not records:
-            raise ValueError('Khong tao duoc calibration records tu file dau vao.')
-        print(
-            'Calibration stats: '
-            f"requested_provider={stats['requested_provider']}, "
-            f"session_providers={stats['session_providers']}, "
-            f"source_files={stats['source_files']}, "
-            f"text_samples={stats['text_samples']}, "
-            f"records={stats['records']}, "
-            f"max_encoder_len={stats['max_encoder_len']}, "
-            f"max_decoder_len={stats['max_decoder_len']}"
-        )
-        resolved_calibration_method = resolve_calibration_method(args.calibration_method or plan.calibration_method)
-        if plan.runner_kind == 'qnn_static':
-            run_qnn_static_quantization(
-                fp32_onnx_path=fp32_onnx_path,
-                output_path=output_path,
-                plan=plan,
-                records=records,
-                calibration_method=resolved_calibration_method,
-                calibration_chunk_size=args.calibration_chunk_size,
+    export_payload = {
+        "fp32_onnx_path": map_local_path_to_service_workspace(
+            fixed_model_path,
+            repo_root=repo_root,
+            service_workspace_root=args.aimet_service_workspace_root,
+        ),
+        "calibration_dir": map_local_path_to_service_workspace(
+            calibration_dir,
+            repo_root=repo_root,
+            service_workspace_root=args.aimet_service_workspace_root,
+        ),
+        "package_dir": map_local_path_to_service_workspace(
+            package_dir,
+            repo_root=repo_root,
+            service_workspace_root=args.aimet_service_workspace_root,
+        ),
+        "qdq_reference_model_path": map_local_path_to_service_workspace(
+            qdq_reference_model_path,
+            repo_root=repo_root,
+            service_workspace_root=args.aimet_service_workspace_root,
+        ),
+        "model_prefix": "model.option1",
+        "param_type": recipe.param_type,
+        "activation_type": recipe.activation_type,
+        "quant_scheme": recipe.quant_scheme,
+        "config_file": (
+            map_local_path_to_service_workspace(
+                config_file_value,
+                repo_root=repo_root,
+                service_workspace_root=args.aimet_service_workspace_root,
             )
-        else:
-            run_static_quantization(
-                fp32_onnx_path=fp32_onnx_path,
-                output_path=output_path,
-                plan=plan,
-                records=records,
-                calibration_method=resolved_calibration_method,
-                percentile=args.percentile,
-                per_channel=args.per_channel,
-                calibration_chunk_size=args.calibration_chunk_size,
+            if Path(config_file_value).exists()
+            else str(config_file_value)
+        ),
+        "policy_manifest_path": (
+            map_local_path_to_service_workspace(
+                policy_manifest_path,
+                repo_root=repo_root,
+                service_workspace_root=args.aimet_service_workspace_root,
             )
+            if policy_manifest_path is not None
+            else None
+        ),
+    }
+    package_report = request_aimet_service_export(
+        service_url=args.aimet_service_url,
+        export_payload=export_payload,
+    )
+    report_path.write_text(json.dumps(package_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    quantize_report = _write_vpcd_aimet_quantize_report(
+        report_path=quantize_report_path,
+        fixed_model_path=fixed_model_path,
+        package_dir=package_dir,
+        qdq_reference_model_path=qdq_reference_model_path,
+        variant_root=variant_root,
+        recipe=recipe,
+        package_report=package_report,
+        service_url=args.aimet_service_url,
+        config_file_value=config_file_value,
+        policy_manifest_path=policy_manifest_path,
+    )
 
-    size_mb = file_size_mb(output_path)
-    print(f'Project: {NAME}')
-    print(f'Quantized ONNX: {output_path}')
-    print(f'Output size: {size_mb:.2f} MB')
-    print(build_size_budget_message(size_mb, args.size_budget_mb))
-    for recommendation in recommend_next_steps(plan, size_mb, args.size_budget_mb):
-        print(f'Goi y: {recommendation}')
+    print(f"Project: {NAME}")
+    print(f"Variant root: {variant_root}")
+    print(f"Quantize report: {quantize_report_path}")
+    print(f"Package ready: {bool(package_report.get('package_ready', False))}")
+    print(f"Dataset fingerprint: {quantize_report['calibration'].get('dataset_fingerprint', '')}")
     return 0
+
+
+def run(args) -> int:
+    validate_args(args)
+    return _run_retained_aimet_pipeline(args)

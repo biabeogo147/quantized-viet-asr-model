@@ -327,80 +327,49 @@ def test_prepare_vpcd_option1_source_model_defaults_to_local_aimet_compile_candi
     _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
     fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
     _write_minimal_vpcd_fp32_model(fp32_model_path)
-    tokenizer_dir = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1"
-    tokenizer_dir.mkdir(parents=True, exist_ok=True)
-
-    def fake_build_vpcd_aimet_quantize_recipe(**kwargs):
-        return AimetQuantizeRecipe(
-            param_type="int8",
-            activation_type="int16",
-            quant_scheme="min_max",
-            config_file="vpcd_matmul_only",
-            calibration_inputs=(
-                CalibrationSample(
-                    inputs={
-                        "input_ids": np.asarray([[1, 2, 3]], dtype=np.int64),
-                        "attention_mask": np.asarray([[1, 1, 1]], dtype=np.int64),
-                        "decoder_input_ids": np.asarray([[2, 1]], dtype=np.int64),
-                        "decoder_attention_mask": np.asarray([[1, 0]], dtype=np.int64),
-                    }
-                ),
-            ),
-            calibration_stats={"dataset_fingerprint": "abc123"},
-            variant_name="wint8_aint16_min_max_local_quality_parity",
-            policy_mode="local_quality_parity",
-            local_quality_policy={
-                "preset": "sd8g2_quality",
-                "excluded_node_names": ["/model/decoder/Cast", "/lm_head/MatMul"],
-                "op_types_to_quantize": ["MatMul"],
-            },
-        )
-
-    def fake_run_aimet_export_in_docker(**kwargs):
-        package_dir = Path(kwargs["package_dir"])
-        package_dir.mkdir(parents=True, exist_ok=True)
-        (package_dir / "model.option1.onnx").write_bytes(b"onnx")
-        (package_dir / "model.option1.encodings").write_text("{}", encoding="utf-8")
-        qdq_path = Path(kwargs["qdq_reference_model_path"])
-        qdq_path.parent.mkdir(parents=True, exist_ok=True)
-        qdq_path.write_bytes(b"qdq")
-        report_path = Path(kwargs["report_path"])
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report = {
-            "package_dir": package_dir.resolve().as_posix(),
-            "onnx_files": ["model.option1.onnx"],
-            "encodings_files": ["model.option1.encodings"],
-            "data_files": [],
-            "package_ready": True,
-            "package_notes": [],
-            "qdq_reference_model_path": qdq_path.resolve().as_posix(),
-        }
-        report_path.write_text(json.dumps(report), encoding="utf-8")
-        return report
-
-    monkeypatch.setattr("tools.aihub_option1_pilots.build_vpcd_aimet_quantize_recipe", fake_build_vpcd_aimet_quantize_recipe)
-    monkeypatch.setattr("tools.aihub_option1_pilots._run_aimet_export_in_docker", fake_run_aimet_export_in_docker)
+    quantize_root = repo_root / "build" / "quantize" / "vpcd" / "local_aimet" / "wint8_aint16_min_max_local_quality_parity"
+    package_dir = quantize_root / "model.option1.aimet"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / "model.option1.onnx").write_bytes(b"onnx")
+    (package_dir / "model.option1.encodings").write_text("{}", encoding="utf-8")
+    qdq_path = quantize_root / "model.option1.qdq.onnx"
+    qdq_path.write_bytes(b"qdq")
+    fixed_model_path = quantize_root / "model.fp32.fixed.onnx"
+    _write_minimal_vpcd_fp32_model(fixed_model_path)
+    quantize_report_path = quantize_root / "quantize_report.json"
+    quantize_report_path.write_text(
+        json.dumps(
+            {
+                "source_strategy": "local_aimet_compile_candidate",
+                "variant_name": "wint8_aint16_min_max_local_quality_parity",
+                "fixed_model_path": fixed_model_path.resolve().as_posix(),
+                "package_dir": package_dir.resolve().as_posix(),
+                "qdq_reference_model_path": qdq_path.resolve().as_posix(),
+                "aimet_service_url": "http://127.0.0.1:18080",
+            }
+        ),
+        encoding="utf-8",
+    )
 
     source = resolve_vpcd_pilot_source(repo_root)
-    prepared = prepare_vpcd_option1_source_model(
-        source,
-        output_path=repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx",
-    )
+    prepared = prepare_vpcd_option1_source_model(source)
 
     prepared_model = onnx.load(prepared.prepared_model_path.as_posix())
     assert prepared.source_strategy == "local_aimet_compile_candidate"
     assert prepared.is_quantized_source is True
-    assert prepared.prepared_model_path == (
-        repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx"
-    ).resolve()
+    assert prepared.prepared_model_path == fixed_model_path.resolve()
+    assert prepared.packaging_path == package_dir.resolve()
+    assert prepared.diagnostic_model_path == qdq_path.resolve()
     input_dims = {
         value.name: [dim.dim_value if dim.HasField("dim_value") else dim.dim_param for dim in value.type.tensor_type.shape.dim]
         for value in prepared_model.graph.input
     }
-    assert input_dims["input_ids"] == [1, 1024]
-    assert input_dims["attention_mask"] == [1, 1024]
-    assert input_dims["decoder_input_ids"] == [1, 128]
-    assert input_dims["decoder_attention_mask"] == [1, 128]
+    assert input_dims["input_ids"] == ["batch", "encoder_sequence"]
+    assert input_dims["attention_mask"] == ["batch", "encoder_sequence"]
+    assert input_dims["decoder_input_ids"] == ["batch", "decoder_sequence"]
+    assert input_dims["decoder_attention_mask"] == ["batch", "decoder_sequence"]
+
+
 def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(tmp_path, monkeypatch):
     from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
 
@@ -410,68 +379,39 @@ def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(
     _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
     fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
     _write_minimal_vpcd_fp32_model(fp32_model_path)
-    tokenizer_dir = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1"
-    tokenizer_dir.mkdir(parents=True, exist_ok=True)
-
-    seen: dict[str, object] = {}
-
-    def fake_build_vpcd_aimet_quantize_recipe(**kwargs):
-        seen["recipe_kwargs"] = kwargs
-        return AimetQuantizeRecipe(
-            param_type="int8",
-            activation_type="int16",
-            quant_scheme="min_max",
-            config_file="vpcd_matmul_only",
-            calibration_inputs=(
-                CalibrationSample(
-                    inputs={
-                        "input_ids": np.asarray([[1, 2, 3]], dtype=np.int64),
-                        "attention_mask": np.asarray([[1, 1, 1]], dtype=np.int64),
-                        "decoder_input_ids": np.asarray([[2, 1]], dtype=np.int64),
-                        "decoder_attention_mask": np.asarray([[1, 0]], dtype=np.int64),
-                    }
-                ),
-            ),
-            calibration_stats={"dataset_fingerprint": "abc123"},
-            variant_name="wint8_aint16_min_max_local_quality_parity",
-            policy_mode="local_quality_parity",
-            local_quality_policy={
-                "preset": "sd8g2_quality",
-                "excluded_node_names": ["/model/decoder/Cast", "/lm_head/MatMul"],
-                "op_types_to_quantize": ["MatMul"],
-            },
-        )
-
-    def fake_run_aimet_export_in_docker(**kwargs):
-        seen["docker_kwargs"] = kwargs
-        package_dir = Path(kwargs["package_dir"])
-        package_dir.mkdir(parents=True, exist_ok=True)
-        (package_dir / "model.option1.onnx").write_bytes(b"onnx")
-        (package_dir / "model.option1.encodings").write_text("{}", encoding="utf-8")
-        qdq_path = Path(kwargs["qdq_reference_model_path"])
-        qdq_path.parent.mkdir(parents=True, exist_ok=True)
-        qdq_path.write_bytes(b"qdq")
-        report_path = Path(kwargs["report_path"])
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report = {
-            "package_dir": package_dir.resolve().as_posix(),
-            "onnx_files": ["model.option1.onnx"],
-            "encodings_files": ["model.option1.encodings"],
-            "data_files": [],
-            "package_ready": True,
-            "package_notes": [],
-            "qdq_reference_model_path": qdq_path.resolve().as_posix(),
-        }
-        report_path.write_text(json.dumps(report), encoding="utf-8")
-        return report
-
-    monkeypatch.setattr("tools.aihub_option1_pilots.build_vpcd_aimet_quantize_recipe", fake_build_vpcd_aimet_quantize_recipe)
-    monkeypatch.setattr("tools.aihub_option1_pilots._run_aimet_export_in_docker", fake_run_aimet_export_in_docker)
+    quantize_root = repo_root / "build" / "quantize" / "vpcd" / "local_aimet" / "wint8_aint16_min_max_local_quality_parity"
+    package_dir = quantize_root / "model.option1.aimet"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    (package_dir / "model.option1.onnx").write_bytes(b"onnx")
+    (package_dir / "model.option1.encodings").write_text("{}", encoding="utf-8")
+    qdq_path = quantize_root / "model.option1.qdq.onnx"
+    qdq_path.write_bytes(b"qdq")
+    fixed_model_path = quantize_root / "model.fp32.fixed.onnx"
+    _write_minimal_vpcd_fp32_model(fixed_model_path)
+    quantize_report_path = quantize_root / "quantize_report.json"
+    quantize_report_path.write_text(
+        json.dumps(
+            {
+                "source_strategy": "local_aimet_compile_candidate",
+                "variant_name": "wint8_aint16_min_max_local_quality_parity",
+                "fixed_model_path": fixed_model_path.resolve().as_posix(),
+                "package_dir": package_dir.resolve().as_posix(),
+                "qdq_reference_model_path": qdq_path.resolve().as_posix(),
+                "aimet": {
+                    "param_type": "int8",
+                    "activation_type": "int16",
+                    "variant_name": "wint8_aint16_min_max_local_quality_parity",
+                    "policy_mode": "local_quality_parity",
+                },
+                "aimet_service_url": "http://127.0.0.1:18080",
+            }
+        ),
+        encoding="utf-8",
+    )
 
     source = resolve_vpcd_pilot_source(repo_root)
     prepared = prepare_vpcd_option1_source_model(
         source,
-        output_path=repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx",
         strategy="local_aimet_compile_candidate",
     )
 
@@ -481,8 +421,8 @@ def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(
     assert prepared.packaging_path.name == "model.option1.aimet"
     assert prepared.packaging_path.parent.name == "wint8_aint16_min_max_local_quality_parity"
     assert prepared.diagnostic_model_path.name == "model.option1.qdq.onnx"
-    assert prepared.report["aihub_compile_readiness"] == "experimental"
-    assert prepared.report["package_ready"] is True
+    assert prepared.prepared_model_path == fixed_model_path.resolve()
+    assert prepared.report["aimet_service_url"] == "http://127.0.0.1:18080"
     assert prepared.report["aimet"]["param_type"] == "int8"
     assert prepared.report["aimet"]["activation_type"] == "int16"
     assert prepared.report["aimet"]["variant_name"] == "wint8_aint16_min_max_local_quality_parity"
@@ -491,9 +431,7 @@ def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(
     assert prepared.report["qdq_reference_model_path"] == prepared.diagnostic_model_path.resolve().as_posix()
     assert prepared.packaging_path.exists()
     assert prepared.diagnostic_model_path.exists()
-    assert Path(seen["docker_kwargs"]["fp32_onnx_path"]).exists()
-    assert Path(seen["docker_kwargs"]["config_file"]).name == "aimet.config.json"
-    assert Path(seen["docker_kwargs"]["policy_manifest_path"]).name == "aimet.policy.json"
+    assert quantize_report_path.exists()
 
 
 def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):
@@ -699,46 +637,6 @@ def test_build_vpcd_autoregressive_calibration_entries_prefers_text_file(tmp_pat
     assert stats["records"] == 4
 
 
-def test_resolve_vpcd_aihub_quantize_dtype_names_uses_quantize_preset_source_of_truth(tmp_path):
-    from tools.aihub_option1_pilots import resolve_vpcd_aihub_quantize_dtype_names, resolve_vpcd_pilot_source
-
-    repo_root = tmp_path / "repo"
-    _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
-    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
-
-    source = resolve_vpcd_pilot_source(repo_root)
-    dtype_names = resolve_vpcd_aihub_quantize_dtype_names(source)
-
-    assert dtype_names == {
-        "weights_dtype_name": "INT8",
-        "activations_dtype_name": "INT16",
-    }
-
-
-def test_resolve_vpcd_aihub_quantize_dtype_names_prefers_preset_over_stale_bundle_types(tmp_path):
-    from tools.aihub_option1_pilots import resolve_vpcd_aihub_quantize_dtype_names, resolve_vpcd_pilot_source
-
-    repo_root = tmp_path / "repo"
-    _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
-    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
-    manifest_path = bundle_dir / "bundle_manifest.json"
-    manifest = ModelBundleManifest.from_path(manifest_path)
-    manifest.metadata["quantization"]["preset"] = "baseline_dynamic_int8"
-    manifest.metadata["quantization"]["activation_type"] = "quint16"
-    manifest.metadata["quantization"]["weight_type"] = "quint8"
-    manifest.write_json(manifest_path)
-
-    source = resolve_vpcd_pilot_source(repo_root)
-    dtype_names = resolve_vpcd_aihub_quantize_dtype_names(source)
-
-    assert dtype_names == {
-        "weights_dtype_name": "INT8",
-        "activations_dtype_name": "INT8",
-    }
-
-
 def test_strip_model_io_value_info_conflicts_removes_output_duplicates():
     from tools.aihub_option1_pilots import strip_model_io_value_info_conflicts
 
@@ -893,10 +791,10 @@ def test_write_prepared_artifact_record_captures_local_aimet_compile_metadata(tm
     source_model_path.parent.mkdir(parents=True, exist_ok=True)
     source_model_path.write_bytes(b"source-model")
 
-    prepared_model_path = repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx"
+    prepared_model_path = repo_root / "build" / "quantize" / "vpcd" / "local_aimet" / "wint8_aint16_min_max_local_quality_parity" / "model.fp32.fixed.onnx"
     prepared_model_path.parent.mkdir(parents=True, exist_ok=True)
     prepared_model_path.write_bytes(b"prepared-model")
-    packaging_path = repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "wint8_aint16_min_max_local_quality_parity" / "model.option1.aimet"
+    packaging_path = repo_root / "build" / "quantize" / "vpcd" / "local_aimet" / "wint8_aint16_min_max_local_quality_parity" / "model.option1.aimet"
     packaging_path.mkdir(parents=True, exist_ok=True)
 
     config = build_option1_runtime_config(
@@ -927,7 +825,7 @@ def test_write_prepared_artifact_record_captures_local_aimet_compile_metadata(tm
     assert payload["source_strategy"] == "local_aimet_compile_candidate"
     assert payload["source_kind"] == "local_aimet"
     assert payload["packaging_kind"] == "aimet_dir"
-    assert payload["packaging_path"].endswith("build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.aimet")
+    assert payload["packaging_path"].endswith("build/quantize/vpcd/local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.aimet")
     assert payload["compatibility"]["aihub_compile_readiness"] == "experimental"
 
 

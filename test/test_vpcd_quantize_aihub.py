@@ -1,4 +1,7 @@
+import json
+import threading
 from pathlib import Path
+from urllib import request as urllib_request
 
 import numpy as np
 import onnx
@@ -43,21 +46,8 @@ def _write_minimal_vpcd_fp32_model(model_path: Path) -> None:
     onnx.save(model, model_path.as_posix())
 
 
-def test_resolve_vpcd_aihub_quantize_dtype_names_follows_preset_policy():
-    from quantize.projects.vpcd import resolve_vpcd_aihub_quantize_dtype_names
-
-    assert resolve_vpcd_aihub_quantize_dtype_names(preset="sd8g2_quality") == {
-        "weights_dtype_name": "INT8",
-        "activations_dtype_name": "INT16",
-    }
-    assert resolve_vpcd_aihub_quantize_dtype_names(preset="baseline_dynamic_int8") == {
-        "weights_dtype_name": "INT8",
-        "activations_dtype_name": "INT8",
-    }
-
-
-def test_calibration_records_to_aihub_dataset_preserves_input_order():
-    from quantize.projects.vpcd import calibration_records_to_aihub_dataset
+def test_calibration_records_to_fixed_input_dataset_preserves_input_order():
+    from quantize.projects.vpcd import calibration_records_to_fixed_input_dataset
 
     records = [
         CalibrationSample(
@@ -74,7 +64,7 @@ def test_calibration_records_to_aihub_dataset_preserves_input_order():
         ),
     ]
 
-    dataset = calibration_records_to_aihub_dataset(records)
+    dataset = calibration_records_to_fixed_input_dataset(records)
 
     assert list(dataset.keys()) == ["input_ids", "attention_mask"]
     assert len(dataset["input_ids"]) == 2
@@ -82,8 +72,31 @@ def test_calibration_records_to_aihub_dataset_preserves_input_order():
     np.testing.assert_array_equal(dataset["attention_mask"][1], np.asarray([[1, 1, 0]], dtype=np.int64))
 
 
-def test_build_vpcd_aihub_quantize_recipe_uses_autoregressive_records(monkeypatch, tmp_path):
-    from quantize.projects.vpcd import build_vpcd_aihub_quantize_recipe
+def test_summarize_fixed_input_calibration_dataset_fingerprint_is_stable():
+    from quantize.projects.vpcd import summarize_fixed_input_calibration_dataset
+
+    dataset = {
+        "input_ids": [
+            np.asarray([[7, 8, 2, 1]], dtype=np.int64),
+            np.asarray([[7, 8, 1, 1]], dtype=np.int64),
+        ],
+        "attention_mask": [
+            np.asarray([[1, 1, 1, 0]], dtype=np.int64),
+            np.asarray([[1, 1, 0, 0]], dtype=np.int64),
+        ],
+    }
+
+    summary_a = summarize_fixed_input_calibration_dataset(dataset)
+    summary_b = summarize_fixed_input_calibration_dataset(dataset)
+
+    assert summary_a["input_order"] == ["input_ids", "attention_mask"]
+    assert summary_a["input_sample_counts"] == {"input_ids": 2, "attention_mask": 2}
+    assert summary_a["input_dtypes"] == {"input_ids": "int64", "attention_mask": "int64"}
+    assert summary_a["dataset_fingerprint"] == summary_b["dataset_fingerprint"]
+
+
+def test_build_vpcd_aimet_quantize_recipe_uses_autoregressive_records(monkeypatch, tmp_path):
+    from quantize.projects.vpcd import build_vpcd_aimet_quantize_recipe
 
     seen: dict[str, object] = {}
 
@@ -113,11 +126,12 @@ def test_build_vpcd_aihub_quantize_recipe_uses_autoregressive_records(monkeypatc
 
     monkeypatch.setattr("quantize.projects.vpcd.build_calibration_records", fake_build_calibration_records)
 
-    recipe = build_vpcd_aihub_quantize_recipe(
+    _write_minimal_vpcd_fp32_model(tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx")
+
+    recipe = build_vpcd_aimet_quantize_recipe(
         model_dir=tmp_path / "assets" / "vpcd",
         fp32_onnx_path=tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx",
         calibration_source_path=tmp_path / "build" / "calibration" / "vpcd_transcriptions.txt",
-        preset="sd8g2_quality",
         max_calibration_samples=16,
         max_generation_length=32,
         ort_provider="cpu",
@@ -136,12 +150,11 @@ def test_build_vpcd_aihub_quantize_recipe_uses_autoregressive_records(monkeypatc
     assert seen["max_calibration_samples"] == 16
     assert seen["max_generation_length"] == 32
     assert seen["ort_provider"] == "cpu"
-    assert recipe.preset == "sd8g2_quality"
-    assert recipe.activations_dtype_name == "INT16"
-    assert recipe.weights_dtype_name == "INT8"
-    assert recipe.calibration_stats["quantize_preset"] == "sd8g2_quality"
-    assert recipe.calibration_stats["activation_type"] == "quint16"
-    assert recipe.calibration_stats["weight_type"] == "quint8"
+    assert recipe.param_type == "int8"
+    assert recipe.activation_type == "int16"
+    assert recipe.quant_scheme == "min_max"
+    assert recipe.config_file == "vpcd_matmul_only"
+    assert recipe.policy_mode == "local_quality_parity"
     assert recipe.calibration_stats["input_order"] == [
         "input_ids",
         "attention_mask",
@@ -161,32 +174,27 @@ def test_build_vpcd_aihub_quantize_recipe_uses_autoregressive_records(monkeypatc
         "decoder_attention_mask": "int64",
     }
     assert recipe.calibration_stats["dataset_fingerprint"]
-    assert list(recipe.calibration_dataset.keys()) == [
-        "input_ids",
-        "attention_mask",
-        "decoder_input_ids",
-        "decoder_attention_mask",
-    ]
-    assert recipe.calibration_dataset["input_ids"][0].shape == (1, 8)
-    assert recipe.calibration_dataset["attention_mask"][0].shape == (1, 8)
-    assert recipe.calibration_dataset["decoder_input_ids"][0].shape == (1, 4)
-    assert recipe.calibration_dataset["decoder_attention_mask"][0].shape == (1, 4)
+    assert len(recipe.calibration_inputs) == 1
+    assert recipe.calibration_inputs[0].inputs["input_ids"].shape == (1, 8)
+    assert recipe.calibration_inputs[0].inputs["attention_mask"].shape == (1, 8)
+    assert recipe.calibration_inputs[0].inputs["decoder_input_ids"].shape == (1, 4)
+    assert recipe.calibration_inputs[0].inputs["decoder_attention_mask"].shape == (1, 4)
     np.testing.assert_array_equal(
-        recipe.calibration_dataset["input_ids"][0][0, :3],
+        recipe.calibration_inputs[0].inputs["input_ids"][0, :3],
         np.asarray([7, 8, 2], dtype=np.int64),
     )
     np.testing.assert_array_equal(
-        recipe.calibration_dataset["input_ids"][0][0, 3:],
+        recipe.calibration_inputs[0].inputs["input_ids"][0, 3:],
         np.asarray([1, 1, 1, 1, 1], dtype=np.int64),
     )
     np.testing.assert_array_equal(
-        recipe.calibration_dataset["attention_mask"][0][0, 3:],
+        recipe.calibration_inputs[0].inputs["attention_mask"][0, 3:],
         np.asarray([0, 0, 0, 0, 0], dtype=np.int64),
     )
 
 
-def test_build_vpcd_aihub_quantize_recipe_fingerprint_is_stable(monkeypatch, tmp_path):
-    from quantize.projects.vpcd import build_vpcd_aihub_quantize_recipe
+def test_build_vpcd_aimet_quantize_recipe_fingerprint_is_stable(monkeypatch, tmp_path):
+    from quantize.projects.vpcd import build_vpcd_aimet_quantize_recipe
 
     records = [
         CalibrationSample(
@@ -227,7 +235,6 @@ def test_build_vpcd_aihub_quantize_recipe_fingerprint_is_stable(monkeypatch, tmp
         model_dir=tmp_path / "assets" / "vpcd",
         fp32_onnx_path=tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx",
         calibration_source_path=tmp_path / "build" / "calibration" / "vpcd_transcriptions.txt",
-        preset="sd8g2_quality",
         max_calibration_samples=16,
         max_generation_length=32,
         ort_provider="cpu",
@@ -240,8 +247,10 @@ def test_build_vpcd_aihub_quantize_recipe_fingerprint_is_stable(monkeypatch, tmp
         pad_token_id=1,
     )
 
-    recipe_a = build_vpcd_aihub_quantize_recipe(**common_kwargs)
-    recipe_b = build_vpcd_aihub_quantize_recipe(**common_kwargs)
+    _write_minimal_vpcd_fp32_model(tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx")
+
+    recipe_a = build_vpcd_aimet_quantize_recipe(**common_kwargs)
+    recipe_b = build_vpcd_aimet_quantize_recipe(**common_kwargs)
 
     assert recipe_a.calibration_stats["dataset_fingerprint"] == recipe_b.calibration_stats["dataset_fingerprint"]
 
@@ -316,7 +325,7 @@ def test_summarize_vpcd_local_quality_policy_reports_decoder_heavy_exclusions(tm
 
     summary = summarize_vpcd_local_quality_policy(model_path)
 
-    assert summary.preset == "sd8g2_quality"
+    assert summary.preset == "local_quality_parity"
     assert summary.total_named_nodes > 0
     assert summary.excluded_node_count == 2
     assert summary.excluded_decoder_node_count == 1
@@ -392,7 +401,7 @@ def test_build_vpcd_aimet_quantize_recipe_reuses_fixed_shape_calibration(monkeyp
     assert recipe.calibration_stats["dataset_fingerprint"]
     assert recipe.calibration_stats["quantize_backend"] == "aimet"
     assert recipe.calibration_stats["policy_mode"] == "local_quality_parity"
-    assert recipe.calibration_stats["local_quality_policy"]["preset"] == "sd8g2_quality"
+    assert recipe.calibration_stats["local_quality_policy"]["preset"] == "local_quality_parity"
     assert "excluded_node_count" in recipe.local_quality_policy
     assert "quantizable_matmul_node_names" in recipe.local_quality_policy
     assert len(recipe.calibration_inputs) == 2
@@ -402,3 +411,71 @@ def test_build_vpcd_aimet_quantize_recipe_reuses_fixed_shape_calibration(monkeyp
         recipe.calibration_inputs[1].inputs["decoder_attention_mask"][0],
         np.asarray([1, 1, 0, 0], dtype=np.int64),
     )
+
+
+def test_quantize_cli_defaults_vpcd_to_retained_aimet_only():
+    from quantize.cli import parse_args
+
+    args = parse_args(["--project", "vpcd"])
+
+    assert args.output_root == str(Path("build") / "quantize" / "vpcd" / "local_aimet")
+    assert args.aimet_service_url == "http://127.0.0.1:18080"
+    assert not hasattr(args, "pipeline")
+    assert not hasattr(args, "preset")
+
+
+def test_aimet_service_http_contract_supports_health_and_export(tmp_path):
+    from http.server import ThreadingHTTPServer
+
+    from quantize.aimet_service import build_handler_class
+
+    seen: dict[str, object] = {}
+
+    def fake_export_callback(payload: dict[str, object]) -> dict[str, object]:
+        seen["payload"] = payload
+        return {
+            "package_ready": True,
+            "package_dir": str(tmp_path / "model.option1.aimet"),
+            "qdq_reference_model_path": str(tmp_path / "model.option1.qdq.onnx"),
+        }
+
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0),
+        build_handler_class(export_callback=fake_export_callback, version_payload={"service": "aimet-test"}),
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_port}"
+
+        with urllib_request.urlopen(f"{base_url}/healthz", timeout=5) as response:
+            health_payload = json.loads(response.read().decode("utf-8"))
+        assert health_payload["status"] == "ok"
+
+        export_request = {
+            "fp32_onnx_path": "/workspace/assets/model.fp32.fixed.onnx",
+            "calibration_dir": "/workspace/build/quantize/vpcd/local_aimet/calibration",
+            "package_dir": "/workspace/build/quantize/vpcd/local_aimet/model.option1.aimet",
+            "qdq_reference_model_path": "/workspace/build/quantize/vpcd/local_aimet/model.option1.qdq.onnx",
+            "config_file": "/workspace/build/quantize/vpcd/local_aimet/aimet.config.json",
+            "policy_manifest_path": "/workspace/build/quantize/vpcd/local_aimet/aimet.policy.json",
+            "param_type": "int8",
+            "activation_type": "int16",
+            "quant_scheme": "min_max",
+            "model_prefix": "model.option1",
+        }
+        request = urllib_request.Request(
+            f"{base_url}/export",
+            data=json.dumps(export_request).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib_request.urlopen(request, timeout=5) as response:
+            export_payload = json.loads(response.read().decode("utf-8"))
+
+        assert export_payload["package_ready"] is True
+        assert seen["payload"] == export_request
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)

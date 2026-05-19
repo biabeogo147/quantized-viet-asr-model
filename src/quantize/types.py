@@ -10,41 +10,13 @@ class CalibrationSample:
 
 
 @dataclass(frozen=True)
-class PresetSpec:
-    name: str
-    runner_kind: str
-    op_types_to_quantize: tuple[str, ...]
-    exclusion_patterns: tuple[str, ...]
-    calibration_method: str
-    percentile: float
-    per_channel: bool
-    activation_type: str
-    weight_type: str
-
-
-@dataclass(frozen=True)
 class QuantizationPlan:
     preset: str
-    runner_kind: str
     op_types_to_quantize: tuple[str, ...]
-    exclusion_patterns: tuple[str, ...]
     nodes_to_exclude: tuple[str, ...]
-    calibration_method: str
-    percentile: float
     per_channel: bool
     activation_type: str
     weight_type: str
-
-
-@dataclass(frozen=True)
-class AiHubQuantizeRecipe:
-    preset: str
-    activation_type: str
-    weight_type: str
-    activations_dtype_name: str
-    weights_dtype_name: str
-    calibration_dataset: dict[str, list[np.ndarray]]
-    calibration_stats: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -68,28 +40,9 @@ class AimetQuantizeRecipe:
     config_file: str
     calibration_inputs: tuple[CalibrationSample, ...]
     calibration_stats: dict[str, Any]
-    variant_name: str = "w8a8_min_max_default"
-    policy_mode: str = "broad_default"
+    variant_name: str
+    policy_mode: str
     local_quality_policy: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class LocalQdqCompatibilityReport:
-    model_path: str
-    opsets: dict[str, int]
-    qdq_domains: dict[str, int]
-    ms_qdq_node_count: int
-    main_qdq_node_count: int
-    uses_uint16_qdq: bool
-    uses_int16_qdq: bool
-    uses_quantized_weight_initializers: bool
-    quantized_weight_initializer_count: int
-    initializer_dtypes: dict[str, int]
-    packaging_kind: str
-    packaging_ready: bool
-    packaging_notes: tuple[str, ...]
-    aihub_compile_readiness: str
-    readiness_flags: tuple[str, ...]
 
 
 @dataclass(frozen=True)

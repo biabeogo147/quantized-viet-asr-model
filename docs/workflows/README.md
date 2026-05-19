@@ -1,37 +1,24 @@
 # Workflow Docs
 
-This folder holds operator-facing how-to docs.
-
-If you are choosing what to run next, start here.
+Use these docs as short operator runbooks.
 
 ## Read order
 
-1. `docs/workflows/export-verify-smoke.md`
-   - export and verify the baseline bundles
-2. `docs/workflows/quantize-qnn-candidates.md`
-   - build the QNN-oriented candidate bundles
-3. `docs/workflows/android-handoff.md`
-   - sync verified bundles into BKMeeting
-4. `docs/workflows/option1-overview.md`
-   - understand the current `Option 1` AI Hub flow
-5. `docs/workflows/option1-rerun.md`
-   - run the retained `Phase 2 + Phase 3` notebook flow
-6. `docs/workflows/option1-promotion-handoff.md`
-   - package `Phase 4 + Phase 5` evidence and hand it toward BKMeeting
+1. [export-verify-smoke.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/export-verify-smoke.md)
+   - baseline export and verify flow
+2. [option1-overview.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/option1-overview.md)
+   - retained-lane map for `Option 1`
+3. [option1-rerun.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/option1-rerun.md)
+   - rerun Phase 2 and Phase 3
+4. [option1-promotion-handoff.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/option1-promotion-handoff.md)
+   - Phase 4, Phase 5, and promotion packaging
+5. [android-handoff.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/android-handoff.md)
+   - BKMeeting sync and handoff boundary
 
-## Scope split
+## Decision docs
 
-Use the workflow docs for step-by-step execution.
+When you need lane history or retained decisions, read:
 
-Use the QNN docs when you need status or decisions:
-
-- `docs/qnn/option1-retained-lanes.md`
-- `docs/qnn/model-quantization.md`
-- `docs/qnn/preflight.md`
-- `docs/qnn/validation-log.md`
-
-## Compatibility aliases
-
-Some older Option 1 filenames remain in this folder as short aliases so existing plan docs and notes still resolve cleanly.
-
-They are not the canonical docs anymore.
+- [option1-retained-lanes.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/qnn/option1-retained-lanes.md)
+- [model-quantization.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/qnn/model-quantization.md)
+- [preflight.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/qnn/preflight.md)

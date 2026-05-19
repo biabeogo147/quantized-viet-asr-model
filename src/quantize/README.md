@@ -1,290 +1,53 @@
 # Quantize Module
 
-`src/quantize/` contains the shared multi-project quantization framework. It currently serves two use cases:
+`src/quantize/` now keeps only the two retained quantization lanes used by this repo:
 
-- quantizing the punctuation model `vpcd`
-- quantizing Zipformer to produce the `qnn_u16u8` candidate bundle
+- `zipformer`: local QNN-oriented PTQ/QDQ bundle generation
+- `vpcd`: local AIMET service-backed quantize producer
 
-For the canonical repo-wide quantization and candidate-prep workflow, use:
+Everything tied only to retired VPCD lanes has been removed.
 
-- `docs/workflows/quantize-qnn-candidates.md`
-- `docs/qnn/preflight.md`
+## Entry point
 
-## Goals
-
-- clearly separate generic logic from project-specific logic
-- keep calibration, presets, runners, QNN helpers, and reports in one place
-- support the Zipformer path from fixed-shape preparation -> PTQ + QDQ -> candidate bundle export
-
-## File map
-
-```text
-python-model-test/src/quantize/
-  cli.py
-  calibration.py
-  config.py
-  evaluate.py
-  fixed_shapes.py
-  model_introspection.py
-  presets.py
-  qnn.py
-  reports.py
-  runner.py
-  runtime.py
-  types.py
-  projects/
-    __init__.py
-    vpcd.py
-    zipformer.py
-  README.md
-```
-
-## Command setup
-
-Examples below assume you run commands from `python-model-test/`.
-
-## What each script is responsible for
-
-### `cli.py`
-
-Role:
-- shared entrypoint for the quantize module
-- parses `--project` first
-- routes the parser and the runner to the correct project adapter
-
-Main functions:
-- `_build_project_probe_parser()`
-- `parse_args(argv=None)`
-- `main(argv=None)`
-
-### `types.py`
-
-Role:
-- declares dataclasses used throughout the module
-
-Main classes:
-- `CalibrationSample`
-- `PresetSpec`
-- `QuantizationPlan`
-
-### `config.py`
-
-Role:
-- stores default paths and numeric defaults for the older punctuation flow
-- currently used by project `vpcd`
-
-### `calibration.py`
-
-Role:
-- creates calibration records for static quantization
-- normalizes provider selection and sample padding
-
-Main classes and functions:
-- `ListCalibrationDataReader`
-  - adapter between a list of `CalibrationSample` values and the ORT quantization API
-- `resolve_ort_providers(...)`
-- `iter_calibration_texts(...)`
-- `iter_calibration_files(...)`
-- `make_calibration_records(...)`
-- `pad_calibration_samples(...)`
-- `load_decoder_start_token_id(...)`
-- `greedy_decode_ids(...)`
-- `build_calibration_records(...)`
-
-### `presets.py`
-
-Role:
-- contains presets for punctuation static/dynamic quantization
-- maps exclusion patterns into `QuantizationPlan`
-
-Main functions:
-- `list_supported_presets()`
-- `get_preset_spec(preset)`
-- `build_quantization_plan(node_names, preset, extra_exclude_patterns=None)`
-
-### `runner.py`
-
-Role:
-- contains the generic quantization runners for static and dynamic paths
-
-Main functions:
-- `resolve_calibration_method(...)`
-- `run_static_quantization(...)`
-- `_run_static_quantization_chunked(...)`
-- `run_dynamic_quantization(...)`
-- `file_size_mb(...)`
-- `build_size_budget_message(...)`
-- `recommend_next_steps(...)`
-
-### `qnn.py`
-
-Role:
-- helper module for QNN-targeted static quantization
-- wraps `qnn_preprocess_model` and `get_qnn_qdq_config`
-
-Main functions:
-- `resolve_quant_type(...)`
-- `resolve_safe_stride(...)`
-- `run_qnn_static_quantization(...)`
-
-### `fixed_shapes.py`
-
-Role:
-- freezes ONNX input shapes before quantization
-- especially important for Zipformer because NPU/QNN flows prefer fixed shapes over dynamic ones
-
-Main function:
-- `freeze_model_inputs(model_path, output_path, input_shapes)`
-
-### `evaluate.py`
-
-Role:
-- thin bridge between quantization and `model_bundle.verifier`
-- lets the quantize phase call verification without duplicating bundle logic
-
-Main functions:
-- `evaluate_bundle_against_model_dir(...)`
-- `evaluate_candidate_bundle(...)`
-
-### `reports.py`
-
-Role:
-- defines the JSON report schema used to persist quantization results
-
-Main classes:
-- `ComponentQuantizationReport`
-- `QuantizationReport`
-
-### `model_introspection.py`
-
-Role:
-- reads named nodes from ONNX graphs
-- generates dry-run summaries
-
-Main functions:
-- `load_model_node_names(path)`
-- `summarize_quantization_plan(plan, node_names)`
-
-### `runtime.py`
-
-Role:
-- works around temporary-directory and hardlink/copy issues on Windows
-- helps ORT quantization run more reliably in the current workspace
-
-Main classes and functions:
-- `ManualTemporaryDirectory`
-- `isolated_model_input(...)`
-- `temporary_workspace_tempdir(...)`
-
-## Shared dependency from `src/tools/`
-
-`quantize/projects/zipformer.py` relies on `tools.paths.resolve_repo_path(...)` so that:
-- audio manifests can keep repo-relative entries such as `assets/speech/sample-1.mp3`
-- UTF-8 BOM text manifests still load correctly
-- moving modules inside `src/` does not silently break calibration fixture lookup
-
-## Project adapters
-
-Details are documented in `src/quantize/projects/README.md`, but in short:
-
-- `projects/vpcd.py`
-  - routes punctuation quantization through presets
-- `projects/zipformer.py`
-  - collects audio calibration data
-  - freezes shapes for encoder / decoder / joiner
-  - quantizes each component
-  - exports the candidate bundle
-  - writes `quantization_report.json` and `evaluation_report.json`
-  - accepts the canonical preset name `zipformer_sd8g2_balanced`
-  - still accepts the legacy alias `zipformer_sd8g2_qnn_u16u8`
-
-## High-level quantization flows
-
-### Recommended dataset prep for balanced experiments
-
-When you want the same external calibration source to drive both projects:
-
-1. extract a deterministic VLSP subset
-2. use the emitted audio manifest for `zipformer`
-3. use the emitted transcription file for `vpcd`
-
-Example:
+Use:
 
 ```bash
-python -m tools.extract_vlsp2020_calibration_subset \
-  --dataset-root <vlsp_dataset_root> \
-  --max-samples 24 \
-  --output-dir build/calibration/vlsp2020
+python -m quantize --project <zipformer|vpcd> ...
 ```
 
-### VPCD
+`quantize/cli.py` resolves the project adapter and hands control to:
 
-`python -m quantize --project vpcd`
--> load FP32 ONNX
--> build the preset plan
--> run text calibration or dynamic quantization
--> quantize
--> print size-budget guidance and next steps
+- [projects/zipformer.py](/D:/DS-AI/BKMeeting-Research/python-model-test/src/quantize/projects/zipformer.py)
+- [projects/vpcd.py](/D:/DS-AI/BKMeeting-Research/python-model-test/src/quantize/projects/vpcd.py)
 
-VPCD fixed-shape QNN preflight is intentionally a separate packaging step after quantization and bundle export:
+## Retained files
 
-```bash
-python -m tools.prepare_vpcd_qnn_candidate \
-  --source-bundle build/model_bundle/vpcd/vpcd_balanced \
-  --output-dir build/model_bundle/vpcd/qnn_fixed_1024x128
+- `aimet.py`
+  - AIMET service helpers, policy helpers, calibration batch IO, and package export internals
+- `aimet_service.py`
+  - HTTP service used by VPCD local AIMET quantization
+- `calibration.py`
+  - VPCD autoregressive calibration record generation
+- `evaluate.py`
+  - Zipformer candidate-vs-reference verification bridge
+- `fixed_shapes.py`
+  - ONNX input freezing helpers
+- `model_introspection.py`
+  - named-node loading used by Zipformer and VPCD policy summaries
+- `qnn.py`
+  - Zipformer QNN static quantization wrapper
+- `reports.py`
+  - Zipformer quantization report schema
+- `runner.py`
+  - shared retained helper `file_size_mb(...)`
+- `runtime.py`
+  - Windows-safe tempdir helpers used by QNN quantization
+- `types.py`
+  - shared dataclasses for retained flows
 
-python -m verify.qnn_preflight \
-  --project vpcd \
-  --bundle-dir build/model_bundle/vpcd/qnn_fixed_1024x128
-```
-
-This keeps the quantization flow focused on QDQ quality and lets the fixed-shape candidate fail independently if decoder padding or shape freezing needs more work.
-
-Smoke command used successfully:
-
-```bash
-python -m quantize \
-  --project vpcd \
-  --calibration-text build/quantize_smoke/vpcd/calibration.txt \
-  --max-calibration-samples 1 \
-  --output build/quantize_smoke/vpcd/model.qnn.qdq.onnx
-```
-
-Balanced command used successfully:
-
-```bash
-python -m quantize \
-  --project vpcd \
-  --preset sd8g2_balanced \
-  --calibration-text build/calibration/vlsp2020/vpcd_transcriptions.txt \
-  --max-calibration-samples 24 \
-  --output build/vpcd/vpcd_balanced.onnx
-```
+## Retained commands
 
 ### Zipformer
-
-`python -m quantize --project zipformer`
--> load audio fixtures
--> trace encoder / decoder / joiner calibration records
--> freeze fixed shapes
--> run QNN PTQ + QDQ on each component
--> export the `qnn_u16u8` candidate bundle
--> verify the candidate against the reference bundle
--> write reports
-
-Smoke command used successfully:
-
-```bash
-python -m quantize \
-  --project zipformer \
-  --audio-manifest build/quantize_smoke/zipformer/audio_manifest.txt \
-  --output-root build/quantize_smoke/zipformer/output \
-  --bundle-output-dir build/quantize_smoke/zipformer/bundle \
-  --reference-bundle-dir build/quantize_smoke/zipformer/reference \
-  --calibration-chunk-size 1
-```
-
-Balanced command used successfully:
 
 ```bash
 python -m quantize \
@@ -297,8 +60,37 @@ python -m quantize \
   --calibration-chunk-size 4
 ```
 
-## Honest status note
+### VPCD
 
-- the `zipformer/qnn_u16u8` candidate bundle is runnable today
-- exact transcript parity with the FP32 reference is not a strict gate for the quantized runtime candidate
-- broader tuning still needs larger calibration, device-side HTP proof, and benchmark data before any production promotion
+Start the AIMET service first:
+
+```bash
+docker build -t bkmeeting/aimet-onnx-service docker/aimet-onnx-ubuntu2204
+docker run --rm -d --name bkmeeting-aimet-service -p 18080:8080 -v <python-model-test-root>:/workspace bkmeeting/aimet-onnx-service
+```
+
+Then quantize:
+
+```bash
+python -m quantize \
+  --project vpcd \
+  --model-dir assets/vietnamese-punc-cap-denorm-v1 \
+  --fp32-onnx assets/vietnamese-punc-cap-denorm-v1/onnx/model.fp32.onnx \
+  --calibration-text build/calibration/vlsp2020/vpcd_transcriptions.txt \
+  --output-root build/quantize/vpcd/local_aimet \
+  --aimet-param-type int8 \
+  --aimet-activation-type int16 \
+  --aimet-quant-scheme min_max \
+  --aimet-config-file vpcd_matmul_only \
+  --aimet-policy-mode local_quality_parity \
+  --aimet-service-url http://127.0.0.1:18080
+```
+
+The retained canonical VPCD artifact lives under:
+
+- `build/quantize/vpcd/local_aimet/wint8_aint16_min_max_local_quality_parity/`
+
+## Rule of thumb
+
+- If the work is about reusable local quantize artifacts, it belongs in `src/quantize/`.
+- If the work is about AI Hub compile/run evidence, it belongs in `src/tools/` and `build/aihub/`.

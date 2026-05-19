@@ -140,3 +140,16 @@ def test_zipformer_validate_args_accepts_balanced_preset():
     args = parser.parse_args(['--preset', 'zipformer_sd8g2_balanced'])
 
     validate_args(args)
+
+
+def test_zipformer_validate_args_rejects_retired_legacy_alias():
+    from quantize.projects.zipformer import apply_default_arguments, validate_args
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    apply_default_arguments(parser)
+
+    args = parser.parse_args(['--preset', 'zipformer_sd8g2_qnn_u16u8'])
+
+    with pytest.raises(ValueError, match="Unsupported zipformer preset"):
+        validate_args(args)
