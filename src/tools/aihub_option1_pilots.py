@@ -29,10 +29,15 @@ from quantize.calibration import (
     resolve_ort_providers,
 )
 from quantize.projects.vpcd import (
+    DEFAULT_AIMET_ACTIVATION_TYPE,
+    DEFAULT_AIMET_CONFIG_FILE,
     DEFAULT_AIMET_OUTPUT_ROOT,
+    DEFAULT_AIMET_PARAM_TYPE,
+    DEFAULT_AIMET_POLICY_MODE,
+    DEFAULT_AIMET_QUANT_SCHEME,
     DEFAULT_CALIBRATION_SOURCE as VPCD_DEFAULT_CALIBRATION_SOURCE,
-    build_vpcd_aimet_quantize_recipe,
     build_vpcd_aimet_variant_name,
+    build_vpcd_aimet_quantize_recipe,
     calibration_records_to_fixed_input_dataset,
 )
 from quantize.fixed_shapes import freeze_model_inputs
@@ -773,13 +778,6 @@ def _resolve_default_vpcd_local_aimet_output_root(repo_root: Path) -> Path:
 def _build_vpcd_local_aimet_quantize_command_hint(
     *,
     source: VpcdPilotSource,
-    calibration_source_path: Path,
-    aimet_param_type: str,
-    aimet_activation_type: str,
-    aimet_quant_scheme: str,
-    aimet_config_file: str,
-    aimet_policy_mode: str,
-    aimet_service_url: str,
 ) -> str:
     model_dir = resolve_vpcd_model_dir(source)
     fp32_source_path = resolve_vpcd_fp32_source_model_path(source)
@@ -788,47 +786,30 @@ def _build_vpcd_local_aimet_quantize_command_hint(
         "--project vpcd "
         f"--model-dir {model_dir} "
         f"--fp32-onnx {fp32_source_path} "
-        f"--calibration-text {calibration_source_path} "
+        f"--calibration-text {_resolve_default_vpcd_calibration_source_path(source.repo_root)} "
         f"--output-root {_resolve_default_vpcd_local_aimet_output_root(source.repo_root)} "
-        f"--aimet-param-type {aimet_param_type} "
-        f"--aimet-activation-type {aimet_activation_type} "
-        f"--aimet-quant-scheme {aimet_quant_scheme} "
-        f"--aimet-config-file {aimet_config_file} "
-        f"--aimet-policy-mode {aimet_policy_mode} "
-        f"--aimet-service-url {aimet_service_url}"
+        f"--aimet-param-type {DEFAULT_AIMET_PARAM_TYPE} "
+        f"--aimet-activation-type {DEFAULT_AIMET_ACTIVATION_TYPE} "
+        f"--aimet-quant-scheme {DEFAULT_AIMET_QUANT_SCHEME} "
+        f"--aimet-config-file {DEFAULT_AIMET_CONFIG_FILE} "
+        f"--aimet-policy-mode {DEFAULT_AIMET_POLICY_MODE}"
     )
 
 
 def _resolve_vpcd_local_aimet_quantize_report(
     *,
     source: VpcdPilotSource,
-    aimet_param_type: str,
-    aimet_activation_type: str,
-    aimet_quant_scheme: str,
-    aimet_policy_mode: str,
-    aimet_config_file: str,
-    aimet_service_url: str,
-    calibration_source_path: Path,
 ) -> tuple[Path, dict[str, Any]]:
     variant_name = build_vpcd_aimet_variant_name(
-        param_type=aimet_param_type,
-        activation_type=aimet_activation_type,
-        quant_scheme=aimet_quant_scheme,
-        policy_mode=aimet_policy_mode,
+        param_type=DEFAULT_AIMET_PARAM_TYPE,
+        activation_type=DEFAULT_AIMET_ACTIVATION_TYPE,
+        quant_scheme=DEFAULT_AIMET_QUANT_SCHEME,
+        policy_mode=DEFAULT_AIMET_POLICY_MODE,
     )
     variant_root = (_resolve_default_vpcd_local_aimet_output_root(source.repo_root) / variant_name).resolve()
     report_path = (variant_root / "quantize_report.json").resolve()
     if not report_path.exists():
-        command_hint = _build_vpcd_local_aimet_quantize_command_hint(
-            source=source,
-            calibration_source_path=calibration_source_path,
-            aimet_param_type=aimet_param_type,
-            aimet_activation_type=aimet_activation_type,
-            aimet_quant_scheme=aimet_quant_scheme,
-            aimet_config_file=aimet_config_file,
-            aimet_policy_mode=aimet_policy_mode,
-            aimet_service_url=aimet_service_url,
-        )
+        command_hint = _build_vpcd_local_aimet_quantize_command_hint(source=source)
         raise FileNotFoundError(
             "Missing prebuilt VPCD AIMET quantize artifact. "
             f"Expected quantize report: {report_path}. "
@@ -840,37 +821,14 @@ def _resolve_vpcd_local_aimet_quantize_report(
 def prepare_vpcd_option1_source_model(
     source: VpcdPilotSource,
     *,
-    output_path: str | Path | None = None,
     strategy: str | None = None,
-    calibration_source_path: str | Path | None = None,
-    max_calibration_samples: int = 24,
-    max_generation_length: int = 32,
-    ort_provider: str = "cpu",
-    aimet_param_type: str = "int8",
-    aimet_activation_type: str = "int16",
-    aimet_quant_scheme: str = "min_max",
-    aimet_config_file: str = "vpcd_matmul_only",
-    aimet_policy_mode: str = "local_quality_parity",
-    aimet_service_url: str = "http://127.0.0.1:18080",
 ) -> PreparedVpcdOption1Source:
     normalized_strategy = _normalize_optional_string(strategy)
     if normalized_strategy is None:
         normalized_strategy = "local_aimet_compile_candidate"
     if normalized_strategy == "local_aimet_compile_candidate":
-        resolved_calibration_source_path = (
-            Path(calibration_source_path).resolve()
-            if calibration_source_path is not None
-            else _resolve_default_vpcd_calibration_source_path(source.repo_root)
-        )
         variant_root, quantize_report = _resolve_vpcd_local_aimet_quantize_report(
             source=source,
-            aimet_param_type=aimet_param_type,
-            aimet_activation_type=aimet_activation_type,
-            aimet_quant_scheme=aimet_quant_scheme,
-            aimet_policy_mode=aimet_policy_mode,
-            aimet_config_file=aimet_config_file,
-            aimet_service_url=aimet_service_url,
-            calibration_source_path=resolved_calibration_source_path,
         )
         prepared_output_path = Path(str(quantize_report["fixed_model_path"])).resolve()
         package_dir = Path(str(quantize_report["package_dir"])).resolve()

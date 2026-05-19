@@ -15,6 +15,8 @@ Run in:
    - `python -m quantize --project vpcd ...`
 4. for VPCD, keep the AIMET service alive on `http://127.0.0.1:18080` while producing the local artifact
 
+The notebook itself starts after those producer steps. It does not run local VPCD quantization.
+
 ## Retained defaults
 
 - `Zipformer`

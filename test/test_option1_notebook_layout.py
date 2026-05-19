@@ -97,19 +97,22 @@ def test_pilot_notebook_supports_local_aimet_vpcd_source_strategy() -> None:
 
     assert "local_aimet_compile_candidate" in code_text
     assert "vpcd_option1_local_aimet" in code_text
-    assert 'VPCD_LOCAL_AIMET_OUTPUT_ROOT = Path("build/quantize/vpcd/local_aimet")' in code_text
-    assert 'VPCD_AIMET_PARAM_TYPE = "int8"' in code_text
-    assert 'VPCD_AIMET_ACTIVATION_TYPE = "int16"' in code_text
-    assert 'VPCD_AIMET_QUANT_SCHEME = "min_max"' in code_text
-    assert 'VPCD_AIMET_CONFIG_FILE = "vpcd_matmul_only"' in code_text
-    assert 'VPCD_AIMET_POLICY_MODE = "local_quality_parity"' in code_text
-    assert 'VPCD_AIMET_SERVICE_URL = "http://127.0.0.1:18080"' in code_text
-    assert "aimet_param_type=VPCD_AIMET_PARAM_TYPE" in code_text
-    assert "aimet_activation_type=VPCD_AIMET_ACTIVATION_TYPE" in code_text
-    assert "aimet_quant_scheme=VPCD_AIMET_QUANT_SCHEME" in code_text
-    assert "aimet_config_file=VPCD_AIMET_CONFIG_FILE" in code_text
-    assert "aimet_policy_mode=VPCD_AIMET_POLICY_MODE" in code_text
-    assert "aimet_service_url=VPCD_AIMET_SERVICE_URL" in code_text
+    assert 'VPCD_QUANTIZED_MODEL_PATH = None' in code_text
+    assert 'VPCD_LOCAL_AIMET_OUTPUT_ROOT = Path("build/quantize/vpcd/local_aimet")' not in code_text
+    assert 'VPCD_CALIBRATION_SOURCE_PATH = Path("build/calibration/vlsp2020/vpcd_transcriptions.txt")' not in code_text
+    assert 'VPCD_AIMET_PARAM_TYPE = "int8"' not in code_text
+    assert 'VPCD_AIMET_ACTIVATION_TYPE = "int16"' not in code_text
+    assert 'VPCD_AIMET_QUANT_SCHEME = "min_max"' not in code_text
+    assert 'VPCD_AIMET_CONFIG_FILE = "vpcd_matmul_only"' not in code_text
+    assert 'VPCD_AIMET_POLICY_MODE = "local_quality_parity"' not in code_text
+    assert 'VPCD_AIMET_SERVICE_URL = "http://127.0.0.1:18080"' not in code_text
+    assert "calibration_source_path=" not in code_text
+    assert "aimet_param_type=" not in code_text
+    assert "aimet_activation_type=" not in code_text
+    assert "aimet_quant_scheme=" not in code_text
+    assert "aimet_config_file=" not in code_text
+    assert "aimet_policy_mode=" not in code_text
+    assert "aimet_service_url=" not in code_text
     assert 'output_path=RUNTIME_CONFIG.pilot_artifact_dir(vpcd_pilot_name) / "model.fp32.fixed.onnx"' not in code_text
     assert "max_calibration_samples=VPCD_CALIBRATION_MAX_SAMPLES" not in code_text
     assert "max_generation_length=VPCD_CALIBRATION_MAX_GENERATION_LENGTH" not in code_text
@@ -120,10 +123,10 @@ def test_pilot_notebook_treats_vpcd_local_aimet_as_prebuilt_source() -> None:
     notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
     markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
 
-    assert "prebuilt local AIMET quantize, then AI Hub compile" in markdown_text
-    assert "Build the local AIMET package first with `python -m quantize --project vpcd ...`" in markdown_text
-    assert "resolves the prebuilt local AIMET package" in markdown_text
-    assert "prebuilt local AIMET QDQ reference model" in markdown_text
+    assert "this notebook starts only after the retained local VPCD quantize artifact already exists" in markdown_text
+    assert "resolves the prebuilt local AIMET artifact" in markdown_text
+    assert "It does not build or export VPCD quantize artifacts locally." in markdown_text
+    assert "Build the local AIMET package first with `python -m quantize --project vpcd ...`" not in markdown_text
     assert "downloaded AI Hub quantized ONNX" not in markdown_text
     assert "fixed-shape FP32 prepare locally, then AI Hub quantize, then AI Hub compile" not in markdown_text
 
