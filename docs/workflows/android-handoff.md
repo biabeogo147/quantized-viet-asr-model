@@ -39,6 +39,8 @@ This CLI:
 - rewrites handoff fields in `bundle_manifest.json` when needed
 - keeps variant-family paths aligned with Android naming
 
+The next planned extension is contract-aware Option 1 sync, where the same CLI will also stage packaged `Phase 5` evidence under the Android asset namespace.
+
 ## Supported handoff targets
 
 ### VPCD
@@ -152,6 +154,7 @@ It does not prove:
 
 - `docs/workflows/model-quantization-status.md`
 - `docs/plans/active/2026-05-19-bkmeeting-android-option1-export-plan.md`
+- `docs/plans/active/2026-05-19-option1-phase6-contract-sync-plan.md`
 - `docs/workflows/export-verify-smoke.md`
 - `docs/workflows/quantize-qnn-candidates.md`
 - `docs/qnn/preflight.md`

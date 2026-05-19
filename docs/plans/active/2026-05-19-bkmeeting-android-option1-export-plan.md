@@ -96,11 +96,26 @@ Instead:
 
 ## Decisions Already Locked
 
-- Keep the AI Hub quantize `B/C/D` fallback plan alive for VPCD.
-- Do not delete the legacy `prefer_fp32_fixed -> AI Hub quantize` path yet.
+- The archived AI Hub quantize `A/B/C/D` investigation is no longer part of the active execution path.
+- The retained VPCD direction is the AIMET parity lane only.
+- Remove the legacy `prefer_fp32_fixed -> AI Hub quantize` VPCD path from the active pilot notebook and helper defaults before the final rerun.
 - Do not promote the historical local-QDQ probe lane.
 - Do not remove the current bundle sync entrypoint:
   - `src/tools/sync_android_bundle.py`
+
+## Current Next Step
+
+The remaining implementation work is now concentrated in `Phase 6`:
+
+- first, clean and rerun the retained VPCD AIMET parity lane from a fresh `build/aihub` state
+- extend `sync_android_bundle.py` so it can consume Phase 5 contract packages
+- sync those contract-backed payloads into BKMeeting
+- keep Android entry through `bundle_manifest.json`
+
+See:
+
+- [2026-05-19-option1-vpcd-default-lane-and-workflow-refresh-plan.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/plans/active/2026-05-19-option1-vpcd-default-lane-and-workflow-refresh-plan.md)
+- [2026-05-19-option1-phase6-contract-sync-plan.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/plans/active/2026-05-19-option1-phase6-contract-sync-plan.md)
 
 ## Scope
 

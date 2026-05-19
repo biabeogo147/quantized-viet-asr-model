@@ -172,4 +172,4 @@ Those remain CPU-side by design in the current first-slice architecture.
 - `docs/workflows/aihub-option1-hybrid-pipeline.md`
 - `docs/workflows/aihub-option1-phase5-contract.md`
 - `docs/workflows/android-handoff.md`
-- `docs/plans/active/2026-05-13-vpcd-option1-debug-results.md`
+- `docs/plans/archive/2026-05-13-vpcd-option1-debug-results.md`

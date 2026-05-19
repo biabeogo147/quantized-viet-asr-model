@@ -57,7 +57,9 @@ Keep the same:
 Then the notebook will resolve the target model id from:
 
 - `build/aihub/records/zipformer_encoder_option1/compile-run-<RUN_LABEL>.json`
-- `build/aihub/records/vpcd_option1/compile-run-<RUN_LABEL>.json`
+- `build/aihub/records/vpcd_option1_local_aimet/compile-run-<RUN_LABEL>.json` for the current VPCD parity lane
+
+Older `vpcd_option1` AI Hub-quantize probe records are historical only and are no longer retained in `build/` after cleanup.
 
 If you want to force a specific compiled target manually, paste the id into:
 
@@ -106,24 +108,22 @@ Notes:
   - the local QDQ diagnostic model path when compile records are reused
 - the final pass/fail decision comes from punctuated outputs compared against `golden_samples.jsonl`
 - recommended knobs for the current runaway decode failure are:
+- recommended knobs for the current bounded parity lane are:
   - `VPCD_HYBRID_MAX_SAMPLES = 2`
   - `VPCD_HYBRID_MAX_STEPS = 5`
   - `VPCD_TEACHER_FORCED_SAMPLE_INDEX = 0`
-- quantize runs now also preserve:
-  - `build/aihub/records/vpcd_option1/quantize-run-<RUN_LABEL>.json`
-  - `build/aihub/vpcd_option1/model.quantized.<RUN_LABEL>.onnx`
+- the retained Phase 2 VPCD evidence now lives under:
+  - `build/aihub/records/vpcd_option1_local_aimet/`
+- the retained VPCD parity run label is:
+  - `20260519-aimet-local-quality-parity-notebook`
 - the hybrid run writes:
   - `build/aihub/records/vpcd_hybrid_option1/hybrid-run-<RUN_LABEL>.json`
 - the quantized-local teacher-forced run writes:
   - `build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-<RUN_LABEL>.json`
 - the teacher-forced run writes:
   - `build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-<RUN_LABEL>.json`
-- a recent local-AIMET probe completed with:
-  - [prepared-artifact-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-20260518-aimet-local-w8a8-minmax.json)
-  - [compile-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/compile-run-20260518-aimet-local-w8a8-minmax.json)
-  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
-  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
-  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
+- older VPCD probe artifacts were intentionally removed from `build/` once the AIMET parity lane superseded them; the historical findings remain summarized in:
+  - [2026-05-13-vpcd-option1-debug-results.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/plans/archive/2026-05-13-vpcd-option1-debug-results.md)
 
 ## Evidence Contract
 

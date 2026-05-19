@@ -15,9 +15,9 @@ Use `On_device_Ai_option1_phase4_gate.ipynb` for benchmark and recommendation re
 Use `On_device_Ai_option1_phase5_contract.ipynb` for package creation only.
 Use `docs/workflows/model-quantization-status.md` for the current per-model quantization summary.
 Use `docs/plans/archive/2026-05-11-aihub-option1-npu-pilots.md` for the historical roadmap behind this workflow.
-Use `docs/plans/active/2026-05-14-vpcd-quantize-vs-compile-isolation-plan.md` for the active AI Hub quantize investigation, including the `B/C/D` fallback variants.
-Use `docs/plans/active/2026-05-18-vpcd-aimet-local-quantize-aihub-compile-plan.md` for the official local AIMET quantize lane and its current switch decision.
 Use `docs/plans/active/2026-05-19-bkmeeting-android-option1-export-plan.md` for the next Android handoff phase.
+Use `docs/plans/active/2026-05-19-option1-phase6-contract-sync-plan.md` for the next implementation pass that extends Android contract-aware sync.
+Use `docs/plans/archive/2026-05-14-vpcd-quantize-vs-compile-isolation-plan.md` and `docs/plans/archive/2026-05-18-vpcd-aimet-local-quantize-aihub-compile-plan.md` only for historical VPCD attribution context.
 
 ## Why This Workflow Exists
 
@@ -34,9 +34,9 @@ This workflow intentionally moves upstream:
    - source: a prepared encoder artifact derived from the fixed-shape encoder ONNX
    - goal: prove the first-slice ASR graph can compile and run on NPU even though the raw fixed-shape source still needs graph preparation first
 2. `VPCD model-session-first`
-   - source: fixed-shape FP32 ONNX prepared locally, then quantized on AI Hub by default
+   - source: fixed-shape FP32 ONNX prepared locally, then exported through the local AIMET parity lane by default
    - goal: prove the first-slice punctuation model session can compile and run on NPU
-   - optional probe: local AIMET `.aimet` package, used for the official local-quantize replacement lane
+   - archived context: older AI Hub quantize probe variants were retired once the AIMET parity lane became the retained path
 
 ## Prerequisites
 
@@ -111,20 +111,21 @@ Current preferred source resolution:
 - preferred AI Hub source graph:
   - `assets/vietnamese-punc-cap-denorm-v1/onnx/model.fp32.onnx`
 - prepared fixed-shape upload artifact:
-  - `build/aihub/vpcd_fp32_fixed/model.fp32.fixed.onnx`
+  - `build/aihub/vpcd_option1_local_aimet/model.fp32.fixed.onnx`
 
 Current caveat:
 
 - the preferred FP32 source must be frozen to the bundle's `1024 x 128` input shapes before upload
-- the default supported notebook lane is still:
+- the current leading notebook lane is:
   - fixed-shape FP32 prepare locally
   - autoregressive calibration build locally
-  - AI Hub quantize
+  - local AIMET parity export
   - AI Hub compile
   - AI Hub inference
 - when compile uses `--truncate_64bit_io`, submit compiled-model inference tensors as `int32` for the integer inputs
+- older AI Hub quantize probe variants are archived and are no longer part of the active execution path
 
-Experimental local-AIMET probe lane:
+Current local-AIMET parity lane:
 
 - strategy flag:
   - `VPCD_SOURCE_STRATEGY = "local_aimet_compile_candidate"`
@@ -132,12 +133,12 @@ Experimental local-AIMET probe lane:
   - `docker/aimet-onnx-ubuntu2204/Dockerfile`
 - reusable image tag:
   - `bkmeeting-vpcd-aimet:ubuntu22.04-py310`
-- prepared package root:
-  - `build/aihub/vpcd_option1_local_aimet/`
+- retained variant root:
+  - `build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/`
 - exported compile input:
-  - `build/aihub/vpcd_option1_local_aimet/model.option1.aimet/`
+  - `build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.aimet/`
 - exported local QDQ diagnostic model:
-  - `build/aihub/vpcd_option1_local_aimet/model.option1.qdq.onnx`
+  - `build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.qdq.onnx`
 
 Current status of the local-AIMET probe:
 
@@ -168,30 +169,19 @@ Each successful Phase 2 run should leave behind a predictable set of local outpu
 ### VPCD
 
 - prepared upload model:
-  - `build/aihub/vpcd_option1/model.option1.onnx`
-- quantize run record:
-  - `build/aihub/records/vpcd_option1/quantize-run-latest.json`
-- downloaded quantized ONNX:
-  - `build/aihub/vpcd_option1/model.quantized.<RUN_LABEL>.onnx`
-- prepared artifact record:
-  - `build/aihub/records/vpcd_option1/prepared-artifact-latest.json`
-- live run record:
-  - `build/aihub/records/vpcd_option1/live-run-latest.json`
-
-Local-AIMET probe outputs:
-
-- prepared upload model:
   - `build/aihub/vpcd_option1_local_aimet/model.fp32.fixed.onnx`
 - exported AIMET package:
-  - `build/aihub/vpcd_option1_local_aimet/model.option1.aimet/`
+  - `build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.aimet/`
 - exported local QDQ diagnostic model:
-  - `build/aihub/vpcd_option1_local_aimet/model.option1.qdq.onnx`
+  - `build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.qdq.onnx`
 - prepared artifact record:
-  - `build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-latest.json`
+  - `build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-20260519-aimet-local-quality-parity-notebook.json`
 - compile record:
-  - `build/aihub/records/vpcd_option1_local_aimet/compile-run-latest.json`
+  - `build/aihub/records/vpcd_option1_local_aimet/compile-run-20260519-aimet-local-quality-parity-notebook.json`
 - live run record:
-  - `build/aihub/records/vpcd_option1_local_aimet/live-run-latest.json`
+  - `build/aihub/records/vpcd_option1_local_aimet/live-run-20260519-aimet-local-quality-parity-notebook.json`
+
+Historical AI Hub quantize probe outputs are intentionally not retained in `build/` after cleanup. If they ever need to be revisited, use the archived VPCD investigation plans rather than the active workflow.
 
 Recent parity rerun outputs:
 

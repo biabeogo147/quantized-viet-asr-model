@@ -83,26 +83,8 @@ Important implementation note:
 - a fresh explicit quantize submission `jp0ekj665` stayed in `QUANTIZING_MODEL` long enough to block the first notebook attempt
 - to avoid manual reruns, the notebook was unblocked with the historical successful quantized artifact from `jp8wwq1op`
 - later, `jp0ekj665` also completed successfully and was checked separately as the current `A` baseline
-- a later local-QDQ probe run was executed by selecting only the VPCD cells needed for:
-  - setup
-  - VPCD prepare
-  - VPCD compile-only
-  - target resolution
-  - local quantized teacher-forced diagnostics
-  - compiled-cloud teacher-forced diagnostics
-  - bounded hybrid
-  - summary
-- executed notebook copy:
-  - [On_device_Ai_option1_pilots.local_qdq_probe.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_qdq_probe.executed.ipynb)
-- probe log:
-  - [local_qdq_probe.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_qdq_probe.log)
-
-Local AIMET probe run:
-
-- executed notebook copy:
-  - [On_device_Ai_option1_pilots.local_aimet.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet.executed.ipynb)
-- probe log:
-  - [local_aimet.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet.log)
+- older local-QDQ and broad-AIMET probe notebooks were intentionally cleaned from `build/` once the parity lane superseded them
+- their conclusions remain captured in this note and in the later Phase 4 / Phase 5 evidence
 
 Local AIMET parity rerun:
 
@@ -110,9 +92,6 @@ Local AIMET parity rerun:
   - [On_device_Ai_option1_pilots.local_aimet_quality_parity.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet_quality_parity.executed.ipynb)
 - probe log:
   - [local_aimet_quality_parity.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet_quality_parity.log)
-- final-compare-only notebook rerun after the bounded-truncation reporting fix:
-  - [On_device_Ai_option1_pilots.local_aimet_quality_parity.compare_only.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet_quality_parity.compare_only.executed.ipynb)
-  - [local_aimet_quality_parity.compare_only.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet_quality_parity.compare_only.log)
 
 Docker-backed AIMET prep used for that run:
 
@@ -120,23 +99,15 @@ Docker-backed AIMET prep used for that run:
   - [docker/aimet-onnx-ubuntu2204/Dockerfile](/D:/DS-AI/BKMeeting-Research/python-model-test/docker/aimet-onnx-ubuntu2204/Dockerfile)
 - reusable image tag:
   - `bkmeeting-vpcd-aimet:ubuntu22.04-py310`
-- host-side calibration artifact root:
-  - `build/aihub/vpcd_option1_local_aimet/`
-- export command used:
-
-```bash
-docker --config build/docker-config run --rm \
-  -v D:/DS-AI/BKMeeting-Research/python-model-test:/workspace \
-  -w /workspace \
-  -e PYTHONPATH=/workspace/src \
-  bkmeeting-vpcd-aimet:ubuntu22.04-py310 \
-  python3 -m quantize.aimet export \
-    --fp32-onnx /workspace/build/aihub/vpcd_option1_local_aimet/model.fp32.fixed.onnx \
-    --calibration-dir /workspace/build/aihub/vpcd_option1_local_aimet/calibration \
-    --package-dir /workspace/build/aihub/vpcd_option1_local_aimet/model.option1.aimet \
-    --qdq-reference-model /workspace/build/aihub/vpcd_option1_local_aimet/model.option1.qdq.onnx \
-    --report-path /workspace/build/aihub/vpcd_option1_local_aimet/model.option1.aimet.report.json
-```
+- retained FP32 source:
+  - `build/aihub/vpcd_option1_local_aimet/model.fp32.fixed.onnx`
+- retained canonical variant root:
+  - `build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/`
+- retained exported AIMET package:
+  - `build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.aimet/`
+- retained QDQ reference:
+  - `build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.qdq.onnx`
+- transient calibration directories and older probe exports were removed from `build/` during cleanup because only the latest reusable parity artifacts are kept
 
 ## Primary Evidence
 
@@ -151,49 +122,9 @@ docker --config build/docker-config run --rm \
 
 ### Quantized Artifact Evidence
 
-Historical successful AI Hub quantize job used to unblock the notebook:
+Historical AI Hub-quantize baseline `A`, local-QDQ probe, and broad AIMET `w8a8 + min_max` probe all failed at teacher-forced step `2`. Their raw build artifacts were intentionally removed during cleanup once the parity lane became the kept future-facing candidate.
 
-- quantize job: `jp8wwq1op`
-- target model: `mnolrjpkn`
-- quantized record:
-  - [quantize-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1/quantize-run-20260513-1am.json)
-- quantized-local teacher-forced record:
-  - [hybrid-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260513-1am.json)
-
-Current baseline `A` rerun using the same current calibration recipe:
-
-- quantize job: `jp0ekj665`
-- target model: `mq8r4jw3n`
-- quantize record:
-  - [quantize-run-20260513-1am-currentA.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1/quantize-run-20260513-1am-currentA.json)
-- quantized-local teacher-forced record:
-  - [hybrid-run-20260513-1am-currentA.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260513-1am-currentA.json)
-
-Compiled cloud record for the failing production lane:
-
-- compile record:
-  - [compile-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1/compile-run-20260513-1am.json)
-- compiled-cloud teacher-forced record:
-  - [hybrid-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260513-1am.json)
-- bounded hybrid record:
-  - [hybrid-run-20260513-1am.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260513-1am.json)
-
-Official AIMET local-quantize probe:
-
-- prepared artifact record:
-  - [prepared-artifact-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-20260518-aimet-local-w8a8-minmax.json)
-- compile record:
-  - [compile-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/compile-run-20260518-aimet-local-w8a8-minmax.json)
-- live run record:
-  - [live-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/live-run-20260518-aimet-local-w8a8-minmax.json)
-- local quantized teacher-forced record:
-  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
-- compiled-cloud teacher-forced record:
-  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
-- bounded hybrid record:
-  - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
-
-Policy-constrained AIMET parity rerun:
+Retained policy-constrained AIMET parity rerun:
 
 - prepared artifact record:
   - [prepared-artifact-20260519-aimet-local-quality-parity-notebook.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-20260519-aimet-local-quality-parity-notebook.json)
@@ -339,12 +270,8 @@ What changed:
 
 Compatibility report from the prepared local-QDQ probe artifact:
 
-- prepared artifact record:
-  - [prepared-artifact-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_qdq/prepared-artifact-20260518-local-qdq-probe.json)
-- compile record:
-  - [compile-run-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_qdq/compile-run-20260518-local-qdq-probe.json)
-- local quantized teacher-forced record:
-  - [hybrid-run-20260518-local-qdq-probe.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260518-local-qdq-probe.json)
+- the raw local-QDQ probe files were removed from `build/` during cleanup
+- the compatibility findings below are retained here as the durable summary
 
 Observed graph facts:
 
