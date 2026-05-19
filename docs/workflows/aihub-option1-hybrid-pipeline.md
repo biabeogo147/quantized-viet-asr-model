@@ -170,7 +170,12 @@ Current sample-level fields:
   - `text`
   - `expected_text`
   - `matches_expected`
+  - `matches_expected_prefix`
+  - `comparison_note`
   - `decode_steps`
+  - `decode_step_limit_reached`
+  - `truncated_by_decode_step_limit`
+  - `ended_with_eos`
   - `cloud_inference_seconds`
   - `decode_seconds`
 
@@ -233,9 +238,18 @@ Current known result:
 - AI Hub quantize baseline `A` diverges at teacher-forced step `2`
 - the current local QDQ artifact matches FP32 locally for the bounded `5`-step teacher-forced probe
 - AI Hub compile rejects that same local QDQ artifact because `com.microsoft:DequantizeLinear` is unsupported in the input model
-- the current official AIMET variant `w8a8 + min_max` compiles on AI Hub
-- that same AIMET variant already diverges at local teacher-forced step `2`
-- compiled cloud reproduces the same AIMET divergence and bounded hybrid exits early with empty text
+- the broad official AIMET variant `w8a8 + min_max` compiles on AI Hub
+- that broad AIMET variant still diverges at local teacher-forced step `2`
+- the newer policy-constrained AIMET parity variant:
+  - `w8a16 + min_max + local_quality_parity`
+  - compiles on AI Hub
+  - matches FP32 locally for teacher-forced steps `1..5`
+  - matches FP32 on compiled cloud for teacher-forced steps `1..5`
+  - produces the correct bounded hybrid prefix instead of punctuation collapse
+- when that bounded hybrid run stops at the debug guardrail before EOS, the record now treats the full-text comparison as unavailable rather than as a real mismatch
+- the notebook final compare cell now mirrors that rule:
+  - `matches_expected is False` => real mismatch
+  - `matches_expected is None` with a truncation note => bounded comparison unavailable
 
 ## Current Limits
 

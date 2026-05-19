@@ -23,7 +23,62 @@
 - detailed evidence lives in:
   - [2026-05-13-vpcd-option1-debug-results.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/plans/active/2026-05-13-vpcd-option1-debug-results.md)
 
+**Status on 2026-05-19:** Keep this plan active for a new parity track.
+
+- working hypothesis:
+  - the current AIMET lane is quantizing too much of the decoder stack compared with the proven local VPCD/QNN policy
+- local policy facts gathered from the current `sd8g2_quality` preset:
+  - total graph nodes: `2946`
+  - excluded nodes: `1765`
+  - excluded decoder nodes: `1764`
+  - excluded `lm_head` nodes: `1`
+  - remaining quantized `MatMul` nodes: about `96`
+- implication:
+  - the next AIMET attempt must aim for policy parity with the local quality lane, not just dtype parity
+- new switch decision:
+  - keep the new AIMET infrastructure
+  - do not promote AIMET to default until a policy-constrained variant passes bounded local and compiled-cloud teacher-forced checks
+
+**Updated status on 2026-05-19 after the parity rerun:**
+
+- `Task 7` is implemented
+- `Task 8` is implemented
+- `Task 10` is implemented
+- `Task 9` is still deferred because the parity variant passed the bounded gates without requiring extra AIMET sensitivity tooling
+- current best official variant:
+  - `w8a16 + min_max + local_quality_parity`
+  - custom config `vpcd_matmul_only`
+- bounded evidence status:
+  - local quantized teacher-forced `5/5` match
+  - compiled-cloud teacher-forced `5/5` match
+  - bounded hybrid prefix correct
+- remaining switch blocker:
+  - validate a longer free-run window beyond the current `max_decode_steps = 5`
+
 ---
+
+## Execution Contract For The Next Implementation Pass
+
+The next implementation pass under this plan must be fully operator-free once started.
+
+- implement the planned AIMET parity work end-to-end without requiring manual notebook reruns
+- run only the VPCD-relevant notebook cells after implementation, not the Zipformer cells
+- if a foreground notebook execution times out, switch to a more reliable execution method:
+  - selective cell runner
+  - background process with progress logging
+  - save-after-each-cell flow
+- after the notebook run finishes:
+  - inspect the outputs
+  - analyze any failure
+  - apply fixes if needed
+  - rerun the affected VPCD cells until the lane is stable enough to summarize
+- update docs with:
+  - the root cause observed for the current VPCD output
+  - every AIMET variant attempted
+  - every Docker command or image requirement used
+  - the result of each approach
+  - the recommended next step if the parity attempt still fails
+- keep the `B/C/D` AI Hub quantize fallback matrix documented and runnable throughout
 
 ## Why This Is The Right Direction
 
@@ -112,11 +167,46 @@ Reason:
 - it may recover quality
 - but it adds format complexity that is not worth paying before compile acceptance is proven
 
+### Updated Follow-up Direction After The First AIMET Probe
+
+The next AIMET pass should no longer be a broad default-quantize attempt.
+
+It should target a **policy-parity variant** that is intentionally shaped to resemble the current local VPCD/QNN quality preset.
+
+That follow-up variant should start with:
+
+- `w8a16`
+- `quant_scheme=min_max`
+- a custom AIMET config file
+- a quantization policy that behaves like:
+  - quantize `MatMul`-heavy encoder regions first
+  - keep the decoder stack conservative
+  - keep `lm_head` conservative
+
+Reason:
+
+- the proven local quality preset is not simply "8-bit weights plus 16-bit activations"
+- it also keeps almost the entire decoder and `lm_head` out of the quantized set
+- the first AIMET probe did not respect that policy shape, so it is not yet a fair parity comparison
+
 ## New Phase Structure
 
 ### Phase 1: Add AIMET Lane And Prove It
 
 This plan covers only this phase.
+
+### Phase 1B: Align AIMET With The Local Quality Policy
+
+This follow-up phase is now in scope for the next implementation pass.
+
+Goal:
+
+- preserve the official AIMET -> `.aimet` -> AI Hub compile route
+- change the AIMET quantization policy so it resembles the local `sd8g2_quality` lane closely enough to be a meaningful comparison
+
+Primary idea:
+
+- use official AIMET configuration mechanisms to avoid quantizing sensitive regions that the local QNN lane already keeps in FP32
 
 ### Phase 2: Switch Defaults If Proven
 
@@ -282,7 +372,193 @@ Success rule:
 
 - no punctuation-collapse pattern like `[0, 4, 4, 4, 4]`
 
+### Gate 6: Policy-Parity Evidence
+
+Before claiming the AIMET parity attempt is representative of the local quality lane, record all of these:
+
+- how many nodes the local quality preset excludes
+- which major regions those exclusions cover
+- what the AIMET config keeps conservative
+- whether the tested AIMET variant is:
+  - broad default quantization
+  - MatMul-focused
+  - decoder-conservative
+
+If this evidence is missing, do not conclude that "AIMET cannot match local quality."
+
 ## Detailed Tasks
+
+## Follow-up Tasks After The First AIMET Probe
+
+These tasks extend the already-implemented AIMET lane. They are the next tasks to execute before any cleanup phase.
+
+### Task 7: Capture Local-Quality Quantization Intent Explicitly
+
+**Files:**
+
+- Modify: `src/quantize/projects/vpcd.py`
+- Modify: `src/quantize/types.py`
+- Test: `test/test_vpcd_quantize_aihub.py`
+
+- [x] **Step 1: Add tests that describe the local quality policy**
+
+Test behavior:
+
+- the VPCD helper exposes a summary of the current local `sd8g2_quality` quantization plan
+- the summary reports:
+  - excluded node count
+  - excluded decoder coverage
+  - excluded `lm_head` coverage
+  - quantized `MatMul` count
+
+- [x] **Step 2: Implement a reusable local-policy summary helper**
+
+Implementation rules:
+
+- do not duplicate the preset logic in a second place
+- derive the summary from the existing preset and actual model node names
+- make the result serializable into records and docs
+
+- [x] **Step 3: Re-run the focused tests**
+
+Run: `pytest test/test_vpcd_quantize_aihub.py -k "quality or aimet" -v`
+
+- [x] **Step 4: Commit**
+
+```bash
+git add src/quantize/projects/vpcd.py src/quantize/types.py test/test_vpcd_quantize_aihub.py
+git commit -m "feat: record vpcd local quality quantization intent"
+```
+
+### Task 8: Add A Policy-Constrained AIMET Variant
+
+**Files:**
+
+- Modify: `src/quantize/aimet.py`
+- Modify: `src/quantize/projects/vpcd.py`
+- Modify: `src/tools/aihub_option1_pilots.py`
+- Test: `test/test_vpcd_quantize_aihub.py`
+- Test: `test/test_aihub_option1_pilots.py`
+
+- [x] **Step 1: Write failing tests for the AIMET parity config**
+
+Test behavior:
+
+- the AIMET recipe can request:
+  - `w8a16`
+  - `min_max`
+  - a custom config file path
+- the helper writes or resolves a custom AIMET config that is intended to be decoder-conservative
+- records clearly state this is a policy-parity variant, not the old broad default variant
+
+- [x] **Step 2: Implement the custom AIMET config flow**
+
+Implementation rules:
+
+- stay on official AIMET mechanisms:
+  - config file
+  - supported quantsim options
+- do not rely on ad-hoc graph rewriting as the main strategy
+- keep the original broad `w8a8 + min_max` path available for comparison
+
+- [x] **Step 3: Re-run the focused tests**
+
+Run: `pytest test/test_vpcd_quantize_aihub.py test/test_aihub_option1_pilots.py -k "aimet" -v`
+
+- [x] **Step 4: Commit**
+
+```bash
+git add src/quantize/aimet.py src/quantize/projects/vpcd.py src/tools/aihub_option1_pilots.py test/test_vpcd_quantize_aihub.py test/test_aihub_option1_pilots.py
+git commit -m "feat: add policy-constrained aimet variant for vpcd"
+```
+
+### Task 9: Add AIMET Sensitivity Analysis Before Cloud Compile
+
+**Files:**
+
+- Modify: `src/quantize/aimet.py`
+- Modify: `src/tools/aihub_option1_pilots.py`
+- Modify: `docs/workflows/aihub-option1-hybrid-pipeline.md`
+- Test: `test/test_aihub_option1_pilots.py`
+
+- [ ] **Step 1: Add a bounded local analysis step**
+
+Goal:
+
+- if the parity variant still fails local teacher-forced step `2`, produce layer-sensitivity evidence before spending more cloud compile cycles
+
+- [ ] **Step 2: Implement an AIMET analysis helper**
+
+Implementation rules:
+
+- prefer official AIMET analysis tooling such as `QuantAnalyzer`
+- scope the first pass to the VPCD regions most likely to be sensitive:
+  - decoder
+  - decoder attention
+  - `lm_head`
+- write the results into local records so docs can compare variants
+
+- [ ] **Step 3: Re-run the focused tests**
+
+Run: `pytest test/test_aihub_option1_pilots.py -k "aimet" -v`
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/quantize/aimet.py src/tools/aihub_option1_pilots.py docs/workflows/aihub-option1-hybrid-pipeline.md test/test_aihub_option1_pilots.py
+git commit -m "feat: add aimet sensitivity analysis for vpcd"
+```
+
+### Task 10: Execute The Parity Variant End-To-End
+
+**Files:**
+
+- Modify: `On_device_Ai_option1_pilots.ipynb`
+- Modify: `docs/plans/active/2026-05-13-vpcd-option1-debug-results.md`
+- Modify: `docs/workflows/aihub-option1-npu-pilots.md`
+- Modify: `docs/workflows/aihub-option1-hybrid-pipeline.md`
+- Test: `test/test_option1_notebook_layout.py`
+
+- [x] **Step 1: Run the VPCD-only notebook path**
+
+Execution rules:
+
+- run only the VPCD cells needed for:
+  - AIMET prepare
+  - compile or compile reuse
+  - local quantized teacher-forced
+  - compiled-cloud teacher-forced when local gate passes
+  - bounded hybrid when teacher-forced gates pass
+- save the executed notebook and log under `build/aihub/notebook_runs/`
+
+- [x] **Step 2: Analyze the output and fix issues if needed**
+
+Decision rules:
+
+- if local teacher-forced still fails at step `2`, stop cloud expansion and document the failure signature
+- if local passes but compiled cloud fails, attribute the issue to compile/runtime and document that
+- if both pass, run bounded hybrid and summarize the result
+
+- [x] **Step 3: Update docs with full evidence**
+
+Docs must include:
+
+- the exact AIMET parity variant used
+- whether the custom config improved step `2`
+- all generated records and notebook logs
+- the root cause of the observed output
+- the recommended next step
+
+- [x] **Step 4: Re-run notebook layout tests**
+
+Run: `pytest test/test_option1_notebook_layout.py -k "aimet or vpcd" -v`
+
+- [x] **Step 5: Commit**
+
+```bash
+git add On_device_Ai_option1_pilots.ipynb docs/plans/active/2026-05-13-vpcd-option1-debug-results.md docs/workflows/aihub-option1-npu-pilots.md docs/workflows/aihub-option1-hybrid-pipeline.md test/test_option1_notebook_layout.py
+git commit -m "docs: record aimet parity results for vpcd"
+```
 
 ### Task 1: Add AIMET Quantization Types And Export Helpers
 

@@ -159,9 +159,15 @@ Experimental local-AIMET probe lane:
 Current status of the local-AIMET probe:
 
 - AI Hub compile accepts the exported `.aimet` package
-- the current default official variant `w8a8 + min_max` already diverges at local teacher-forced step `2`
-- compiled cloud reproduces the same step-`2` divergence
-- because of that, local AIMET is still an investigation lane, not the default notebook source
+- the broad default official variant `w8a8 + min_max` already diverges at local teacher-forced step `2`
+- a newer policy-constrained parity variant now exists:
+  - `w8a16 + min_max + local_quality_parity`
+  - custom AIMET config `vpcd_matmul_only`
+- that parity variant matches FP32 for the bounded `5`-step teacher-forced window both:
+  - locally on the exported QDQ reference
+  - on the compiled AI Hub cloud target
+- bounded hybrid also produces the correct `5`-step prefix instead of collapsing to punctuation or early EOS
+- because the current proof window is still bounded to `5` decode steps, local AIMET is now the leading replacement candidate, but not yet the default notebook source
 
 ## Canonical Run Outputs
 
@@ -214,6 +220,13 @@ Local-AIMET probe outputs:
   - `build/aihub/records/vpcd_option1_local_aimet/compile-run-latest.json`
 - live run record:
   - `build/aihub/records/vpcd_option1_local_aimet/live-run-latest.json`
+
+Recent parity rerun outputs:
+
+- executed notebook:
+  - `build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet_quality_parity.executed.ipynb`
+- log:
+  - `build/aihub/notebook_runs/local_aimet_quality_parity.log`
 
 ### What The Records Contain
 

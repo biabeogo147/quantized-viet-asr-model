@@ -1,24 +1,35 @@
 # VPCD Option 1 Debug Results
 
-Date: `2026-05-18`
+Date: `2026-05-19`
 
-This note captures the real outcome after implementing the VPCD quantize-vs-compile isolation work, rerunning the VPCD notebook path, and comparing FP32 local, quantized local, and compiled cloud behavior.
+This note captures the real outcome after implementing the VPCD quantize-vs-compile isolation work, the local-QDQ compile probe, the official AIMET probe, and the new AIMET parity rerun that keeps the quantization policy close to the proven local `sd8g2_quality` lane.
 
 ## Executive Conclusion
 
-The VPCD punctuation-collapse bug is now attributed to the `quantize` stage, not only to `compile` or to long free-run decoding.
+There are now two distinct conclusions, and both matter:
 
-Evidence:
+- the original VPCD punctuation-collapse bug was caused by `quantize`, not by `compile`, long free-run decode, or notebook control flow
+- the new policy-constrained AIMET lane fixes that bounded correctness failure for the first `5` decoder steps
 
-- the downloaded AI Hub quantized ONNX already diverges from the FP32 local reference at teacher-forced step `2`
-- the compiled cloud target diverges at the same step and with the same top-token pattern
-- bounded hybrid free-run then collapses to `",,,,"` because that earlier next-token error keeps feeding punctuation tokens back into the decoder
+Current best result:
+
+- local AIMET parity variant:
+  - `w8a16 + min_max + local_quality_parity`
+- AI Hub compile:
+  - accepted
+- local quantized teacher-forced:
+  - `5/5` steps match FP32
+- compiled-cloud teacher-forced:
+  - `5/5` steps match FP32
+- bounded hybrid:
+  - generates the correct prefix `Hôm nay là buổi`
+  - the remaining full-text mismatch under `max_decode_steps = 5` is an expected truncation artifact, not a punctuation collapse
 
 Short version:
 
 - `max_step = 5` fixed the runaway runtime cost
-- it did not fix correctness
-- correctness is already broken in the quantized ONNX before cloud compile/runtime enters the picture
+- the original bad lanes were already broken in the quantized model at teacher-forced step `2`
+- the parity AIMET lane removes that early divergence in the bounded window by avoiding over-quantization of decoder-heavy regions
 
 Update after the local-QDQ compile probe on `2026-05-18`:
 
@@ -33,6 +44,19 @@ Update after the official AIMET local-quantize probe on `2026-05-18`:
 - however, the locally exported AIMET QDQ reference already diverged from FP32 at teacher-forced step `2`
 - the compiled cloud target reproduced the same divergence pattern, so this AIMET variant solved compile compatibility but did not solve correctness
 - bounded hybrid no longer collapsed into punctuation; instead it exited almost immediately with EOS and empty text
+
+Update after the policy-constrained AIMET parity rerun on `2026-05-19`:
+
+- the new parity variant kept the official AIMET route but changed the quantization policy to resemble the local `sd8g2_quality` lane:
+  - `w8a16`
+  - `min_max`
+  - custom AIMET config `vpcd_matmul_only`
+  - policy mode `local_quality_parity`
+- AI Hub compile accepted the exported `.aimet` package and produced target model `mn1dlyevn`
+- the local AIMET QDQ reference matched FP32 for teacher-forced steps `1..5`
+- the compiled cloud target matched FP32 for teacher-forced steps `1..5`
+- bounded hybrid no longer collapsed into punctuation or early EOS
+- the bounded hybrid result is now limited only by the debug guardrail `max_decode_steps = 5`
 
 ## Notebook Status
 
@@ -81,6 +105,18 @@ Local AIMET probe run:
   - [On_device_Ai_option1_pilots.local_aimet.input.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet.input.ipynb)
 - probe log:
   - [local_aimet.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet.log)
+
+Local AIMET parity rerun:
+
+- executed notebook copy:
+  - [On_device_Ai_option1_pilots.local_aimet_quality_parity.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet_quality_parity.executed.ipynb)
+- reduced notebook input used for the VPCD-only rerun:
+  - [On_device_Ai_option1_pilots.local_aimet_quality_parity.input.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet_quality_parity.input.ipynb)
+- probe log:
+  - [local_aimet_quality_parity.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet_quality_parity.log)
+- final-compare-only notebook rerun after the bounded-truncation reporting fix:
+  - [On_device_Ai_option1_pilots.local_aimet_quality_parity.compare_only.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet_quality_parity.compare_only.executed.ipynb)
+  - [local_aimet_quality_parity.compare_only.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet_quality_parity.compare_only.log)
 
 Docker-backed AIMET prep used for that run:
 
@@ -160,6 +196,21 @@ Official AIMET local-quantize probe:
   - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
 - bounded hybrid record:
   - [hybrid-run-20260518-aimet-local-w8a8-minmax.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260518-aimet-local-w8a8-minmax.json)
+
+Policy-constrained AIMET parity rerun:
+
+- prepared artifact record:
+  - [prepared-artifact-20260519-aimet-local-quality-parity-notebook.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/prepared-artifact-20260519-aimet-local-quality-parity-notebook.json)
+- compile record:
+  - [compile-run-20260519-aimet-local-quality-parity-notebook.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/compile-run-20260519-aimet-local-quality-parity-notebook.json)
+- live run record:
+  - [live-run-20260519-aimet-local-quality-parity-notebook.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_option1_local_aimet/live-run-20260519-aimet-local-quality-parity-notebook.json)
+- local quantized teacher-forced record:
+  - [hybrid-run-20260519-aimet-local-quality-parity-notebook.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_quantized_teacher_forced_option1/hybrid-run-20260519-aimet-local-quality-parity-notebook.json)
+- compiled-cloud teacher-forced record:
+  - [hybrid-run-20260519-aimet-local-quality-parity-notebook.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_teacher_forced_option1/hybrid-run-20260519-aimet-local-quality-parity-notebook.json)
+- bounded hybrid record:
+  - [hybrid-run-20260519-aimet-local-quality-parity-notebook.json](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/records/vpcd_hybrid_option1/hybrid-run-20260519-aimet-local-quality-parity-notebook.json)
 
 ## Attribution Result
 
@@ -385,6 +436,51 @@ Conclusion:
 - however, the current default AIMET variant `w8a8 + min_max` is not semantically healthy enough for VPCD
 - because the local AIMET QDQ reference already fails at step `2`, the fault is still attributable to quantization, not to AI Hub compile
 
+### Approach 7: Policy-Constrained AIMET Parity Variant
+
+What changed:
+
+- kept the official Docker-backed AIMET export route
+- kept the same calibration fingerprint
+- changed the quantization policy to track the proven local `sd8g2_quality` intent much more closely:
+  - `w8a16`
+  - `min_max`
+  - custom AIMET config `vpcd_matmul_only`
+  - policy mode `local_quality_parity`
+- explicitly disabled a large decoder-heavy region and kept `lm_head` conservative instead of broad default quantization
+
+Observed correctness result:
+
+- local quantized teacher-forced:
+  - steps `1..5` all matched FP32
+  - step `2` correctly stayed at token `2232`
+- compiled-cloud teacher-forced:
+  - steps `1..5` all matched FP32
+  - compiled cloud no longer reproduced the old step-`2` failure
+- bounded hybrid:
+  - sample `0` generated ids:
+    - `[0, 2232, 177, 9, 847]`
+  - bounded text:
+    - `Hôm nay là buổi`
+  - this is the correct prefix for the chosen `5`-step debug window
+
+Observed reporting nuance:
+
+- with `max_decode_steps = 5`, the hybrid text is intentionally shorter than the full gold sentence
+- that row should be treated as:
+  - `comparison unavailable because the debug step limit truncated the run before EOS`
+- it should not be treated as a real punctuation mismatch
+- the notebook final compare cell was patched accordingly:
+  - real mismatches now require `matches_expected is False`
+  - bounded truncation now prints:
+    - `vpcd full-text comparison unavailable`
+
+Conclusion:
+
+- the earlier AIMET failure was not evidence that "AIMET cannot work for VPCD"
+- the actual issue was over-quantization relative to the proven local policy
+- once the policy became decoder-conservative, the official AIMET lane passed the bounded correctness gates
+
 ## Matrix Status
 
 The bounded follow-up matrix is only partially exercised.
@@ -398,6 +494,12 @@ Completed:
   - `w8a8 + min_max + same calibration fingerprint`
   - compiles on AI Hub
   - still fails at local quantized step `2`
+- policy-constrained local AIMET:
+  - `w8a16 + min_max + local_quality_parity + same calibration fingerprint`
+  - compiles on AI Hub
+  - local quantized teacher-forced passes `5/5`
+  - compiled-cloud teacher-forced passes `5/5`
+  - bounded hybrid produces the correct prefix and no longer collapses
 
 Not yet executed:
 
@@ -422,15 +524,18 @@ Reason not yet executed:
 - the repo now records an explicit compatibility report for local-QDQ compile candidates
 - the repo now has a reusable Docker image and command path for AIMET export
 - the repo now has an official `.aimet -> AI Hub compile` lane that is proven compile-compatible
+- the repo now has a policy-constrained AIMET lane that matches FP32 for the bounded `5`-step teacher-forced window both locally and on compiled cloud
+- the old punctuation-collapse behavior is no longer reproduced by the policy-constrained AIMET lane in the bounded hybrid check
+- hybrid records now distinguish a real mismatch from a `decode_step_limit` truncation in bounded debug runs
 
 ## What Is Not Fixed Yet
 
-- VPCD punctuation correctness on AI Hub is still failing
+- full-length VPCD free-run correctness on AI Hub is not re-proven yet beyond the bounded `5`-step debug window
 - baseline `A` remains bad even with the current calibration fingerprint
-- no passing quantized variant has been found yet
 - the current local QDQ artifact still cannot be compiled by AI Hub in its present ORT/QNN-specific format
 - the current official AIMET variant `w8a8 + min_max` still diverges at local teacher-forced step `2`
-- compiled cloud currently inherits that same AIMET divergence, so AIMET is not ready to replace the default lane
+- the current parity proof only covers the bounded `5`-step window
+- a longer free-run validation is still needed before switching notebook defaults fully to the AIMET lane
 
 ## Recommended Next Steps
 
@@ -466,11 +571,13 @@ Interpretation rules:
 If the team continues pursuing local quantization as the default source lane, the next work should target an artifact format that is closer to what AI Hub documents as officially supported:
 
 1. keep the official `.aimet` packaging route
-2. rerun AIMET with a higher-fidelity activation lane first:
-   - `w8a16 + min_max`
-3. if needed after that, try another official AIMET quantization scheme:
+2. keep the new parity lane as the leading candidate:
+   - `w8a16 + min_max + local_quality_parity`
+3. increase the bounded decode window gradually before changing defaults:
+   - `5 -> 10 -> 20`
+4. if the longer window regresses, run the remaining official AIMET follow-ups:
    - `w8a8 + tf_enhanced`
-4. only after exhausting official AIMET variants, revisit standard main-domain QDQ with `main` opset `21+`
+5. only after exhausting official AIMET variants, revisit standard main-domain QDQ with `main` opset `21+`
 
 Do not keep spending time on blind domain rewriting of the current `opset 17 + com.microsoft + uint16` graph. The compile probe already showed that AI Hub rejects it as input.
 
@@ -498,3 +605,13 @@ For the current official AIMET probe, the verdict is now:
 - local quantized step-`2` correctness: `failed`
 - compiled-cloud step-`2` correctness: `failed`
 - switch-default decision: `do not switch yet`
+
+For the current policy-constrained AIMET parity rerun, the verdict is now:
+
+- AI Hub compile compatibility: `accepted`
+- local quantized step-`2` correctness: `passed`
+- compiled-cloud step-`2` correctness: `passed`
+- bounded hybrid result: `correct prefix, truncated by debug step limit`
+- switch-default decision:
+  - `leading candidate`
+  - keep as non-default until a longer free-run window is validated

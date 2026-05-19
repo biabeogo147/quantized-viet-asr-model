@@ -12,6 +12,7 @@ Current active VPCD planning documents:
   - current investigation plan for replacing AI Hub quantize with a local-QDQ-to-AI-Hub-compile lane
 - `2026-05-18-vpcd-aimet-local-quantize-aihub-compile-plan.md`
   - implementation plan for the official local quantize path based on AIMET `.aimet` packages
-  - current result: compile-compatible on AI Hub, but the default `w8a8 + min_max` variant still fails local teacher-forced step `2`
+  - current result: the policy-constrained parity variant `w8a16 + min_max + local_quality_parity` now passes bounded `5`-step teacher-forced checks both locally and on compiled cloud
+  - next active track: extend that proof beyond the current bounded `max_decode_steps = 5` window before switching defaults
 
 Historical or superseded plans should be moved to `docs/plans/archive/`.
