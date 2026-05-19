@@ -150,6 +150,8 @@ It does not prove:
 
 ## Related docs
 
+- `docs/workflows/model-quantization-status.md`
+- `docs/plans/active/2026-05-19-bkmeeting-android-option1-export-plan.md`
 - `docs/workflows/export-verify-smoke.md`
 - `docs/workflows/quantize-qnn-candidates.md`
 - `docs/qnn/preflight.md`

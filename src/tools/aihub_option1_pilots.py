@@ -7,7 +7,6 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from datetime import datetime, timezone
-from shutil import copy2
 from typing import Any, Callable, Mapping
 
 import numpy as np
@@ -48,7 +47,6 @@ from quantize.projects.vpcd import (
     DEFAULT_PRESET as VPCD_DEFAULT_PRESET,
     build_vpcd_aimet_quantize_recipe,
     build_vpcd_aihub_quantize_recipe,
-    inspect_vpcd_qdq_compile_candidate,
     resolve_vpcd_aihub_quantize_dtype_names as resolve_vpcd_quantize_dtype_names_from_preset,
 )
 from quantize.fixed_shapes import freeze_model_inputs
@@ -60,7 +58,6 @@ DEFAULT_COMPUTE_UNIT = "npu"
 DEFAULT_AIMET_DOCKER_IMAGE_TAG = "bkmeeting-vpcd-aimet:ubuntu22.04-py310"
 DEFAULT_AIMET_DOCKER_WORKSPACE = "/workspace"
 InputSpecs = dict[str, tuple[tuple[int, ...], str]]
-MS_QDQ_OP_TYPES = {"QuantizeLinear", "DequantizeLinear"}
 ZIPFORMER_BOOL_SLICE_NODE_NAMES = (
     "/encoder/Slice_1",
     "/encoder/Slice_3",
@@ -791,79 +788,6 @@ def resolve_vpcd_fp32_source_model_path(source: VpcdPilotSource) -> Path | None:
     )
 
 
-def rewrite_aihub_compatible_qdq_domains(model: onnx.ModelProto) -> None:
-    touched_ms_qdq = False
-    for node in model.graph.node:
-        if node.domain == "com.microsoft" and node.op_type in MS_QDQ_OP_TYPES:
-            node.domain = ""
-            touched_ms_qdq = True
-
-    if not touched_ms_qdq:
-        return
-
-    has_remaining_ms_domain_nodes = any(node.domain == "com.microsoft" for node in model.graph.node)
-    preserved_opsets = [
-        opset
-        for opset in model.opset_import
-        if opset.domain != "com.microsoft" or has_remaining_ms_domain_nodes
-    ]
-    del model.opset_import[:]
-    model.opset_import.extend(preserved_opsets)
-
-
-def _package_aihub_onnx_upload(model_path: Path) -> tuple[str, Path]:
-    resolved_model_path = model_path.resolve()
-    if resolved_model_path.is_dir():
-        return "onnx_dir", resolved_model_path
-
-    external_data_path = resolved_model_path.with_suffix(f"{resolved_model_path.suffix}.data")
-    if not external_data_path.exists():
-        return "onnx_file", resolved_model_path
-
-    package_dir = (resolved_model_path.parent / f"{resolved_model_path.stem}.upload.onnx").resolve()
-    package_dir.mkdir(parents=True, exist_ok=True)
-    packaged_model_path = package_dir / resolved_model_path.name
-    packaged_data_path = package_dir / external_data_path.name
-    copy2(resolved_model_path, packaged_model_path)
-    copy2(external_data_path, packaged_data_path)
-    return "onnx_dir", package_dir
-
-
-def _copy_onnx_artifact(source_model_path: Path, destination_model_path: Path) -> None:
-    source_path = source_model_path.resolve()
-    destination_path = destination_model_path.resolve()
-    destination_path.parent.mkdir(parents=True, exist_ok=True)
-    copy2(source_path, destination_path)
-
-    source_data_path = source_path.with_suffix(f"{source_path.suffix}.data")
-    if source_data_path.exists():
-        destination_data_path = destination_path.with_suffix(f"{destination_path.suffix}.data")
-        copy2(source_data_path, destination_data_path)
-
-
-def _build_local_qdq_compile_candidate_report(
-    *,
-    graph_report: Mapping[str, Any],
-    packaging_kind: str,
-    packaging_path: Path,
-    transformation_kind: str,
-) -> dict[str, Any]:
-    graph_readiness = str(graph_report.get("aihub_compile_readiness", "unsafe"))
-    packaging_ready = bool(graph_report.get("packaging_ready", False))
-    compile_candidate_readiness = "unsafe"
-    if packaging_ready:
-        compile_candidate_readiness = "ready" if graph_readiness == "ready" else "experimental"
-    return {
-        "aihub_compile_readiness": compile_candidate_readiness,
-        "graph_aihub_compile_readiness": graph_readiness,
-        "packaging_kind": packaging_kind,
-        "packaging_path": packaging_path.as_posix(),
-        "transformation_kind": transformation_kind,
-        "graph_report": dict(graph_report),
-        "readiness_flags": list(graph_report.get("readiness_flags", [])),
-    }
-
-
 def _resolve_default_vpcd_calibration_source_path(repo_root: Path) -> Path:
     candidate = Path(VPCD_DEFAULT_CALIBRATION_SOURCE)
     if candidate.is_absolute():
@@ -1187,62 +1111,6 @@ def prepare_vpcd_option1_source_model(
             diagnostic_model_path=qdq_reference_model_path,
             report=report,
             graph_report=None,
-        )
-
-    if normalized_strategy in {"direct_qdq_sanitized", "local_qdq_compile_candidate"}:
-        raw_graph_report = inspect_vpcd_qdq_compile_candidate(source.model_path)
-        preserve_as_is_for_compile_probe = (
-            normalized_strategy == "local_qdq_compile_candidate"
-            and (
-                bool(raw_graph_report.get("uses_uint16_qdq"))
-                or bool(raw_graph_report.get("uses_int16_qdq"))
-            )
-            and int(dict(raw_graph_report.get("opsets", {})).get("main", 0)) < 21
-        )
-        prepared_output_path.parent.mkdir(parents=True, exist_ok=True)
-        transformation_kind = "as_is"
-        if preserve_as_is_for_compile_probe:
-            _copy_onnx_artifact(source.model_path, prepared_output_path)
-        else:
-            model = onnx.load(source.model_path.as_posix())
-            rewritten_domains = {
-                (node.name, node.op_type): node.domain
-                for node in model.graph.node
-                if node.op_type in MS_QDQ_OP_TYPES
-            }
-            rewrite_aihub_compatible_qdq_domains(model)
-            rewritten_domain_count = 0
-            for node in model.graph.node:
-                if node.op_type not in MS_QDQ_OP_TYPES:
-                    continue
-                previous_domain = rewritten_domains.get((node.name, node.op_type))
-                if previous_domain == "com.microsoft" and node.domain == "":
-                    rewritten_domain_count += 1
-            if rewritten_domain_count > 0:
-                transformation_kind = "domain_rewritten"
-            onnx.checker.check_model(model, full_check=True)
-            onnx.save(model, prepared_output_path.as_posix())
-        packaging_kind, packaging_path = _package_aihub_onnx_upload(prepared_output_path)
-        graph_report = inspect_vpcd_qdq_compile_candidate(prepared_output_path)
-        report: dict[str, Any] | None = None
-        if normalized_strategy == "local_qdq_compile_candidate":
-            report = _build_local_qdq_compile_candidate_report(
-                graph_report=graph_report,
-                packaging_kind=packaging_kind,
-                packaging_path=packaging_path,
-                transformation_kind=transformation_kind,
-            )
-        return PreparedVpcdOption1Source(
-            prepared_model_path=prepared_output_path,
-            is_quantized_source=True,
-            source_strategy=normalized_strategy,
-            source_kind="local_qdq",
-            packaging_kind=packaging_kind,
-            packaging_path=packaging_path,
-            transformation_kind=transformation_kind,
-            diagnostic_model_path=prepared_output_path,
-            report=report,
-            graph_report=graph_report,
         )
 
     if normalized_strategy != "prefer_fp32_fixed":

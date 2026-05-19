@@ -101,8 +101,6 @@ Local AIMET probe run:
 
 - executed notebook copy:
   - [On_device_Ai_option1_pilots.local_aimet.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet.executed.ipynb)
-- reduced notebook input used for the VPCD-only run:
-  - [On_device_Ai_option1_pilots.local_aimet.input.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet.input.ipynb)
 - probe log:
   - [local_aimet.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet.log)
 
@@ -110,8 +108,6 @@ Local AIMET parity rerun:
 
 - executed notebook copy:
   - [On_device_Ai_option1_pilots.local_aimet_quality_parity.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet_quality_parity.executed.ipynb)
-- reduced notebook input used for the VPCD-only rerun:
-  - [On_device_Ai_option1_pilots.local_aimet_quality_parity.input.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_pilots.local_aimet_quality_parity.input.ipynb)
 - probe log:
   - [local_aimet_quality_parity.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/local_aimet_quality_parity.log)
 - final-compare-only notebook rerun after the bounded-truncation reporting fix:

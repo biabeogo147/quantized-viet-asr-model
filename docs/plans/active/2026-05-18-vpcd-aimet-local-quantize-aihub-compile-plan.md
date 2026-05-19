@@ -1,5 +1,16 @@
 # VPCD AIMET Local Quantize To AI Hub Compile Plan
 
+## Postscript 2026-05-19
+
+The implementation phase described in this plan is complete.
+
+Current follow-up state:
+
+- the AIMET parity lane `w8a16 + min_max + local_quality_parity` is now the leading local quantize candidate
+- the historical `local_qdq_compile_candidate` investigation has been archived out of active use
+- the live code path for `direct_qdq_sanitized` and `local_qdq_compile_candidate` was removed later during the cleanup phase
+- the `B/C/D` AI Hub quantize fallback plan remains active
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a new official local quantization lane for VPCD based on `AIMET -> .aimet package -> AI Hub compile`, and use that lane as the primary candidate for replacing the current `FP32 -> AI Hub quantize -> AI Hub compile` flow.

@@ -161,118 +161,6 @@ def _write_minimal_vpcd_fp32_model(model_path: Path) -> None:
     onnx.save(model, model_path.as_posix())
 
 
-def _write_minimal_vpcd_ms_qdq_model(model_path: Path) -> None:
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    scale = helper.make_tensor("scale", TensorProto.FLOAT, [1], [0.1])
-    zero_point = helper.make_tensor("zero_point", TensorProto.UINT8, [1], [0])
-    graph = helper.make_graph(
-        nodes=[
-            helper.make_node(
-                "QuantizeLinear",
-                inputs=["decoder_input_ids", "scale", "zero_point"],
-                outputs=["quantized"],
-                domain="com.microsoft",
-                name="ms_quantize",
-            ),
-            helper.make_node(
-                "DequantizeLinear",
-                inputs=["quantized", "scale", "zero_point"],
-                outputs=["logits"],
-                domain="com.microsoft",
-                name="ms_dequantize",
-            ),
-        ],
-        name="vpcd-ms-qdq-minimal",
-        inputs=[
-            helper.make_tensor_value_info("decoder_input_ids", TensorProto.FLOAT, [1, 4]),
-        ],
-        outputs=[
-            helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 4]),
-        ],
-        initializer=[scale, zero_point],
-    )
-    model = helper.make_model(
-        graph,
-        opset_imports=[helper.make_opsetid("", 17), helper.make_opsetid("com.microsoft", 1)],
-    )
-    onnx.save(model, model_path.as_posix())
-
-
-def _write_minimal_vpcd_ms_uint16_qdq_model(model_path: Path) -> None:
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    scale = helper.make_tensor("scale", TensorProto.FLOAT, [1], [0.1])
-    zero_point = helper.make_tensor("zero_point", TensorProto.UINT16, [1], [0])
-    graph = helper.make_graph(
-        nodes=[
-            helper.make_node(
-                "QuantizeLinear",
-                inputs=["decoder_input_ids", "scale", "zero_point"],
-                outputs=["quantized"],
-                domain="com.microsoft",
-                name="ms_quantize",
-            ),
-            helper.make_node(
-                "DequantizeLinear",
-                inputs=["quantized", "scale", "zero_point"],
-                outputs=["logits"],
-                domain="com.microsoft",
-                name="ms_dequantize",
-            ),
-        ],
-        name="vpcd-ms-u16-qdq-minimal",
-        inputs=[
-            helper.make_tensor_value_info("decoder_input_ids", TensorProto.FLOAT, [1, 4]),
-        ],
-        outputs=[
-            helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 4]),
-        ],
-        initializer=[scale, zero_point],
-    )
-    model = helper.make_model(
-        graph,
-        opset_imports=[helper.make_opsetid("", 17), helper.make_opsetid("com.microsoft", 1)],
-    )
-    onnx.save(model, model_path.as_posix())
-
-
-def _build_ms_qdq_with_ms_gelu_model() -> onnx.ModelProto:
-    scale = helper.make_tensor("scale", TensorProto.FLOAT, [1], [0.1])
-    zero_point = helper.make_tensor("zero_point", TensorProto.UINT8, [1], [0])
-    graph = helper.make_graph(
-        nodes=[
-            helper.make_node(
-                "QuantizeLinear",
-                inputs=["x", "scale", "zero_point"],
-                outputs=["quantized"],
-                domain="com.microsoft",
-                name="ms_quantize",
-            ),
-            helper.make_node(
-                "DequantizeLinear",
-                inputs=["quantized", "scale", "zero_point"],
-                outputs=["dequantized"],
-                domain="com.microsoft",
-                name="ms_dequantize",
-            ),
-            helper.make_node(
-                "Gelu",
-                inputs=["dequantized"],
-                outputs=["y"],
-                domain="com.microsoft",
-                name="ms_gelu",
-            ),
-        ],
-        name="ms-qdq-with-gelu",
-        inputs=[helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4])],
-        outputs=[helper.make_tensor_value_info("y", TensorProto.FLOAT, [1, 4])],
-        initializer=[scale, zero_point],
-    )
-    return helper.make_model(
-        graph,
-        opset_imports=[helper.make_opsetid("", 17), helper.make_opsetid("com.microsoft", 1)],
-    )
-
-
 def _build_zipformer_bool_slice_model() -> onnx.ModelProto:
     bool_mask = helper.make_tensor_value_info("/GreaterOrEqual_output_0", TensorProto.BOOL, [1, 8])
     graph_output = helper.make_tensor_value_info("masked", TensorProto.FLOAT, [1, 1, 4])
@@ -452,7 +340,7 @@ def test_prepare_vpcd_option1_source_model_defaults_to_fp32_fixed_shape_prepare(
     bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
     _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
     qdq_model_path = bundle_dir / "model.mobile.onnx"
-    _write_minimal_vpcd_ms_qdq_model(qdq_model_path)
+    qdq_model_path.write_bytes(b"qdq-model")
     fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
     _write_minimal_vpcd_fp32_model(fp32_model_path)
 
@@ -492,123 +380,6 @@ def test_prepare_vpcd_option1_source_model_requires_fp32_for_default_debug_lane(
             output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx",
             strategy="prefer_fp32_fixed",
         )
-
-
-def test_rewrite_aihub_compatible_qdq_domains_converts_ms_qdq_nodes_to_default_domain(tmp_path):
-    from tools.aihub_option1_pilots import rewrite_aihub_compatible_qdq_domains
-
-    model_path = tmp_path / "model.mobile.onnx"
-    _write_minimal_vpcd_ms_qdq_model(model_path)
-    model = onnx.load(model_path.as_posix())
-
-    rewrite_aihub_compatible_qdq_domains(model)
-
-    rewritten_domains = {(node.name, node.op_type): node.domain for node in model.graph.node}
-    assert rewritten_domains[("ms_quantize", "QuantizeLinear")] == ""
-    assert rewritten_domains[("ms_dequantize", "DequantizeLinear")] == ""
-    assert all(opset.domain != "com.microsoft" for opset in model.opset_import)
-    onnx.checker.check_model(model, full_check=True)
-
-
-def test_rewrite_aihub_compatible_qdq_domains_preserves_ms_opset_when_non_qdq_ms_nodes_remain():
-    from tools.aihub_option1_pilots import rewrite_aihub_compatible_qdq_domains
-
-    model = _build_ms_qdq_with_ms_gelu_model()
-
-    rewrite_aihub_compatible_qdq_domains(model)
-
-    rewritten_domains = {(node.name, node.op_type): node.domain for node in model.graph.node}
-    assert rewritten_domains[("ms_quantize", "QuantizeLinear")] == ""
-    assert rewritten_domains[("ms_dequantize", "DequantizeLinear")] == ""
-    assert rewritten_domains[("ms_gelu", "Gelu")] == "com.microsoft"
-    assert any(opset.domain == "com.microsoft" for opset in model.opset_import)
-    onnx.checker.check_model(model, full_check=True)
-
-
-def test_prepare_vpcd_option1_source_model_can_prepare_sanitized_qdq_source_even_when_fp32_exists(tmp_path):
-    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
-
-    repo_root = tmp_path / "repo"
-    _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
-    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
-    qdq_model_path = bundle_dir / "model.mobile.onnx"
-    _write_minimal_vpcd_ms_qdq_model(qdq_model_path)
-    fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
-    _write_minimal_vpcd_fp32_model(fp32_model_path)
-
-    source = resolve_vpcd_pilot_source(repo_root)
-    prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(
-        source,
-        output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.qdq.onnx",
-        strategy="direct_qdq_sanitized",
-    )
-
-    prepared_model = onnx.load(prepared_model_path.as_posix())
-    assert is_quantized_source is True
-    assert prepared_model_path == (repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.qdq.onnx").resolve()
-    assert all(node.domain == "" for node in prepared_model.graph.node if node.op_type in {"QuantizeLinear", "DequantizeLinear"})
-
-
-def test_prepare_vpcd_option1_source_model_builds_local_qdq_compile_candidate_with_packaging_report(tmp_path):
-    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
-
-    repo_root = tmp_path / "repo"
-    _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
-    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
-    qdq_model_path = bundle_dir / "model.mobile.onnx"
-    _write_minimal_vpcd_ms_qdq_model(qdq_model_path)
-
-    source = resolve_vpcd_pilot_source(repo_root)
-    prepared = prepare_vpcd_option1_source_model(
-        source,
-        output_path=repo_root / "build" / "aihub" / "vpcd_option1_local_qdq" / "model.option1.qdq.onnx",
-        strategy="local_qdq_compile_candidate",
-    )
-
-    assert prepared.report["aihub_compile_readiness"] in {"experimental", "ready"}
-    assert prepared.source_kind == "local_qdq"
-    assert prepared.packaging_kind in {"onnx_file", "onnx_dir"}
-    assert prepared.transformation_kind == "domain_rewritten"
-    assert prepared.packaging_path.exists()
-
-    prepared_model = onnx.load(prepared.prepared_model_path.as_posix())
-    assert all(
-        node.domain == ""
-        for node in prepared_model.graph.node
-        if node.op_type in {"QuantizeLinear", "DequantizeLinear"}
-    )
-
-
-def test_prepare_vpcd_option1_source_model_keeps_uint16_ms_qdq_as_is_for_compile_probe(tmp_path):
-    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
-
-    repo_root = tmp_path / "repo"
-    _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
-    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
-    qdq_model_path = bundle_dir / "model.mobile.onnx"
-    _write_minimal_vpcd_ms_uint16_qdq_model(qdq_model_path)
-
-    source = resolve_vpcd_pilot_source(repo_root)
-    prepared = prepare_vpcd_option1_source_model(
-        source,
-        output_path=repo_root / "build" / "aihub" / "vpcd_option1_local_qdq" / "model.option1.qdq.onnx",
-        strategy="local_qdq_compile_candidate",
-    )
-
-    prepared_model = onnx.load(prepared.prepared_model_path.as_posix())
-    assert prepared.transformation_kind == "as_is"
-    assert prepared.report["aihub_compile_readiness"] == "experimental"
-    assert prepared.report["graph_aihub_compile_readiness"] == "unsafe"
-    assert any(
-        node.domain == "com.microsoft"
-        for node in prepared_model.graph.node
-        if node.op_type in {"QuantizeLinear", "DequantizeLinear"}
-    )
-
-
 def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(tmp_path, monkeypatch):
     from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
 
@@ -1089,7 +860,7 @@ def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path
     assert payload["input_specs"]["x_lens"]["dtype"] == "int64"
 
 
-def test_write_prepared_artifact_record_captures_local_qdq_compile_probe_metadata(tmp_path):
+def test_write_prepared_artifact_record_captures_local_aimet_compile_metadata(tmp_path):
     from tools.aihub_option1_pilots import (
         build_option1_runtime_config,
         write_prepared_artifact_record,
@@ -1097,13 +868,15 @@ def test_write_prepared_artifact_record_captures_local_qdq_compile_probe_metadat
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    source_model_path = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128" / "model.mobile.onnx"
+    source_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
     source_model_path.parent.mkdir(parents=True, exist_ok=True)
     source_model_path.write_bytes(b"source-model")
 
-    prepared_model_path = repo_root / "build" / "aihub" / "vpcd_option1_local_qdq" / "model.option1.qdq.onnx"
+    prepared_model_path = repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx"
     prepared_model_path.parent.mkdir(parents=True, exist_ok=True)
     prepared_model_path.write_bytes(b"prepared-model")
+    packaging_path = repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "wint8_aint16_min_max_local_quality_parity" / "model.option1.aimet"
+    packaging_path.mkdir(parents=True, exist_ok=True)
 
     config = build_option1_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
@@ -1111,29 +884,29 @@ def test_write_prepared_artifact_record_captures_local_qdq_compile_probe_metadat
         repo_root=repo_root,
     )
     record_path = write_prepared_artifact_record(
-        pilot_name="vpcd_option1_local_qdq",
+        pilot_name="vpcd_option1_local_aimet",
         runtime_config=config,
         source_model_path=source_model_path,
         prepared_model_path=prepared_model_path,
         input_specs=None,
         compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io --qairt_version 2.46.0",
-        source_strategy="local_qdq_compile_candidate",
-        source_kind="local_qdq",
-        packaging_kind="onnx_file",
-        packaging_path=prepared_model_path,
+        source_strategy="local_aimet_compile_candidate",
+        source_kind="local_aimet",
+        packaging_kind="aimet_dir",
+        packaging_path=packaging_path,
         compatibility={
             "aihub_compile_readiness": "experimental",
-            "graph_aihub_compile_readiness": "unsafe",
+            "package_ready": True,
         },
         run_label="unit-test",
     )
 
     payload = json.loads(record_path.read_text(encoding="utf-8"))
     assert payload["record_kind"] == "prepared_artifact"
-    assert payload["source_strategy"] == "local_qdq_compile_candidate"
-    assert payload["source_kind"] == "local_qdq"
-    assert payload["packaging_kind"] == "onnx_file"
-    assert payload["packaging_path"].endswith("build/aihub/vpcd_option1_local_qdq/model.option1.qdq.onnx")
+    assert payload["source_strategy"] == "local_aimet_compile_candidate"
+    assert payload["source_kind"] == "local_aimet"
+    assert payload["packaging_kind"] == "aimet_dir"
+    assert payload["packaging_path"].endswith("build/aihub/vpcd_option1_local_aimet/wint8_aint16_min_max_local_quality_parity/model.option1.aimet")
     assert payload["compatibility"]["aihub_compile_readiness"] == "experimental"
 
 
@@ -1240,7 +1013,7 @@ def test_write_compile_run_record_captures_target_model_metadata(tmp_path):
     assert payload["target_model"]["name"] == "zipformer-target"
 
 
-def test_write_compile_run_record_marks_local_qdq_lane_as_quantize_disabled(tmp_path):
+def test_write_compile_run_record_marks_local_aimet_lane_as_quantize_disabled(tmp_path):
     from tools.aihub_option1_pilots import (
         build_option1_runtime_config,
         write_compile_run_record,
@@ -1267,12 +1040,12 @@ def test_write_compile_run_record_marks_local_qdq_lane_as_quantize_disabled(tmp_
     )
 
     record_path = write_compile_run_record(
-        pilot_name="vpcd_option1_local_qdq",
+        pilot_name="vpcd_option1_local_aimet",
         runtime_config=config,
         compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io --qairt_version 2.46.0",
         compile_job=FakeJob("compile-1", "https://aihub/jobs/compile-1", "SUCCESS"),
-        target_model=FakeModel("model-1", "https://aihub/models/model-1", "vpcd-local-qdq-target"),
-        source_strategy="local_qdq_compile_candidate",
+        target_model=FakeModel("model-1", "https://aihub/models/model-1", "vpcd-local-aimet-target"),
+        source_strategy="local_aimet_compile_candidate",
         quantize_stage="disabled",
         compatibility={"aihub_compile_readiness": "experimental"},
         run_label="unit-test",
@@ -1280,8 +1053,8 @@ def test_write_compile_run_record_marks_local_qdq_lane_as_quantize_disabled(tmp_
 
     payload = json.loads(record_path.read_text(encoding="utf-8"))
     assert payload["record_kind"] == "compile_run"
-    assert payload["pilot_name"] == "vpcd_option1_local_qdq"
-    assert payload["source_strategy"] == "local_qdq_compile_candidate"
+    assert payload["pilot_name"] == "vpcd_option1_local_aimet"
+    assert payload["source_strategy"] == "local_aimet_compile_candidate"
     assert payload["quantize_stage"] == "disabled"
     assert payload["compatibility"]["aihub_compile_readiness"] == "experimental"
 
