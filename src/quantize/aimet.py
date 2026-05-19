@@ -37,8 +37,12 @@ def build_matmul_only_aimet_config() -> dict[str, Any]:
             }
         },
         "supergroups": [],
-        "model_input": {},
-        "model_output": {},
+        "model_input": {
+            "is_input_quantized": "True",
+        },
+        "model_output": {
+            "is_output_quantized": "True",
+        },
     }
 
 

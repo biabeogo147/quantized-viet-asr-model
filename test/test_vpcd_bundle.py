@@ -558,6 +558,7 @@ def test_bundle_runtime_restore_with_model_step_accepts_pluggable_runner():
 
     assert restored['text'] == 'xin chao.'
     assert restored['decode_steps'] == 2
+    assert restored['ended_with_eos'] is True
     assert model_step_inputs[0]['decoder_input_ids'][0, :4].tolist() == [2, 1, 1, 1]
     assert model_step_inputs[0]['decoder_attention_mask'][0, :4].tolist() == [1, 0, 0, 0]
     assert model_step_inputs[1]['decoder_input_ids'][0, :4].tolist() == [2, 5, 1, 1]

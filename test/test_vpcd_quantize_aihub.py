@@ -352,6 +352,8 @@ def test_build_matmul_only_aimet_config_disables_defaults_but_enables_matmul_wei
     assert config["op_type"]["MatMul"]["is_input_quantized"] == "True"
     assert config["op_type"]["MatMul"]["is_output_quantized"] == "True"
     assert config["op_type"]["MatMul"]["params"]["weight"]["is_quantized"] == "True"
+    assert config["model_input"]["is_input_quantized"] == "True"
+    assert config["model_output"]["is_output_quantized"] == "True"
 
 
 def test_summarize_vpcd_local_quality_policy_reports_decoder_heavy_exclusions(tmp_path):

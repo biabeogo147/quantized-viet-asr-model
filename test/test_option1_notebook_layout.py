@@ -96,6 +96,25 @@ def test_pilot_notebook_supports_local_aimet_vpcd_source_strategy() -> None:
     assert "local_aimet_compile_candidate" in code_text
     assert "vpcd_option1_local_aimet" in code_text
     assert "Skipping AI Hub quantize for local source lane" in code_text
+    assert 'VPCD_AIMET_PARAM_TYPE = "int8"' in code_text
+    assert 'VPCD_AIMET_ACTIVATION_TYPE = "int16"' in code_text
+    assert 'VPCD_AIMET_QUANT_SCHEME = "min_max"' in code_text
+    assert 'VPCD_AIMET_CONFIG_FILE = "vpcd_matmul_only"' in code_text
+    assert 'VPCD_AIMET_POLICY_MODE = "local_quality_parity"' in code_text
+    assert "aimet_param_type=VPCD_AIMET_PARAM_TYPE" in code_text
+    assert "aimet_activation_type=VPCD_AIMET_ACTIVATION_TYPE" in code_text
+    assert "aimet_quant_scheme=VPCD_AIMET_QUANT_SCHEME" in code_text
+    assert "aimet_config_file=VPCD_AIMET_CONFIG_FILE" in code_text
+    assert "aimet_policy_mode=VPCD_AIMET_POLICY_MODE" in code_text
+
+
+def test_pilot_notebook_treats_bounded_vpcd_truncation_as_comparison_unavailable() -> None:
+    notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
+    code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
+
+    assert 'vpcd_hybrid_mismatches = [row for row in vpcd_hybrid_results if row["matches_expected"] is False]' in code_text
+    assert 'vpcd_hybrid_comparison_unavailable = [row for row in vpcd_hybrid_results if row["matches_expected"] is None]' in code_text
+    assert 'print("vpcd full-text comparison unavailable:")' in code_text
 
 
 def test_phase4_notebook_exists_with_phase4_sections() -> None:

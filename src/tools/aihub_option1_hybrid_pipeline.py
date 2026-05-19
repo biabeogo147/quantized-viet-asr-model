@@ -296,17 +296,48 @@ def run_vpcd_hybrid_evaluation(
         decode_seconds = round(time.perf_counter() - decode_started, 6)
         output_text = str(restored["text"])
         expected_text = str(sample.get("expected_output", ""))
+        generated_ids = [int(token_id) for token_id in np.asarray(restored["generated_ids"]).tolist()]
+        ended_with_eos = bool(
+            restored.get("ended_with_eos")
+            if "ended_with_eos" in restored
+            else (generated_ids and int(generated_ids[-1]) == int(source.eos_token_id))
+        )
+        decode_steps = int(restored["decode_steps"])
+        decode_step_limit_reached = decode_steps >= int(decode_step_limit)
+        truncated_by_decode_step_limit = bool(
+            decode_step_limit < int(source.decoder_sequence)
+            and decode_step_limit_reached
+            and not ended_with_eos
+        )
+        expected_available = bool(expected_text)
+        matches_expected_prefix = (
+            expected_text.startswith(output_text) if expected_available and bool(output_text) else None
+        )
+        if expected_available and not truncated_by_decode_step_limit:
+            matches_expected: bool | None = output_text == expected_text
+            comparison_note: str | None = None
+        elif truncated_by_decode_step_limit:
+            matches_expected = None
+            comparison_note = "decode_step_limit_reached_before_eos"
+        else:
+            matches_expected = None
+            comparison_note = None
         results.append(
             {
                 "sample_index": int(sample_index),
                 "raw_text": str(sample["raw_text"]),
                 "text": output_text,
                 "expected_text": expected_text,
-                "expected_available": bool(expected_text),
-                "matches_expected": output_text == expected_text,
+                "expected_available": expected_available,
+                "matches_expected": matches_expected,
+                "matches_expected_prefix": matches_expected_prefix,
+                "comparison_note": comparison_note,
                 "decode_step_limit": int(decode_step_limit),
-                "decode_steps": int(restored["decode_steps"]),
-                "generated_ids": [int(token_id) for token_id in np.asarray(restored["generated_ids"]).tolist()],
+                "decode_steps": decode_steps,
+                "decode_step_limit_reached": decode_step_limit_reached,
+                "truncated_by_decode_step_limit": truncated_by_decode_step_limit,
+                "ended_with_eos": ended_with_eos,
+                "generated_ids": generated_ids,
                 "golden_input_ids": [int(token_id) for token_id in np.asarray(sample.get("input_ids", []), dtype=np.int64).tolist()],
                 "input_ids_fixture_available": "input_ids" in sample,
                 "cloud_inference_seconds": round(sum(float(job["elapsed_seconds"]) for job in step_jobs), 6),

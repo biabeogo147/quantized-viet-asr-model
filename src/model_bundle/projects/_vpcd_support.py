@@ -343,6 +343,7 @@ class BundleOnnxRuntime:
                 'text': '',
                 'decode_steps': 0,
                 'generated_ids': np.asarray([], dtype=np.int64),
+                'ended_with_eos': False,
             }
 
         model_ids = self._encode_to_model_ids(normalized)
@@ -387,10 +388,12 @@ class BundleOnnxRuntime:
                 break
 
         generated_ids = decoder_token_ids[1:]
+        ended_with_eos = bool(generated_ids.size and int(generated_ids[-1]) == int(self.metadata['eos_token_id']))
         return {
             'text': self._decode_model_ids(generated_ids).strip(),
             'decode_steps': int(generated_ids.size),
             'generated_ids': generated_ids,
+            'ended_with_eos': ended_with_eos,
         }
 
     def _encode_to_model_ids(self, text: str) -> np.ndarray:
