@@ -40,6 +40,43 @@ The export path must stay aligned with the existing Python-first contract:
     - `build/aihub/records/vpcd_teacher_forced_option1/`
     - `build/aihub/records/vpcd_hybrid_option1/`
 
+## Status Update: 2026-05-19
+
+Phase 4 and Phase 5 are now runnable against the current promoted evidence layout.
+
+What changed:
+
+- both notebooks now use per-pilot run labels instead of one shared label
+- VPCD Phase 4 and Phase 5 now explicitly resolve Phase 2 evidence from:
+  - `vpcd_option1_local_aimet`
+- VPCD Phase 4 now preserves the current bounded debug contract:
+  - `compile_pilot_name = vpcd_option1_local_aimet`
+  - `max_decode_steps = 5`
+
+Fresh execution artifacts:
+
+- Phase 4:
+  - [On_device_Ai_option1_phase4_gate.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_phase4_gate.executed.ipynb)
+  - [option1_phase4_gate.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/option1_phase4_gate.log)
+- Phase 5:
+  - [On_device_Ai_option1_phase5_contract.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_phase5_contract.executed.ipynb)
+  - [option1_phase5_contract.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/option1_phase5_contract.log)
+
+Current promotion outcome after the latest run:
+
+- Zipformer:
+  - Phase 4: `WARN`
+  - Phase 5 package status: `deployment_candidate`
+- VPCD:
+  - Phase 4: `NO_GO`
+  - reason: bounded run is now correctly treated as `comparison_unavailable`
+  - Phase 5 package status: `research_only`
+
+Important execution note:
+
+- the first full Phase 4 notebook run exposed a JSON serialization bug in the gate helper and then surfaced a VPCD bounded-comparison classification bug
+- after both helper fixes landed, the final VPCD Phase 4 record was refreshed from the notebook-produced hybrid evidence and the original benchmark summary rather than paying for another multi-hour cloud rerun
+
 ## Export Principle
 
 Android should keep using `bundle_manifest.json` as the entrypoint, but the BKMeeting-facing payload must grow from "just candidate bundle files" into "candidate bundle plus Option 1 evidence-backed compiled payload" where appropriate.

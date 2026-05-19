@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -161,6 +161,8 @@ def classify_phase4_sample(
     actual_text = str(sample_result.get("text", "") or "")
     expected_text = str(sample_result.get("expected_text", "") or "")
     generated_ids = [int(value) for value in sample_result.get("generated_ids", [])]
+    comparison_note = _normalize_optional_string(sample_result.get("comparison_note"))
+    truncated_by_decode_step_limit = bool(sample_result.get("truncated_by_decode_step_limit"))
 
     if not expected_text:
         return {
@@ -168,6 +170,13 @@ def classify_phase4_sample(
             "severity": COMPARISON_UNAVAILABLE,
             "normalized_text_distance": None,
             "reasons": ["expected_text_unavailable"],
+        }
+    if truncated_by_decode_step_limit or comparison_note == "decode_step_limit_reached_before_eos":
+        return {
+            "sample_key": sample_key,
+            "severity": COMPARISON_UNAVAILABLE,
+            "normalized_text_distance": None,
+            "reasons": ["decode_step_limit_reached_before_eos"],
         }
 
     if actual_text == expected_text:
@@ -343,6 +352,7 @@ def build_phase4_gate_record_payload(
     pilot_name: str,
     runtime_config: Option1RuntimeConfig,
     run_label: str | None,
+    phase2_compile_pilot_name_override: str | None = None,
     target_model_id: str,
     compile_record_path: str | Path | None,
     prepared_record_path: str | Path | None,
@@ -355,11 +365,14 @@ def build_phase4_gate_record_payload(
     config: Phase4GateConfig,
 ) -> dict[str, Any]:
     layout = resolve_option1_pilot_layout(pilot_name)
+    phase2_compile_pilot_name = (
+        _normalize_optional_string(phase2_compile_pilot_name_override) or layout.phase2_compile_pilot_name
+    )
     return {
         "record_kind": PHASE4_RECORD_KIND,
         "pilot_name": layout.phase4_gate_pilot_name,
         "canonical_pilot_name": layout.canonical_name,
-        "phase2_compile_pilot_name": layout.phase2_compile_pilot_name,
+        "phase2_compile_pilot_name": phase2_compile_pilot_name,
         "phase3_hybrid_pilot_name": layout.phase3_hybrid_pilot_name,
         "device_name": runtime_config.device_name,
         "qairt_version": runtime_config.qairt_version,
@@ -409,6 +422,7 @@ def run_phase4_gate(
     max_samples: int,
     run_label: str | None = None,
     explicit_target_model_id: str | None = None,
+    phase2_compile_pilot_name_override: str | None = None,
     config: Phase4GateConfig | None = None,
 ) -> dict[str, Any]:
     gate_config = config or build_phase4_gate_config()
@@ -426,6 +440,7 @@ def run_phase4_gate(
         runtime_config=runtime_config,
         run_label=run_label,
         hybrid_run_record_path=benchmark_summary["last_report"].get("record_path"),
+        phase2_compile_pilot_name_override=phase2_compile_pilot_name_override,
     )
     correctness_summary = build_phase4_correctness_summary(
         pilot_name=layout.canonical_name,
@@ -452,6 +467,7 @@ def run_phase4_gate(
         pilot_name=layout.canonical_name,
         runtime_config=runtime_config,
         run_label=run_label,
+        phase2_compile_pilot_name_override=source_records["phase2_compile_pilot_name"],
         target_model_id=str(source_records["hybrid_run_record"].get("target_model_id", "")),
         compile_record_path=source_records["paths"]["compile_record_path"],
         prepared_record_path=source_records["paths"]["prepared_record_path"],
@@ -486,12 +502,16 @@ def resolve_phase4_source_records(
     runtime_config: Option1RuntimeConfig,
     run_label: str | None,
     hybrid_run_record_path: str | Path | None = None,
+    phase2_compile_pilot_name_override: str | None = None,
 ) -> dict[str, Any]:
     layout = resolve_option1_pilot_layout(pilot_name)
     normalized_label = _normalize_record_label(run_label or "latest")
-    prepared_record_path = runtime_config.pilot_record_dir(layout.phase2_compile_pilot_name) / f"prepared-artifact-{normalized_label}.json"
-    compile_record_path = runtime_config.pilot_record_dir(layout.phase2_compile_pilot_name) / f"compile-run-{normalized_label}.json"
-    live_run_record_path = runtime_config.pilot_record_dir(layout.phase2_compile_pilot_name) / f"live-run-{normalized_label}.json"
+    phase2_compile_pilot_name = (
+        _normalize_optional_string(phase2_compile_pilot_name_override) or layout.phase2_compile_pilot_name
+    )
+    prepared_record_path = runtime_config.pilot_record_dir(phase2_compile_pilot_name) / f"prepared-artifact-{normalized_label}.json"
+    compile_record_path = runtime_config.pilot_record_dir(phase2_compile_pilot_name) / f"compile-run-{normalized_label}.json"
+    live_run_record_path = runtime_config.pilot_record_dir(phase2_compile_pilot_name) / f"live-run-{normalized_label}.json"
     hybrid_path = (
         Path(hybrid_run_record_path).resolve()
         if hybrid_run_record_path is not None
@@ -499,6 +519,7 @@ def resolve_phase4_source_records(
     )
 
     return {
+        "phase2_compile_pilot_name": phase2_compile_pilot_name,
         "paths": {
             "prepared_record_path": prepared_record_path.resolve(),
             "compile_record_path": compile_record_path.resolve(),
@@ -677,6 +698,8 @@ def _read_json_file(path: str | Path) -> dict[str, Any]:
 
 
 def _json_safe(value: Any) -> Any:
+    if is_dataclass(value):
+        return _json_safe(asdict(value))
     if isinstance(value, Mapping):
         return {str(key): _json_safe(item) for key, item in value.items()}
     if isinstance(value, Path):

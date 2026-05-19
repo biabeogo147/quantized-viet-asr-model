@@ -236,6 +236,7 @@ def test_phase4_benchmark_sweep_summarizes_warmup_and_steady_state():
 def test_phase4_classify_supports_exact_minor_major_and_catastrophic_rows():
     from tools.aihub_option1_phase4_gate import (
         CATASTROPHIC_DECODE_FAILURE,
+        COMPARISON_UNAVAILABLE,
         EXACT_MATCH,
         MAJOR_TEXT_DRIFT,
         MINOR_TEXT_DRIFT,
@@ -271,11 +272,27 @@ def test_phase4_classify_supports_exact_minor_major_and_catastrophic_rows():
         config=config,
     )
 
+    bounded = classify_phase4_sample(
+        pilot_name="vpcd",
+        sample_result={
+            "sample_index": 1,
+            "text": "Hôm nay trời đẹp",
+            "expected_text": "Hôm nay trời đẹp và gió mát.",
+            "matches_expected": None,
+            "comparison_note": "decode_step_limit_reached_before_eos",
+            "truncated_by_decode_step_limit": True,
+            "generated_ids": [0, 2232, 177, 9, 847],
+        },
+        config=config,
+    )
+
     assert exact["severity"] == EXACT_MATCH
     assert minor["severity"] == MINOR_TEXT_DRIFT
     assert major["severity"] == MAJOR_TEXT_DRIFT
     assert catastrophic["severity"] == CATASTROPHIC_DECODE_FAILURE
     assert "placeholder_like_output" in catastrophic["reasons"]
+    assert bounded["severity"] == COMPARISON_UNAVAILABLE
+    assert bounded["reasons"] == ["decode_step_limit_reached_before_eos"]
 
 
 def test_phase4_footprint_summary_uses_prepared_live_and_hybrid_records(tmp_path):
@@ -359,3 +376,194 @@ def test_phase4_recommendation_supports_go_warn_and_no_go():
     assert "minor_text_drift_present" in warn["reasons"]
     assert no_go["value"] == NO_GO
     assert "catastrophic_decode_failure_present" in no_go["reasons"]
+
+
+def test_phase4_source_records_support_vpcd_compile_pilot_override(tmp_path):
+    from tools.aihub_option1_hybrid_pipeline import ResolvedCompiledTarget, write_hybrid_run_record
+    from tools.aihub_option1_phase4_gate import (
+        build_phase4_gate_config,
+        build_phase4_gate_record_payload,
+        resolve_phase4_source_records,
+    )
+    from tools.aihub_option1_pilots import (
+        build_option1_runtime_config,
+        write_compile_run_record,
+        write_live_run_record,
+        write_prepared_artifact_record,
+    )
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    runtime_config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        repo_root=repo_root,
+    )
+
+    source_model_path = repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx"
+    source_model_path.parent.mkdir(parents=True, exist_ok=True)
+    source_model_path.write_bytes(b"vpcd-fp32-fixed")
+
+    prepared_model_path = repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.option1.qdq.onnx"
+    prepared_model_path.write_bytes(b"vpcd-qdq")
+
+    prepared_record_path = write_prepared_artifact_record(
+        pilot_name="vpcd_option1_local_aimet",
+        runtime_config=runtime_config,
+        source_model_path=source_model_path,
+        prepared_model_path=prepared_model_path,
+        input_specs={
+            "input_ids": ((1, 1024), "int64"),
+            "attention_mask": ((1, 1024), "int64"),
+        },
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
+        source_strategy="local_aimet_compile_candidate",
+        run_label="vpcd-phase4",
+    )
+    compile_record_path = write_compile_run_record(
+        pilot_name="vpcd_option1_local_aimet",
+        runtime_config=runtime_config,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
+        target_model={
+            "model_id": "vpcd-aimet-target",
+            "url": "https://example/models/vpcd-aimet-target",
+            "name": "vpcd-aimet-target",
+        },
+        source_strategy="local_aimet_compile_candidate",
+        quantize_stage="local_aimet",
+        run_label="vpcd-phase4",
+    )
+    live_record_path = write_live_run_record(
+        pilot_name="vpcd_option1_local_aimet",
+        runtime_config=runtime_config,
+        compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
+        job_options="--compute_unit npu",
+        profile_job={"job_id": "profile-vpcd", "url": "https://example/jobs/profile-vpcd"},
+        inference_job={"job_id": "infer-vpcd", "url": "https://example/jobs/infer-vpcd"},
+        output_tensors={"output_0": [np.zeros((1, 8), dtype=np.float32)]},
+        run_label="vpcd-phase4",
+    )
+    hybrid_record_path = write_hybrid_run_record(
+        pilot_name="vpcd_hybrid_option1",
+        runtime_config=runtime_config,
+        target_reference=ResolvedCompiledTarget(
+            compile_pilot_name="vpcd_option1_local_aimet",
+            target_model_id="vpcd-aimet-target",
+            compile_record_path=compile_record_path,
+            run_label="vpcd-phase4",
+            explicit_override=False,
+        ),
+        sample_results=[
+            {
+                "sample_index": 0,
+                "raw_text": "hom nay troi dep",
+                "text": "Hôm nay trời đẹp",
+                "expected_text": "Hôm nay trời đẹp",
+                "matches_expected": True,
+                "generated_ids": [0, 2232, 177, 9, 847],
+                "cloud_inference_seconds": 1.2,
+                "decode_seconds": 0.1,
+            }
+        ],
+        run_label="vpcd-phase4",
+    )
+
+    resolved = resolve_phase4_source_records(
+        pilot_name="vpcd",
+        runtime_config=runtime_config,
+        run_label="vpcd-phase4",
+        hybrid_run_record_path=hybrid_record_path,
+        phase2_compile_pilot_name_override="vpcd_option1_local_aimet",
+    )
+
+    assert resolved["phase2_compile_pilot_name"] == "vpcd_option1_local_aimet"
+    assert resolved["paths"]["prepared_record_path"] == prepared_record_path
+    assert resolved["paths"]["compile_record_path"] == compile_record_path
+    assert resolved["paths"]["live_run_record_path"] == live_record_path
+    assert resolved["compile_run_record"]["pilot_name"] == "vpcd_option1_local_aimet"
+
+    payload = build_phase4_gate_record_payload(
+        pilot_name="vpcd",
+        runtime_config=runtime_config,
+        run_label="vpcd-phase4",
+        phase2_compile_pilot_name_override="vpcd_option1_local_aimet",
+        target_model_id="vpcd-aimet-target",
+        compile_record_path=compile_record_path,
+        prepared_record_path=prepared_record_path,
+        live_run_record_path=live_record_path,
+        hybrid_run_record_path=hybrid_record_path,
+        benchmark_summary={
+            "iterations": [],
+            "warmup": {"total_seconds": 1.3, "cloud_inference_seconds": 1.2, "decode_seconds": 0.1},
+            "steady_state": {"count": 0, "total_seconds_mean": None, "total_seconds_min": None, "total_seconds_max": None},
+            "latency_summary": {"average_cloud_inference_seconds": 1.2},
+        },
+        correctness_summary={
+            "severity_counts": {"exact_match": 1},
+            "sample_results": [{"sample_key": 0, "severity": "exact_match", "reasons": ["exact_text_match"]}],
+            "worst_severity": "exact_match",
+            "matched_samples": 1,
+            "mismatched_samples": 0,
+        },
+        footprint_summary={"prepared_model_size_bytes": 8, "output_tensor_footprint_bytes": 32, "generated_token_footprint_bytes": 40},
+        recommendation={"value": "GO", "reasons": ["exact_match_only"]},
+        config=build_phase4_gate_config(),
+    )
+    assert payload["phase2_compile_pilot_name"] == "vpcd_option1_local_aimet"
+
+
+def test_phase4_gate_record_writer_serializes_resolved_target_reference(tmp_path):
+    from tools.aihub_option1_hybrid_pipeline import ResolvedCompiledTarget
+    from tools.aihub_option1_phase4_gate import build_phase4_gate_config, build_phase4_gate_record_payload, write_phase4_gate_record
+    from tools.aihub_option1_pilots import build_option1_runtime_config
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    runtime_config = build_option1_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        repo_root=repo_root,
+    )
+
+    payload = build_phase4_gate_record_payload(
+        pilot_name="zipformer",
+        runtime_config=runtime_config,
+        run_label="serialize-target-reference",
+        target_model_id="zipformer-target",
+        compile_record_path=Path("D:/compile-run.json"),
+        prepared_record_path=Path("D:/prepared-artifact.json"),
+        live_run_record_path=Path("D:/live-run.json"),
+        hybrid_run_record_path=Path("D:/hybrid-run.json"),
+        benchmark_summary={
+            "iterations": [],
+            "warmup": {"total_seconds": 1.0, "cloud_inference_seconds": 0.8, "decode_seconds": 0.2},
+            "steady_state": {"count": 0, "total_seconds_mean": None, "total_seconds_min": None, "total_seconds_max": None},
+            "last_report": {
+                "target_reference": ResolvedCompiledTarget(
+                    compile_pilot_name="zipformer_encoder_option1",
+                    target_model_id="zipformer-target",
+                    compile_record_path=Path("D:/compile-run.json"),
+                    run_label="serialize-target-reference",
+                    explicit_override=False,
+                ),
+            },
+        },
+        correctness_summary={
+            "severity_counts": {"exact_match": 1},
+            "sample_results": [{"sample_key": "sample-1", "severity": "exact_match", "reasons": ["exact_text_match"]}],
+            "worst_severity": "exact_match",
+            "matched_samples": 1,
+            "mismatched_samples": 0,
+        },
+        footprint_summary={"prepared_model_size_bytes": 12, "output_tensor_footprint_bytes": 20, "generated_token_footprint_bytes": 16},
+        recommendation={"value": "GO", "reasons": ["exact_match_only"]},
+        config=build_phase4_gate_config(),
+    )
+
+    record_path = write_phase4_gate_record(
+        pilot_name="zipformer",
+        runtime_config=runtime_config,
+        payload=payload,
+        run_label="serialize-target-reference",
+    )
+
+    persisted = json.loads(record_path.read_text(encoding="utf-8"))
+    assert persisted["benchmark_summary"]["last_report"]["target_reference"]["compile_pilot_name"] == "zipformer_encoder_option1"

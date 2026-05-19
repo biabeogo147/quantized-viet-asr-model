@@ -28,18 +28,22 @@ def resolve_phase5_evidence_inputs(
     pilot_name: str,
     runtime_config: Option1RuntimeConfig,
     run_label: str | None,
+    phase2_compile_pilot_name_override: str | None = None,
 ) -> dict[str, Any]:
     layout = resolve_option1_pilot_layout(pilot_name)
     normalized_label = _normalize_record_label(run_label or "latest")
+    phase2_compile_pilot_name = (
+        _normalize_optional_string(phase2_compile_pilot_name_override) or layout.phase2_compile_pilot_name
+    )
     required_paths = {
         "prepared_artifact_record": (
-            runtime_config.pilot_record_dir(layout.phase2_compile_pilot_name) / f"prepared-artifact-{normalized_label}.json"
+            runtime_config.pilot_record_dir(phase2_compile_pilot_name) / f"prepared-artifact-{normalized_label}.json"
         ).resolve(),
         "compile_run_record": (
-            runtime_config.pilot_record_dir(layout.phase2_compile_pilot_name) / f"compile-run-{normalized_label}.json"
+            runtime_config.pilot_record_dir(phase2_compile_pilot_name) / f"compile-run-{normalized_label}.json"
         ).resolve(),
         "live_run_record": (
-            runtime_config.pilot_record_dir(layout.phase2_compile_pilot_name) / f"live-run-{normalized_label}.json"
+            runtime_config.pilot_record_dir(phase2_compile_pilot_name) / f"live-run-{normalized_label}.json"
         ).resolve(),
         "hybrid_run_record": (
             runtime_config.pilot_record_dir(layout.phase3_hybrid_pilot_name) / f"hybrid-run-{normalized_label}.json"
@@ -57,6 +61,7 @@ def resolve_phase5_evidence_inputs(
     return {
         "layout": layout,
         "run_label": normalized_label,
+        "phase2_compile_pilot_name": phase2_compile_pilot_name,
         "required_record_paths": required_paths,
         **payloads,
         "warnings": warnings,
@@ -149,6 +154,7 @@ def materialize_phase5_contract_package(
     pilot_name: str,
     runtime_config: Option1RuntimeConfig,
     run_label: str | None,
+    phase2_compile_pilot_name_override: str | None = None,
     package_label: str | None = None,
     output_root: str | Path | None = None,
 ) -> dict[str, Any]:
@@ -156,6 +162,7 @@ def materialize_phase5_contract_package(
         pilot_name=pilot_name,
         runtime_config=runtime_config,
         run_label=run_label,
+        phase2_compile_pilot_name_override=phase2_compile_pilot_name_override,
     )
     layout: Option1PilotLayout = evidence_inputs["layout"]
     normalized_label = evidence_inputs["run_label"]
