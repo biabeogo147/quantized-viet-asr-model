@@ -4,6 +4,14 @@ from pathlib import Path
 import numpy as np
 
 
+def test_vpcd_phase4_layout_defaults_to_local_aimet_compile_lane():
+    from tools.aihub_option1_phase4_gate import resolve_option1_pilot_layout
+
+    layout = resolve_option1_pilot_layout("vpcd")
+
+    assert layout.phase2_compile_pilot_name == "vpcd_option1_local_aimet"
+
+
 def _init_repo_root(repo_root: Path) -> None:
     (repo_root / "src").mkdir(parents=True, exist_ok=True)
     (repo_root / "assets").mkdir(parents=True, exist_ok=True)

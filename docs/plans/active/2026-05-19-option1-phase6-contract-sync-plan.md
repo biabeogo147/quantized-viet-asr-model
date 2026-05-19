@@ -9,20 +9,18 @@ Implement the next handoff phase after `Phase 5` packaging:
 - preserve `bundle_manifest.json` as the Android entrypoint
 - attach enough Option 1 metadata and packaged evidence for future runtime integration work
 
-This plan assumes the latest retained records stay fixed:
+This plan assumes the next clean rerun will use one shared label:
 
 - Zipformer:
-  - `RUN_LABEL = 20260513-1am`
+  - `RUN_LABEL = 20260519-option1-final-rerun`
 - VPCD:
-  - `RUN_LABEL = 20260519-aimet-local-quality-parity-notebook`
+  - `RUN_LABEL = 20260519-option1-final-rerun`
 
 ## Starting Point
 
 What already exists:
 
-- retained Phase 5 contract packages:
-  - `build/aihub/contracts/option1/zipformer/20260513-1am/`
-  - `build/aihub/contracts/option1/vpcd/20260519-aimet-local-quality-parity-notebook/`
+- the contract packaging helpers and notebooks are ready
 - retained candidate bundles:
   - `build/model_bundle/zipformer/qnn_u16u8/`
   - `build/model_bundle/vpcd/qnn_fixed_1024x128/`
@@ -32,6 +30,7 @@ What already exists:
 
 What does not exist yet:
 
+- `build/aihub/` was intentionally reset for the final rerun, so fresh Phase 5 packages must be regenerated first
 - `sync_android_bundle.py` only knows how to copy a classic bundle directory
 - it does not accept a Phase 5 contract package as an input
 - it does not copy packaged Option 1 evidence into BKMeeting

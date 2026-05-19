@@ -300,7 +300,7 @@ def test_resolve_vpcd_source_reads_fixed_shape_candidate(tmp_path):
     assert source.decoder_start_token_id == 2
 
 
-def test_prepare_vpcd_option1_source_model_prefers_fp32_and_freezes_shapes_when_requested(tmp_path):
+def test_prepare_vpcd_option1_source_model_rejects_retired_fp32_fixed_strategy(tmp_path):
     from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
 
     repo_root = tmp_path / "repo"
@@ -311,75 +311,96 @@ def test_prepare_vpcd_option1_source_model_prefers_fp32_and_freezes_shapes_when_
     _write_minimal_vpcd_fp32_model(fp32_model_path)
 
     source = resolve_vpcd_pilot_source(repo_root)
-    prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(
-        source,
-        strategy="prefer_fp32_fixed",
-    )
-
-    assert prepared_model_path == (
-        repo_root / "build" / "aihub" / "vpcd_fp32_fixed" / "model.fp32.fixed.onnx"
-    ).resolve()
-    assert is_quantized_source is False
-
-    prepared_model = onnx.load(prepared_model_path.as_posix())
-    input_dims = {
-        value.name: [dim.dim_value if dim.HasField("dim_value") else dim.dim_param for dim in value.type.tensor_type.shape.dim]
-        for value in prepared_model.graph.input
-    }
-    assert input_dims["input_ids"] == [1, 1024]
-    assert input_dims["attention_mask"] == [1, 1024]
-    assert input_dims["decoder_input_ids"] == [1, 128]
-    assert input_dims["decoder_attention_mask"] == [1, 128]
-
-
-def test_prepare_vpcd_option1_source_model_defaults_to_fp32_fixed_shape_prepare(tmp_path):
-    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
-
-    repo_root = tmp_path / "repo"
-    _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
-    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
-    qdq_model_path = bundle_dir / "model.mobile.onnx"
-    qdq_model_path.write_bytes(b"qdq-model")
-    fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
-    _write_minimal_vpcd_fp32_model(fp32_model_path)
-
-    source = resolve_vpcd_pilot_source(repo_root)
-    prepared_model_path, is_quantized_source = prepare_vpcd_option1_source_model(
-        source,
-        output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx",
-    )
-
-    prepared_model = onnx.load(prepared_model_path.as_posix())
-    assert is_quantized_source is False
-    assert prepared_model_path == (repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx").resolve()
-    input_dims = {
-        value.name: [dim.dim_value if dim.HasField("dim_value") else dim.dim_param for dim in value.type.tensor_type.shape.dim]
-        for value in prepared_model.graph.input
-    }
-    assert input_dims["input_ids"] == [1, 1024]
-    assert input_dims["attention_mask"] == [1, 1024]
-    assert input_dims["decoder_input_ids"] == [1, 128]
-    assert input_dims["decoder_attention_mask"] == [1, 128]
-
-
-def test_prepare_vpcd_option1_source_model_requires_fp32_for_default_debug_lane(tmp_path):
-    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
-
-    repo_root = tmp_path / "repo"
-    _init_repo_root(repo_root)
-    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
-    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
-    qdq_model_path = bundle_dir / "model.mobile.onnx"
-    qdq_model_path.write_bytes(b"qdq-model")
-
-    source = resolve_vpcd_pilot_source(repo_root)
-    with pytest.raises(FileNotFoundError, match="VPCD FP32 ONNX source model"):
+    with pytest.raises(ValueError, match="Unsupported VPCD Option 1 source strategy"):
         prepare_vpcd_option1_source_model(
             source,
-            output_path=repo_root / "build" / "aihub" / "vpcd_option1" / "model.option1.onnx",
             strategy="prefer_fp32_fixed",
         )
+
+
+def test_prepare_vpcd_option1_source_model_defaults_to_local_aimet_compile_candidate(tmp_path, monkeypatch):
+    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
+    _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
+    fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
+    _write_minimal_vpcd_fp32_model(fp32_model_path)
+    tokenizer_dir = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1"
+    tokenizer_dir.mkdir(parents=True, exist_ok=True)
+
+    def fake_build_vpcd_aimet_quantize_recipe(**kwargs):
+        return AimetQuantizeRecipe(
+            param_type="int8",
+            activation_type="int16",
+            quant_scheme="min_max",
+            config_file="vpcd_matmul_only",
+            calibration_inputs=(
+                CalibrationSample(
+                    inputs={
+                        "input_ids": np.asarray([[1, 2, 3]], dtype=np.int64),
+                        "attention_mask": np.asarray([[1, 1, 1]], dtype=np.int64),
+                        "decoder_input_ids": np.asarray([[2, 1]], dtype=np.int64),
+                        "decoder_attention_mask": np.asarray([[1, 0]], dtype=np.int64),
+                    }
+                ),
+            ),
+            calibration_stats={"dataset_fingerprint": "abc123"},
+            variant_name="wint8_aint16_min_max_local_quality_parity",
+            policy_mode="local_quality_parity",
+            local_quality_policy={
+                "preset": "sd8g2_quality",
+                "excluded_node_names": ["/model/decoder/Cast", "/lm_head/MatMul"],
+                "op_types_to_quantize": ["MatMul"],
+            },
+        )
+
+    def fake_run_aimet_export_in_docker(**kwargs):
+        package_dir = Path(kwargs["package_dir"])
+        package_dir.mkdir(parents=True, exist_ok=True)
+        (package_dir / "model.option1.onnx").write_bytes(b"onnx")
+        (package_dir / "model.option1.encodings").write_text("{}", encoding="utf-8")
+        qdq_path = Path(kwargs["qdq_reference_model_path"])
+        qdq_path.parent.mkdir(parents=True, exist_ok=True)
+        qdq_path.write_bytes(b"qdq")
+        report_path = Path(kwargs["report_path"])
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report = {
+            "package_dir": package_dir.resolve().as_posix(),
+            "onnx_files": ["model.option1.onnx"],
+            "encodings_files": ["model.option1.encodings"],
+            "data_files": [],
+            "package_ready": True,
+            "package_notes": [],
+            "qdq_reference_model_path": qdq_path.resolve().as_posix(),
+        }
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return report
+
+    monkeypatch.setattr("tools.aihub_option1_pilots.build_vpcd_aimet_quantize_recipe", fake_build_vpcd_aimet_quantize_recipe)
+    monkeypatch.setattr("tools.aihub_option1_pilots._run_aimet_export_in_docker", fake_run_aimet_export_in_docker)
+
+    source = resolve_vpcd_pilot_source(repo_root)
+    prepared = prepare_vpcd_option1_source_model(
+        source,
+        output_path=repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx",
+    )
+
+    prepared_model = onnx.load(prepared.prepared_model_path.as_posix())
+    assert prepared.source_strategy == "local_aimet_compile_candidate"
+    assert prepared.is_quantized_source is True
+    assert prepared.prepared_model_path == (
+        repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx"
+    ).resolve()
+    input_dims = {
+        value.name: [dim.dim_value if dim.HasField("dim_value") else dim.dim_param for dim in value.type.tensor_type.shape.dim]
+        for value in prepared_model.graph.input
+    }
+    assert input_dims["input_ids"] == [1, 1024]
+    assert input_dims["attention_mask"] == [1, 1024]
+    assert input_dims["decoder_input_ids"] == [1, 128]
+    assert input_dims["decoder_attention_mask"] == [1, 128]
 def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(tmp_path, monkeypatch):
     from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
 

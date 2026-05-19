@@ -119,6 +119,8 @@ Everything else serves that contract:
 ## Related docs
 
 - `docs/architecture/bundle-contract.md`
+- `docs/workflows/README.md`
 - `docs/workflows/export-verify-smoke.md`
 - `docs/workflows/quantize-qnn-candidates.md`
+- `docs/workflows/option1-overview.md`
 - `docs/workflows/android-handoff.md`

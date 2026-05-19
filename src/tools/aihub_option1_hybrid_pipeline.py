@@ -40,7 +40,7 @@ from transformers import AutoTokenizer
 
 ZIPFORMER_PHASE2_PILOT = "zipformer_encoder_option1"
 ZIPFORMER_PHASE3_PILOT = "zipformer_hybrid_option1"
-VPCD_PHASE2_PILOT = "vpcd_option1"
+VPCD_PHASE2_PILOT = "vpcd_option1_local_aimet"
 VPCD_PHASE3_PILOT = "vpcd_hybrid_option1"
 VPCD_TEACHER_FORCED_PILOT = "vpcd_teacher_forced_option1"
 VPCD_QUANTIZED_TEACHER_FORCED_PILOT = "vpcd_quantized_teacher_forced_option1"

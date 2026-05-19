@@ -7,6 +7,12 @@ from model_bundle.manifest import ModelBundleManifest
 from model_bundle.projects._vpcd_support import BundleOnnxRuntime
 
 
+def test_vpcd_phase2_pilot_defaults_to_local_aimet_lane():
+    from tools.aihub_option1_hybrid_pipeline import VPCD_PHASE2_PILOT
+
+    assert VPCD_PHASE2_PILOT == "vpcd_option1_local_aimet"
+
+
 def _init_repo_root(repo_root: Path) -> None:
     (repo_root / "src").mkdir(parents=True, exist_ok=True)
     (repo_root / "assets").mkdir(parents=True, exist_ok=True)
@@ -405,7 +411,7 @@ def test_vpcd_hybrid_runner_restores_expected_text(tmp_path):
         repo_root=repo_root,
     )
     write_compile_run_record(
-        pilot_name="vpcd_option1",
+        pilot_name="vpcd_option1_local_aimet",
         runtime_config=runtime_config,
         compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
         target_model={"model_id": "vpcd-target", "url": "https://example/models/vpcd-target"},
@@ -483,7 +489,7 @@ def test_vpcd_hybrid_runner_passes_decode_step_limit_to_bundle_runtime(tmp_path)
         repo_root=repo_root,
     )
     write_compile_run_record(
-        pilot_name="vpcd_option1",
+        pilot_name="vpcd_option1_local_aimet",
         runtime_config=runtime_config,
         compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
         target_model={"model_id": "vpcd-target", "url": "https://example/models/vpcd-target"},
@@ -529,7 +535,7 @@ def test_vpcd_hybrid_runner_marks_bounded_prefix_runs_as_comparison_unavailable(
         repo_root=repo_root,
     )
     write_compile_run_record(
-        pilot_name="vpcd_option1",
+        pilot_name="vpcd_option1_local_aimet",
         runtime_config=runtime_config,
         compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
         target_model={"model_id": "vpcd-target", "url": "https://example/models/vpcd-target"},
@@ -578,7 +584,7 @@ def test_vpcd_teacher_forced_diagnostics_records_cpu_and_cloud_step_summaries(tm
         repo_root=repo_root,
     )
     write_compile_run_record(
-        pilot_name="vpcd_option1",
+        pilot_name="vpcd_option1_local_aimet",
         runtime_config=runtime_config,
         compile_options="--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
         target_model={"model_id": "vpcd-target", "url": "https://example/models/vpcd-target"},

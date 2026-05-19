@@ -8,6 +8,10 @@ Use this file after:
 - candidate-bundle checks pass
 - Python-side QNN preflight passes where applicable
 
+If you are working on the retained `Option 1` AI Hub path, read this after:
+
+- `docs/workflows/option1-promotion-handoff.md`
+
 ## Responsibility split
 
 ### What `python-model-test` proves before handoff
@@ -39,7 +43,7 @@ This CLI:
 - rewrites handoff fields in `bundle_manifest.json` when needed
 - keeps variant-family paths aligned with Android naming
 
-The next planned extension is contract-aware Option 1 sync, where the same CLI will also stage packaged `Phase 5` evidence under the Android asset namespace.
+The next planned extension is contract-aware `Option 1` sync, where the same CLI will also stage packaged `Phase 5` evidence under the Android asset namespace.
 
 ## Supported handoff targets
 
@@ -152,10 +156,9 @@ It does not prove:
 
 ## Related docs
 
-- `docs/workflows/model-quantization-status.md`
-- `docs/plans/active/2026-05-19-bkmeeting-android-option1-export-plan.md`
-- `docs/plans/active/2026-05-19-option1-phase6-contract-sync-plan.md`
 - `docs/workflows/export-verify-smoke.md`
 - `docs/workflows/quantize-qnn-candidates.md`
+- `docs/workflows/option1-promotion-handoff.md`
+- `docs/qnn/model-quantization.md`
 - `docs/qnn/preflight.md`
 - `src/tools/README.md`

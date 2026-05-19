@@ -58,7 +58,7 @@ PILOT_LAYOUTS = {
     ),
     "vpcd": Option1PilotLayout(
         canonical_name="vpcd",
-        phase2_compile_pilot_name="vpcd_option1",
+        phase2_compile_pilot_name="vpcd_option1_local_aimet",
         phase3_hybrid_pilot_name="vpcd_hybrid_option1",
         phase4_gate_pilot_name="vpcd_phase4_option1",
         contract_pilot_name="vpcd",

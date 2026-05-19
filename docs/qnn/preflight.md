@@ -85,6 +85,7 @@ The intended sequence is:
 
 ## Related docs
 
+- `docs/qnn/model-quantization.md`
 - `docs/qnn/validation-log.md`
 - `docs/workflows/quantize-qnn-candidates.md`
 - `docs/workflows/android-handoff.md`

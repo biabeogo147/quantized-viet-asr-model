@@ -31,51 +31,25 @@ The export path must stay aligned with the existing Python-first contract:
 - Current leading AI Hub-compatible local quantize lane:
   - `local_aimet_compile_candidate`
   - `w8a16 + min_max + local_quality_parity`
-- Current best run label:
-  - `20260519-aimet-local-quality-parity-notebook`
-- Current evidence:
-  - prepared / compile / live records under `build/aihub/records/vpcd_option1_local_aimet/`
-  - bounded teacher-forced and hybrid records under:
-    - `build/aihub/records/vpcd_quantized_teacher_forced_option1/`
-    - `build/aihub/records/vpcd_teacher_forced_option1/`
-    - `build/aihub/records/vpcd_hybrid_option1/`
+- Current final rerun label:
+  - `20260519-option1-final-rerun`
+- Current state:
+  - `build/aihub/` has been intentionally cleaned
+  - the next operator rerun must regenerate the fresh VPCD evidence set
 
 ## Status Update: 2026-05-19
 
-Phase 4 and Phase 5 are now runnable against the current promoted evidence layout.
+Phase 4 and Phase 5 are now runnable against the promoted evidence layout.
 
 What changed:
 
-- both notebooks now use per-pilot run labels instead of one shared label
-- VPCD Phase 4 and Phase 5 now explicitly resolve Phase 2 evidence from:
+- pilot, Phase 4, and Phase 5 notebooks now all default to the clean rerun label:
+  - `20260519-option1-final-rerun`
+- VPCD now resolves the active compile lane directly through:
   - `vpcd_option1_local_aimet`
-- VPCD Phase 4 now preserves the current bounded debug contract:
-  - `compile_pilot_name = vpcd_option1_local_aimet`
+- VPCD Phase 4 still preserves the bounded debug contract:
   - `max_decode_steps = 5`
-
-Fresh execution artifacts:
-
-- Phase 4:
-  - [On_device_Ai_option1_phase4_gate.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_phase4_gate.executed.ipynb)
-  - [option1_phase4_gate.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/option1_phase4_gate.log)
-- Phase 5:
-  - [On_device_Ai_option1_phase5_contract.executed.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/On_device_Ai_option1_phase5_contract.executed.ipynb)
-  - [option1_phase5_contract.log](/D:/DS-AI/BKMeeting-Research/python-model-test/build/aihub/notebook_runs/option1_phase5_contract.log)
-
-Current promotion outcome after the latest run:
-
-- Zipformer:
-  - Phase 4: `WARN`
-  - Phase 5 package status: `deployment_candidate`
-- VPCD:
-  - Phase 4: `NO_GO`
-  - reason: bounded run is now correctly treated as `comparison_unavailable`
-  - Phase 5 package status: `research_only`
-
-Important execution note:
-
-- the first full Phase 4 notebook run exposed a JSON serialization bug in the gate helper and then surfaced a VPCD bounded-comparison classification bug
-- after both helper fixes landed, the final VPCD Phase 4 record was refreshed from the notebook-produced hybrid evidence and the original benchmark summary rather than paying for another multi-hour cloud rerun
+- all stale `build/aihub` evidence was removed so the next rerun produces one clean version only
 
 ## Export Principle
 
@@ -98,7 +72,7 @@ Instead:
 
 - The archived AI Hub quantize `A/B/C/D` investigation is no longer part of the active execution path.
 - The retained VPCD direction is the AIMET parity lane only.
-- Remove the legacy `prefer_fp32_fixed -> AI Hub quantize` VPCD path from the active pilot notebook and helper defaults before the final rerun.
+- The legacy `prefer_fp32_fixed -> AI Hub quantize` VPCD path has been removed from the active notebook and helper defaults.
 - Do not promote the historical local-QDQ probe lane.
 - Do not remove the current bundle sync entrypoint:
   - `src/tools/sync_android_bundle.py`
@@ -107,7 +81,7 @@ Instead:
 
 The remaining implementation work is now concentrated in `Phase 6`:
 
-- first, clean and rerun the retained VPCD AIMET parity lane from a fresh `build/aihub` state
+- first, run the fresh clean rerun from the current notebook defaults
 - extend `sync_android_bundle.py` so it can consume Phase 5 contract packages
 - sync those contract-backed payloads into BKMeeting
 - keep Android entry through `bundle_manifest.json`
@@ -141,9 +115,9 @@ Choose the concrete `RUN_LABEL` per model family.
 Expected initial labels:
 
 - Zipformer:
-  - `20260513-1am` unless a newer Phase 4 run supersedes it
+  - `20260519-option1-final-rerun`
 - VPCD:
-  - `20260519-aimet-local-quality-parity-notebook`
+  - `20260519-option1-final-rerun`
 
 ### Task 1.2
 

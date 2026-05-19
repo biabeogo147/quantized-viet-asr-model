@@ -84,9 +84,11 @@ def test_pilot_notebook_limits_vpcd_source_strategies_to_supported_lanes() -> No
     notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
     code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
 
-    assert "VPCD_SOURCE_STRATEGY = \"prefer_fp32_fixed\"" in code_text
+    assert 'VPCD_SOURCE_STRATEGY = "local_aimet_compile_candidate"' in code_text
     assert "local_qdq_compile_candidate" not in code_text
-    assert "Skipping AI Hub quantize for local source lane" in code_text
+    assert 'vpcd_source_strategy = str(VPCD_SOURCE_STRATEGY or "local_aimet_compile_candidate").strip()' in code_text
+    assert "vpcd_uses_aihub_quantize" not in code_text
+    assert "quantize-run-" not in code_text
 
 
 def test_pilot_notebook_supports_local_aimet_vpcd_source_strategy() -> None:
@@ -95,7 +97,6 @@ def test_pilot_notebook_supports_local_aimet_vpcd_source_strategy() -> None:
 
     assert "local_aimet_compile_candidate" in code_text
     assert "vpcd_option1_local_aimet" in code_text
-    assert "Skipping AI Hub quantize for local source lane" in code_text
     assert 'VPCD_AIMET_PARAM_TYPE = "int8"' in code_text
     assert 'VPCD_AIMET_ACTIVATION_TYPE = "int16"' in code_text
     assert 'VPCD_AIMET_QUANT_SCHEME = "min_max"' in code_text
@@ -106,6 +107,7 @@ def test_pilot_notebook_supports_local_aimet_vpcd_source_strategy() -> None:
     assert "aimet_quant_scheme=VPCD_AIMET_QUANT_SCHEME" in code_text
     assert "aimet_config_file=VPCD_AIMET_CONFIG_FILE" in code_text
     assert "aimet_policy_mode=VPCD_AIMET_POLICY_MODE" in code_text
+    assert "resolve_downloaded_quantized_model_path(" not in code_text
 
 
 def test_pilot_notebook_treats_bounded_vpcd_truncation_as_comparison_unavailable() -> None:
@@ -126,11 +128,11 @@ def test_phase4_notebook_exists_with_phase4_sections() -> None:
     assert "### Zipformer Phase 4 Benchmark And Gate" in markdown_text
     assert "### VPCD Phase 4 Benchmark And Gate" in markdown_text
     assert "## Phase 4 Recommendation Summary" in markdown_text
-    assert 'ZIPFORMER_RUN_LABEL = "20260513-1am"' in code_text
-    assert 'VPCD_RUN_LABEL = "20260519-aimet-local-quality-parity-notebook"' in code_text
-    assert 'VPCD_PHASE2_COMPILE_PILOT_NAME = "vpcd_option1_local_aimet"' in code_text
-    assert "phase2_compile_pilot_name_override=VPCD_PHASE2_COMPILE_PILOT_NAME" in code_text
-    assert "compile_pilot_name=VPCD_PHASE2_COMPILE_PILOT_NAME" in code_text
+    assert 'ZIPFORMER_RUN_LABEL = "20260519-option1-final-rerun"' in code_text
+    assert 'VPCD_RUN_LABEL = "20260519-option1-final-rerun"' in code_text
+    assert 'VPCD_PHASE2_COMPILE_PILOT_NAME' not in code_text
+    assert "phase2_compile_pilot_name_override=" not in code_text
+    assert "compile_pilot_name=VPCD_PHASE2_COMPILE_PILOT_NAME" not in code_text
     assert "max_decode_steps=VPCD_PHASE4_MAX_DECODE_STEPS" in code_text
 
 
@@ -145,7 +147,7 @@ def test_phase5_notebook_exists_with_phase5_sections() -> None:
     assert "## Phase 5 Packaging Summary" in markdown_text
     assert "PHASE5_INCLUDE_ZIPFORMER" in code_text
     assert "PHASE5_INCLUDE_VPCD" in code_text
-    assert 'ZIPFORMER_RUN_LABEL = "20260513-1am"' in code_text
-    assert 'VPCD_RUN_LABEL = "20260519-aimet-local-quality-parity-notebook"' in code_text
-    assert 'VPCD_PHASE2_COMPILE_PILOT_NAME = "vpcd_option1_local_aimet"' in code_text
-    assert "phase2_compile_pilot_name_override=VPCD_PHASE2_COMPILE_PILOT_NAME" in code_text
+    assert 'ZIPFORMER_RUN_LABEL = "20260519-option1-final-rerun"' in code_text
+    assert 'VPCD_RUN_LABEL = "20260519-option1-final-rerun"' in code_text
+    assert 'VPCD_PHASE2_COMPILE_PILOT_NAME' not in code_text
+    assert "phase2_compile_pilot_name_override=" not in code_text

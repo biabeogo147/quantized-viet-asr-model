@@ -1009,9 +1009,9 @@ def prepare_vpcd_option1_source_model(
 ) -> PreparedVpcdOption1Source:
     normalized_strategy = _normalize_optional_string(strategy)
     if normalized_strategy is None:
-        normalized_strategy = "prefer_fp32_fixed"
+        normalized_strategy = "local_aimet_compile_candidate"
     prepared_output_path = Path(output_path).resolve() if output_path is not None else (
-        source.repo_root / "build" / "aihub" / "vpcd_fp32_fixed" / "model.fp32.fixed.onnx"
+        source.repo_root / "build" / "aihub" / "vpcd_option1_local_aimet" / "model.fp32.fixed.onnx"
     ).resolve()
     if normalized_strategy == "local_aimet_compile_candidate":
         fp32_source_path = resolve_vpcd_fp32_source_model_path(source)
@@ -1113,29 +1113,7 @@ def prepare_vpcd_option1_source_model(
             graph_report=None,
         )
 
-    if normalized_strategy != "prefer_fp32_fixed":
-        raise ValueError(f"Unsupported VPCD Option 1 source strategy: {normalized_strategy}")
-
-    fp32_source_path = resolve_vpcd_fp32_source_model_path(source)
-    if fp32_source_path is None:
-        raise FileNotFoundError(
-            "Could not resolve a VPCD FP32 ONNX source model for the FP32 -> AI Hub quantize debug lane."
-        )
-
-    input_shapes = {name: spec[0] for name, spec in build_vpcd_input_specs(source).items()}
-    freeze_model_inputs(fp32_source_path, prepared_output_path, input_shapes)
-    return PreparedVpcdOption1Source(
-        prepared_model_path=prepared_output_path,
-        is_quantized_source=False,
-        source_strategy=normalized_strategy,
-        source_kind="fp32_fixed",
-        packaging_kind="onnx_file",
-        packaging_path=prepared_output_path,
-        transformation_kind="fixed_shape_freeze",
-        diagnostic_model_path=None,
-        report=None,
-        graph_report=None,
-    )
+    raise ValueError(f"Unsupported VPCD Option 1 source strategy: {normalized_strategy}")
 
 
 def summarize_tensor_outputs(
