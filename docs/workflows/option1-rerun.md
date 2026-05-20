@@ -18,6 +18,7 @@ This is now the full retained `Option 1` notebook flow in this repo.
 4. for VPCD, keep the AIMET service alive on `http://127.0.0.1:18080` while producing the local artifact
 
 The notebook itself starts after those producer steps. It does not run local VPCD quantization.
+It also no longer prepares the Zipformer encoder for AI Hub inside the notebook.
 
 ## Retained defaults
 
@@ -35,7 +36,7 @@ The notebook itself starts after those producer steps. It does not run local VPC
 
 ### Zipformer
 
-1. prepare encoder upload artifact
+1. read the prebuilt AI Hub-ready encoder from `build/quantize/zipformer/qnn_u16u8/aihub_compile/encoder.aihub.option1.onnx`
 2. compile on AI Hub
 3. run compiled target
 4. run hybrid transcript comparison
@@ -62,6 +63,7 @@ The notebook itself starts after those producer steps. It does not run local VPC
 
 Stop and investigate if:
 
+- the retained Zipformer AI Hub-ready encoder is missing
 - the notebook asks for a retired VPCD lane
 - the retained local AIMET artifact is missing
 - VPCD diverges before the retained `5`-step window

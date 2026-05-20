@@ -25,6 +25,7 @@ class QuantizationReport:
     trace_records: int
     components: list[ComponentQuantizationReport] = field(default_factory=list)
     evaluation: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)

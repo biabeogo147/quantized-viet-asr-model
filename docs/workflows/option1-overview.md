@@ -7,6 +7,7 @@ This is the shortest current map for `Option 1`.
 - `Zipformer`
   - retained lane: `zipformer_encoder_option1`
   - producer: local quantize bundle under `build/quantize/zipformer/qnn_u16u8/`
+  - retained compile input: `build/quantize/zipformer/qnn_u16u8/aihub_compile/encoder.aihub.option1.onnx`
   - notebook proof: encoder-first AI Hub compile/run plus hybrid comparison
 - `VPCD`
   - retained lane: `local_aimet_compile_candidate`

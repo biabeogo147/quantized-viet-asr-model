@@ -131,6 +131,16 @@ def test_pilot_notebook_treats_vpcd_local_aimet_as_prebuilt_source() -> None:
     assert "fixed-shape FP32 prepare locally, then AI Hub quantize, then AI Hub compile" not in markdown_text
 
 
+def test_pilot_notebook_treats_zipformer_as_prebuilt_aihub_ready_source() -> None:
+    notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
+    code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
+    markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
+
+    assert "prepare_zipformer_encoder_option1_source_model" not in code_text
+    assert 'zipformer_aihub_prepared_encoder_path = Path("build/quantize/zipformer/qnn_u16u8/aihub_compile/encoder.aihub.option1.onnx")' in code_text
+    assert "The notebook reads the retained AI Hub-ready encoder directly from `build/quantize`." in markdown_text
+
+
 def test_pilot_notebook_treats_bounded_vpcd_truncation_as_comparison_unavailable() -> None:
     notebook = _load_notebook("On_device_Ai_option1_pilots.ipynb")
     code_text = "\n".join(_cell_texts(notebook, cell_type="code"))

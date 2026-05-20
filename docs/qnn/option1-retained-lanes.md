@@ -11,7 +11,7 @@ Use it when you need to answer:
 
 Status date:
 
-- `2026-05-19`
+- `2026-05-20`
 
 ## Final decision
 
@@ -20,7 +20,7 @@ Status date:
 Best retained NPU lane:
 
 - `zipformer_encoder_option1`
-- source: prepared fixed-shape encoder artifact
+- source: `build/quantize/zipformer/qnn_u16u8/aihub_compile/encoder.aihub.option1.onnx`
 - compile path: direct AI Hub compile to `precompiled_qnn_onnx`
 
 Why:
@@ -62,7 +62,7 @@ It should not use:
 | --- | --- | --- | --- | --- |
 | FP32 reference bundle | Local FP32 export only | None | Good reference bundle for Python verification and Android baseline, but not an NPU lane | Keep as reference only |
 | Local quantized bundle `qnn_u16u8` | Local QDQ candidate bundle with `quint8` weights and `quint16` activations | None in this lane | Structurally valid and useful for Android experimentation, but current Python evaluation is still not clean end-to-end | Keep as candidate bundle, not as the main AI Hub proof lane |
-| Prepared encoder direct compile | Prepared fixed-shape encoder slice | Direct AI Hub compile | Compile and cloud inference work; this is the strongest current NPU proof | Keep |
+| Prepared encoder direct compile | `python -m quantize --project zipformer` now emits the retained AI Hub-ready encoder under `build/quantize/.../aihub_compile/` | Direct AI Hub compile | Compile and cloud inference work; the `2026-05-20` post-quantize-only rerun matched the prior retained hybrid output exactly | Keep |
 | AI Hub quantize on prepared encoder | AI Hub quantize attempt on prepared encoder graph | AI Hub quantize -> compile | Not the active path; QAIRT conversion still collides with control-flow outputs on this graph family | Retire from active operator flow |
 | AIMET local quantize | Not used | Not used | No active AIMET-based Zipformer lane exists in this repo | Not applicable |
 
@@ -117,6 +117,7 @@ Quantized:
 - bundle format: fixed-shape `QDQ`
 - weights: `quint8`
 - activations: `quint16`
+- retained AI Hub compile input: `build/quantize/zipformer/qnn_u16u8/aihub_compile/encoder.aihub.option1.onnx`
 
 Still CPU-side in the retained AI Hub lane:
 

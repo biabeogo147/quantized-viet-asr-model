@@ -9,10 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 import numpy as np
-import onnx
 import onnxruntime as ort
-from onnx import TensorProto, helper
-from onnxruntime.tools.symbolic_shape_infer import SymbolicShapeInference
 
 from model_bundle.fixtures import AudioSampleFixture, read_jsonl
 from model_bundle.manifest import ModelBundleManifest
@@ -47,16 +44,6 @@ from transformers import AutoTokenizer
 DEFAULT_TARGET_RUNTIME = "precompiled_qnn_onnx"
 DEFAULT_COMPUTE_UNIT = "npu"
 InputSpecs = dict[str, tuple[tuple[int, ...], str]]
-ZIPFORMER_BOOL_SLICE_NODE_NAMES = (
-    "/encoder/Slice_1",
-    "/encoder/Slice_3",
-    "/encoder/Slice_5",
-)
-ZIPFORMER_BOOL_UNSQUEEZE_NODE_NAMES = (
-    "/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15",
-    "/encoder/2/encoder/0/self_attn_weights/Unsqueeze_15",
-    "/encoder/3/encoder/0/self_attn_weights/Unsqueeze_15",
-)
 
 
 @dataclass(frozen=True)
@@ -344,94 +331,6 @@ def build_zipformer_encoder_inference_entries(
         dataset["x"].append(np.asarray(encoder_inputs["x"], dtype=np.float32))
         dataset["x_lens"].append(np.asarray(encoder_inputs["x_lens"], dtype=np.int64))
     return dataset
-
-
-def strip_model_io_value_info_conflicts(
-    model: onnx.ModelProto,
-    *,
-    extra_names: set[str] | None = None,
-) -> None:
-    io_names = {value.name for value in model.graph.input} | {value.name for value in model.graph.output}
-    if extra_names:
-        io_names.update(extra_names)
-    kept = [value for value in model.graph.value_info if value.name not in io_names]
-    del model.graph.value_info[:]
-    model.graph.value_info.extend(kept)
-
-
-def rewrite_zipformer_bool_mask_slices_for_htp(model: onnx.ModelProto) -> None:
-    slice_names = set(ZIPFORMER_BOOL_SLICE_NODE_NAMES)
-    unsqueeze_names = set(ZIPFORMER_BOOL_UNSQUEEZE_NODE_NAMES)
-    shared_cast_name = "/GreaterOrEqual_output_0_u8_cast"
-    shared_cast_output = "/GreaterOrEqual_output_0_u8"
-    stale_value_info_names: set[str] = set()
-    new_nodes: list[onnx.NodeProto] = []
-    shared_cast_inserted = False
-
-    for node in model.graph.node:
-        if node.name in slice_names and not shared_cast_inserted:
-            new_nodes.append(
-                helper.make_node(
-                    "Cast",
-                    ["/GreaterOrEqual_output_0"],
-                    [shared_cast_output],
-                    name=shared_cast_name,
-                    to=TensorProto.UINT8,
-                )
-            )
-            shared_cast_inserted = True
-
-        if node.name in slice_names:
-            node.input[0] = shared_cast_output
-            stale_value_info_names.add(node.output[0])
-
-        if node.name in unsqueeze_names:
-            original_output = node.output[0]
-            temp_output = f"{original_output}_u8"
-            stale_value_info_names.add(temp_output)
-            node.output[0] = temp_output
-            new_nodes.append(node)
-            new_nodes.append(
-                helper.make_node(
-                    "Cast",
-                    [temp_output],
-                    [original_output],
-                    name=f"{node.name}_cast_bool",
-                    to=TensorProto.BOOL,
-                )
-            )
-            continue
-
-        new_nodes.append(node)
-
-    del model.graph.node[:]
-    model.graph.node.extend(new_nodes)
-    strip_model_io_value_info_conflicts(model, extra_names=stale_value_info_names)
-
-
-def prepare_zipformer_encoder_option1_source_model(
-    source: ZipformerEncoderPilotSource,
-    *,
-    output_path: str | Path | None = None,
-) -> Path:
-    prepared_output_path = Path(output_path).resolve() if output_path is not None else (
-        source.repo_root / "build" / "aihub" / "zipformer_encoder_option1" / "encoder.aihub.option1.onnx"
-    ).resolve()
-    work_dir = prepared_output_path.parent
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    optimized_model_path = work_dir / "encoder.fixed.optimized.onnx"
-    symshape_model_path = work_dir / "encoder.fixed.optimized.symshape.onnx"
-
-    _optimize_onnx_model_for_aihub(source.source_model_path, optimized_model_path)
-    _run_symbolic_shape_inference(optimized_model_path, symshape_model_path)
-
-    model = onnx.load(symshape_model_path.as_posix())
-    strip_model_io_value_info_conflicts(model)
-    rewrite_zipformer_bool_mask_slices_for_htp(model)
-    onnx.checker.check_model(model, full_check=True)
-    onnx.save(model, prepared_output_path.as_posix())
-    return prepared_output_path
 
 
 def resolve_vpcd_pilot_source(repo_root: str | Path | None = None) -> VpcdPilotSource:
@@ -1220,23 +1119,6 @@ def coerce_inputs_for_compiled_model(
         else:
             coerced[name] = np.asarray(value, dtype=np.int32)
     return coerced
-
-
-def _optimize_onnx_model_for_aihub(source_model_path: Path, output_path: Path) -> Path:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    session_options = ort.SessionOptions()
-    session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
-    session_options.optimized_model_filepath = output_path.as_posix()
-    ort.InferenceSession(source_model_path.as_posix(), sess_options=session_options, providers=["CPUExecutionProvider"])
-    return output_path.resolve()
-
-
-def _run_symbolic_shape_inference(source_model_path: Path, output_path: Path) -> Path:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    model = onnx.load(source_model_path.as_posix())
-    inferred = SymbolicShapeInference.infer_shapes(model, auto_merge=True, guess_output_rank=True, verbose=0)
-    onnx.save(inferred, output_path.as_posix())
-    return output_path.resolve()
 
 
 def _resolve_repo_root(repo_root: str | Path | None) -> Path:

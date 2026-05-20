@@ -57,8 +57,15 @@ python -m quantize \
   --output-root build/quantize/zipformer/qnn_u16u8 \
   --bundle-output-dir build/model_bundle/zipformer/qnn_u16u8 \
   --reference-bundle-dir build/model_bundle/zipformer/fp32 \
-  --calibration-chunk-size 4
+  --calibration-chunk-size 4 \
+  --provider CUDAExecutionProvider
 ```
+
+This command now also emits the retained AI Hub compile input:
+
+- `build/quantize/zipformer/qnn_u16u8/aihub_compile/encoder.aihub.option1.onnx`
+
+Only that final file is kept in `aihub_compile/`.
 
 ### VPCD
 

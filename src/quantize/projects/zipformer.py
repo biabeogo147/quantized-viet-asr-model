@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Sequence
 
 import numpy as np
+import onnx
+import onnxruntime as ort
+from onnx import TensorProto, helper
 from onnxruntime.quantization import CalibrationMethod
+from onnxruntime.tools.symbolic_shape_infer import SymbolicShapeInference
 
 from model_bundle.fixtures import AudioExpectedOutput, AudioSampleFixture, read_jsonl
 from model_bundle.projects.zipformer import DEFAULT_AUDIO_FIXTURES, ModelDirAcousticRuntime, export_bundle
@@ -25,6 +29,16 @@ DEFAULT_BUNDLE_OUTPUT_DIR = Path('build') / 'model_bundle' / 'zipformer' / 'qnn_
 DEFAULT_REFERENCE_BUNDLE_DIR = Path('build') / 'model_bundle' / 'zipformer' / 'fp32'
 DEFAULT_PRESET = 'zipformer_sd8g2_balanced'
 SUPPORTED_PRESETS = (DEFAULT_PRESET,)
+ZIPFORMER_BOOL_SLICE_NODE_NAMES = (
+    "/encoder/Slice_1",
+    "/encoder/Slice_3",
+    "/encoder/Slice_5",
+)
+ZIPFORMER_BOOL_UNSQUEEZE_NODE_NAMES = (
+    "/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15",
+    "/encoder/2/encoder/0/self_attn_weights/Unsqueeze_15",
+    "/encoder/3/encoder/0/self_attn_weights/Unsqueeze_15",
+)
 
 
 def apply_default_arguments(parser) -> None:
@@ -146,6 +160,110 @@ def _fixed_input_shapes(stats: dict[str, int]) -> dict[str, dict[str, list[int]]
     }
 
 
+def _strip_model_io_value_info_conflicts(
+    model: onnx.ModelProto,
+    *,
+    extra_names: set[str] | None = None,
+) -> None:
+    io_names = {value.name for value in model.graph.input} | {value.name for value in model.graph.output}
+    if extra_names:
+        io_names.update(extra_names)
+    kept = [value for value in model.graph.value_info if value.name not in io_names]
+    del model.graph.value_info[:]
+    model.graph.value_info.extend(kept)
+
+
+def _rewrite_zipformer_bool_mask_slices_for_htp(model: onnx.ModelProto) -> None:
+    slice_names = set(ZIPFORMER_BOOL_SLICE_NODE_NAMES)
+    unsqueeze_names = set(ZIPFORMER_BOOL_UNSQUEEZE_NODE_NAMES)
+    shared_cast_name = "/GreaterOrEqual_output_0_u8_cast"
+    shared_cast_output = "/GreaterOrEqual_output_0_u8"
+    stale_value_info_names: set[str] = set()
+    new_nodes: list[onnx.NodeProto] = []
+    shared_cast_inserted = False
+
+    for node in model.graph.node:
+        if node.name in slice_names and not shared_cast_inserted:
+            new_nodes.append(
+                helper.make_node(
+                    "Cast",
+                    ["/GreaterOrEqual_output_0"],
+                    [shared_cast_output],
+                    name=shared_cast_name,
+                    to=TensorProto.UINT8,
+                )
+            )
+            shared_cast_inserted = True
+
+        if node.name in slice_names:
+            node.input[0] = shared_cast_output
+            stale_value_info_names.add(node.output[0])
+
+        if node.name in unsqueeze_names:
+            original_output = node.output[0]
+            temp_output = f"{original_output}_u8"
+            stale_value_info_names.add(temp_output)
+            node.output[0] = temp_output
+            new_nodes.append(node)
+            new_nodes.append(
+                helper.make_node(
+                    "Cast",
+                    [temp_output],
+                    [original_output],
+                    name=f"{node.name}_cast_bool",
+                    to=TensorProto.BOOL,
+                )
+            )
+            continue
+
+        new_nodes.append(node)
+
+    del model.graph.node[:]
+    model.graph.node.extend(new_nodes)
+    _strip_model_io_value_info_conflicts(model, extra_names=stale_value_info_names)
+
+
+def _optimize_onnx_model_for_aihub(source_model_path: Path, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    session_options = ort.SessionOptions()
+    session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
+    session_options.optimized_model_filepath = output_path.as_posix()
+    ort.InferenceSession(source_model_path.as_posix(), sess_options=session_options, providers=["CPUExecutionProvider"])
+    return output_path.resolve()
+
+
+def _run_symbolic_shape_inference(source_model_path: Path, output_path: Path) -> Path:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    model = onnx.load(source_model_path.as_posix())
+    inferred = SymbolicShapeInference.infer_shapes(model, auto_merge=True, guess_output_rank=True, verbose=0)
+    onnx.save(inferred, output_path.as_posix())
+    return output_path.resolve()
+
+
+def prepare_zipformer_aihub_encoder(source_model_path: Path, output_path: Path) -> Path:
+    prepared_output_path = Path(output_path).resolve()
+    work_dir = prepared_output_path.parent
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    optimized_model_path = work_dir / "encoder.fixed.optimized.tmp.onnx"
+    symshape_model_path = work_dir / "encoder.fixed.optimized.symshape.tmp.onnx"
+
+    try:
+        _optimize_onnx_model_for_aihub(Path(source_model_path).resolve(), optimized_model_path)
+        _run_symbolic_shape_inference(optimized_model_path, symshape_model_path)
+
+        model = onnx.load(symshape_model_path.as_posix())
+        _strip_model_io_value_info_conflicts(model)
+        _rewrite_zipformer_bool_mask_slices_for_htp(model)
+        onnx.checker.check_model(model, full_check=True)
+        onnx.save(model, prepared_output_path.as_posix())
+    finally:
+        for intermediate_path in (optimized_model_path, symshape_model_path):
+            if intermediate_path.exists():
+                intermediate_path.unlink()
+    return prepared_output_path
+
+
 def _build_component_plan(component_model: Path, preset: str) -> QuantizationPlan:
     _ = load_model_node_names(component_model)
     return QuantizationPlan(
@@ -184,6 +302,11 @@ def run(args) -> int:
     runtime = ModelDirAcousticRuntime(model_dir=model_dir, provider=args.provider)
     records, stats = _collect_component_records(runtime, fixtures)
     fixed_paths = _fixed_shape_paths(model_dir, output_root, stats)
+    aihub_compile_dir = output_root / 'aihub_compile'
+    aihub_prepared_encoder_path = prepare_zipformer_aihub_encoder(
+        fixed_paths['encoder'],
+        aihub_compile_dir / 'encoder.aihub.option1.onnx',
+    )
     fixed_input_shapes = _fixed_input_shapes(stats)
     quantized_dir = output_root / 'quantized'
     quantized_dir.mkdir(parents=True, exist_ok=True)
@@ -253,7 +376,17 @@ def run(args) -> int:
         trace_records=stats['trace_records'],
         components=component_reports,
         evaluation=evaluation,
+        metadata={
+            'aihub_prepared_encoder_path': aihub_prepared_encoder_path.as_posix(),
+            'aihub_prepare_applied': True,
+            'aihub_prepare_steps': [
+                'ort_optimize',
+                'symbolic_shape_inference',
+                'zipformer_bool_mask_rewrite',
+            ],
+        },
     )
+    report.write_json(output_root / 'quantization_report.json')
     report.write_json(bundle_output_dir / 'quantization_report.json')
     (bundle_output_dir / 'evaluation_report.json').write_text(json.dumps(evaluation, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 

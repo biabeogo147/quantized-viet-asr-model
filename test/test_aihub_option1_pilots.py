@@ -637,34 +637,6 @@ def test_build_vpcd_autoregressive_calibration_entries_prefers_text_file(tmp_pat
     assert stats["records"] == 4
 
 
-def test_strip_model_io_value_info_conflicts_removes_output_duplicates():
-    from tools.aihub_option1_pilots import strip_model_io_value_info_conflicts
-
-    model = _build_zipformer_bool_slice_model()
-    assert any(value.name == "masked" for value in model.graph.value_info)
-
-    strip_model_io_value_info_conflicts(model)
-
-    assert all(value.name != "masked" for value in model.graph.value_info)
-    onnx.checker.check_model(model, full_check=True)
-
-
-def test_rewrite_zipformer_bool_mask_slices_for_htp_inserts_uint8_slice_path():
-    from tools.aihub_option1_pilots import rewrite_zipformer_bool_mask_slices_for_htp
-
-    model = _build_zipformer_bool_slice_model()
-
-    rewrite_zipformer_bool_mask_slices_for_htp(model)
-
-    nodes_by_name = {node.name: node for node in model.graph.node}
-    assert "/GreaterOrEqual_output_0_u8_cast" in nodes_by_name
-    assert nodes_by_name["/encoder/Slice_1"].input[0] == "/GreaterOrEqual_output_0_u8"
-    assert nodes_by_name["/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15"].output[0].endswith("_u8")
-    assert "/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15_cast_bool" in nodes_by_name
-    assert all(value.name != "/encoder/Slice_1_output_0" for value in model.graph.value_info)
-    onnx.checker.check_model(model, full_check=True)
-
-
 def test_option_helpers_build_precompiled_and_npu_flags():
     from tools.aihub_option1_pilots import (
         build_compile_options,
@@ -741,7 +713,7 @@ def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path
     source_model_path.parent.mkdir(parents=True, exist_ok=True)
     source_model_path.write_bytes(b"source-model")
 
-    prepared_model_path = repo_root / "build" / "aihub" / "zipformer_encoder_option1" / "encoder.aihub.option1.onnx"
+    prepared_model_path = repo_root / "build" / "quantize" / "zipformer" / "qnn_u16u8" / "aihub_compile" / "encoder.aihub.option1.onnx"
     prepared_model_path.parent.mkdir(parents=True, exist_ok=True)
     prepared_model_path.write_bytes(b"prepared-model")
 
@@ -770,7 +742,7 @@ def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path
     assert payload["qairt_version"] == "2.46.0"
     assert payload["compile_options"] == "--target_runtime precompiled_qnn_onnx --truncate_64bit_io --qairt_version 2.46.0"
     assert payload["source_model"]["path"].endswith("build/quantize/zipformer/qnn_u16u8/fixed_shapes/encoder.fixed.onnx")
-    assert payload["prepared_model"]["path"].endswith("build/aihub/zipformer_encoder_option1/encoder.aihub.option1.onnx")
+    assert payload["prepared_model"]["path"].endswith("build/quantize/zipformer/qnn_u16u8/aihub_compile/encoder.aihub.option1.onnx")
     assert payload["source_model"]["size_bytes"] == len(b"source-model")
     assert payload["prepared_model"]["size_bytes"] == len(b"prepared-model")
     assert payload["input_specs"]["x"]["shape"] == [1, 2009, 80]

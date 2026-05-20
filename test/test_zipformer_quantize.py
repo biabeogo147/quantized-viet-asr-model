@@ -3,7 +3,9 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+import onnx
 import pytest
+from onnx import TensorProto, helper
 
 from model_bundle.manifest import ModelBundleManifest
 from model_bundle.fixtures import AudioSampleFixture
@@ -18,6 +20,62 @@ def tmp_case_dir():
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _build_zipformer_bool_slice_model() -> onnx.ModelProto:
+    bool_mask = helper.make_tensor_value_info("/GreaterOrEqual_output_0", TensorProto.BOOL, [1, 8])
+    graph_output = helper.make_tensor_value_info("masked", TensorProto.FLOAT, [1, 1, 4])
+
+    starts = helper.make_tensor("starts", TensorProto.INT64, [1], [0])
+    ends = helper.make_tensor("ends", TensorProto.INT64, [1], [8])
+    axes = helper.make_tensor("axes", TensorProto.INT64, [1], [1])
+    steps = helper.make_tensor("steps", TensorProto.INT64, [1], [2])
+    unsqueeze_axes = helper.make_tensor("unsqueeze_axes", TensorProto.INT64, [1], [1])
+    where_true = helper.make_tensor("where_true", TensorProto.FLOAT, [1], [1.0])
+    where_false = helper.make_tensor("where_false", TensorProto.FLOAT, [1], [0.0])
+
+    graph = helper.make_graph(
+        nodes=[
+            helper.make_node(
+                "Slice",
+                ["/GreaterOrEqual_output_0", "starts", "ends", "axes", "steps"],
+                ["/encoder/Slice_1_output_0"],
+                name="/encoder/Slice_1",
+            ),
+            helper.make_node(
+                "Unsqueeze",
+                ["/encoder/Slice_1_output_0", "unsqueeze_axes"],
+                ["/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15_output_0"],
+                name="/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15",
+            ),
+            helper.make_node(
+                "Where",
+                [
+                    "/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15_output_0",
+                    "where_true",
+                    "where_false",
+                ],
+                ["masked"],
+                name="/encoder/1/encoder/0/self_attn_weights/Where",
+            ),
+        ],
+        name="zipformer-bool-slice",
+        inputs=[bool_mask],
+        outputs=[graph_output],
+        initializer=[starts, ends, axes, steps, unsqueeze_axes, where_true, where_false],
+        value_info=[
+            helper.make_tensor_value_info("/encoder/Slice_1_output_0", TensorProto.BOOL, [1, 4]),
+            helper.make_tensor_value_info(
+                "/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15_output_0",
+                TensorProto.BOOL,
+                [1, 1, 4],
+            ),
+            helper.make_tensor_value_info("masked", TensorProto.FLOAT, [1, 1, 4]),
+        ],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    model.ir_version = 10
+    return model
 
 
 def test_prepare_encoder_inputs_pads_features_to_fixed_frames():
@@ -153,3 +211,54 @@ def test_zipformer_validate_args_rejects_retired_legacy_alias():
 
     with pytest.raises(ValueError, match="Unsupported zipformer preset"):
         validate_args(args)
+
+
+def test_prepare_zipformer_aihub_encoder_rewrites_bool_slice_path(tmp_case_dir):
+    from quantize.projects.zipformer import prepare_zipformer_aihub_encoder
+
+    source_model_path = tmp_case_dir / 'encoder.fixed.onnx'
+    output_path = tmp_case_dir / 'aihub_compile' / 'encoder.aihub.option1.onnx'
+    onnx.save(_build_zipformer_bool_slice_model(), source_model_path.as_posix())
+
+    prepared_path = prepare_zipformer_aihub_encoder(source_model_path, output_path)
+
+    prepared_model = onnx.load(prepared_path.as_posix())
+    nodes_by_name = {node.name: node for node in prepared_model.graph.node}
+    assert prepared_path == output_path.resolve()
+    assert "/GreaterOrEqual_output_0_u8_cast" in nodes_by_name
+    assert nodes_by_name["/encoder/Slice_1"].input[0] == "/GreaterOrEqual_output_0_u8"
+    assert nodes_by_name["/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15"].output[0].endswith("_u8")
+    assert "/encoder/1/encoder/0/self_attn_weights/Unsqueeze_15_cast_bool" in nodes_by_name
+    assert sorted(path.name for path in output_path.parent.iterdir()) == ["encoder.aihub.option1.onnx"]
+
+
+def test_quantization_report_can_record_aihub_prepared_encoder_metadata():
+    from quantize.reports import QuantizationReport
+
+    report = QuantizationReport(
+        project='zipformer',
+        preset='zipformer_sd8g2_balanced',
+        output_root='build/quantize/zipformer/qnn_u16u8',
+        bundle_output_dir='build/model_bundle/zipformer/qnn_u16u8',
+        sample_count=1,
+        trace_records=2,
+        metadata={
+            'aihub_prepared_encoder_path': 'build/quantize/zipformer/qnn_u16u8/aihub_compile/encoder.aihub.option1.onnx',
+            'aihub_prepare_applied': True,
+            'aihub_prepare_steps': [
+                'ort_optimize',
+                'symbolic_shape_inference',
+                'zipformer_bool_mask_rewrite',
+            ],
+        },
+    )
+
+    payload = report.to_dict()
+
+    assert payload['metadata']['aihub_prepared_encoder_path'].endswith('aihub_compile/encoder.aihub.option1.onnx')
+    assert payload['metadata']['aihub_prepare_applied'] is True
+    assert payload['metadata']['aihub_prepare_steps'] == [
+        'ort_optimize',
+        'symbolic_shape_inference',
+        'zipformer_bool_mask_rewrite',
+    ]
