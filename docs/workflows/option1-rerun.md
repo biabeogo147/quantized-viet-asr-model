@@ -1,10 +1,12 @@
 # Option 1 Rerun
 
-Use this doc when you want one fresh retained-lane rerun before Phase 4 and Phase 5.
+Use this doc when you want one fresh retained-lane rerun.
 
 Run in:
 
 - [On_device_Ai_option1_pilots.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_pilots.ipynb)
+
+This is now the full retained `Option 1` notebook flow in this repo.
 
 ## Prerequisites
 

@@ -163,7 +163,6 @@ VPCD:
 
 - `docs/workflows/option1-overview.md`
 - `docs/workflows/option1-rerun.md`
-- `docs/workflows/option1-promotion-handoff.md`
 - `docs/qnn/model-quantization.md`
 - `docs/plans/archive/2026-05-13-vpcd-option1-debug-results.md`
 - `docs/plans/archive/2026-05-11-aihub-option1-npu-pilots.md`

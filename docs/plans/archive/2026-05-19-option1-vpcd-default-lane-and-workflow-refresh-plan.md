@@ -1,5 +1,7 @@
 # Option 1 VPCD Default Lane And Workflow Refresh Implementation Plan
 
+Archived on 2026-05-19 after the retained AIMET lane became the only active VPCD notebook path.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Promote the proven VPCD AIMET parity lane to the default `Option 1` pilot path, remove the retired VPCD AI Hub-quantize lane from active code and `build/aihub`, prepare a clean final rerun setup for the operator, and rewrite workflow docs so the current NPU path is short, consistent, and easy to follow.

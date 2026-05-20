@@ -12,7 +12,7 @@ Run the producer first:
 python -m quantize --project vpcd ...
 ```
 
-Then the AI Hub notebooks only consume the prebuilt artifact from:
+Then the retained AI Hub notebook only consumes the prebuilt artifact from:
 
 - `build/quantize/vpcd/local_aimet/wint8_aint16_min_max_local_quality_parity/`
 

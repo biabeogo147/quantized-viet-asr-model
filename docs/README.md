@@ -42,8 +42,6 @@ If you are new to the repo, read the docs in this order:
   - current `Option 1` reader guide and evidence chain
 - `docs/workflows/option1-rerun.md`
   - current `Phase 2 + Phase 3` rerun flow in `On_device_Ai_option1_pilots.ipynb`
-- `docs/workflows/option1-promotion-handoff.md`
-  - `Phase 4 + Phase 5` packaging plus the boundary into BKMeeting
 - `docs/workflows/android-handoff.md`
   - generic bundle sync handoff into BKMeeting and the Python-vs-Android responsibility split
 
@@ -76,5 +74,5 @@ If you are new to the repo, read the docs in this order:
 - Stable docs should not use date-based filenames.
 - Canonical docs should prefer repo-relative paths and placeholders such as `<BKMEETING_ROOT>`, never machine-specific absolute paths.
 - If two docs say the same thing, keep one as canonical and archive or trim the duplicate.
-- Older Option 1 workflow filenames in `docs/workflows/` may remain as short compatibility aliases, but the canonical entrypoints are `option1-overview.md`, `option1-rerun.md`, and `option1-promotion-handoff.md`.
+- The canonical `Option 1` workflow entrypoints are `option1-overview.md`, `option1-rerun.md`, and `android-handoff.md`.
 - Archived plans may still mention superseded filenames, old interpreter commands, or machine-specific paths because they record historical execution context rather than the current canonical workflow.

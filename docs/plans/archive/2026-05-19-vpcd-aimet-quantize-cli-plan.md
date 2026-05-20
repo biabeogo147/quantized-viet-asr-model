@@ -1,5 +1,7 @@
 # VPCD AIMET Quantize CLI Reuse Plan
 
+Archived on 2026-05-19 after the retained VPCD AIMET producer flow moved fully into `python -m quantize`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make VPCD local AIMET quantization a reusable `python -m quantize` producer like Zipformer, store the canonical quantized artifacts under `build/quantize/vpcd/...`, run AIMET from a reusable Docker service that exposes a mapped host port, and change `On_device_Ai_option1_pilots.ipynb` so it starts from an already-built local AIMET package instead of exporting AIMET inside the notebook.

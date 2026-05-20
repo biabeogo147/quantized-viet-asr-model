@@ -27,16 +27,14 @@ Do this first:
 1. run `python -m quantize --project zipformer ...`
 2. run `python -m quantize --project vpcd ...`
 
-Then run the AI Hub notebooks.
+Then run the retained AI Hub notebook.
 
-## Notebook phases
+## Current notebook surface
 
 1. `On_device_Ai_option1_pilots.ipynb`
-   - Phase 2 and Phase 3
-2. `On_device_Ai_option1_phase4_gate.ipynb`
-   - Phase 4 gate verdicts
-3. `On_device_Ai_option1_phase5_contract.ipynb`
-   - Phase 5 contract packaging
+   - retained `Phase 2` and `Phase 3` evidence
+   - `Zipformer` compile/run plus hybrid comparison
+   - `VPCD` local and compiled teacher-forced checks plus bounded hybrid
 
 ## Current proof boundary
 
@@ -45,7 +43,6 @@ Then run the AI Hub notebooks.
 - compile-ready artifacts
 - AI Hub compile/run evidence
 - bounded hybrid evidence
-- Phase 5 contract packaging
 
 It does not prove:
 

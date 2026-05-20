@@ -78,4 +78,4 @@ For Android planning:
 - `docs/qnn/option1-retained-lanes.md`
 - `docs/qnn/preflight.md`
 - `docs/workflows/option1-overview.md`
-- `docs/workflows/option1-promotion-handoff.md`
+- `docs/workflows/option1-rerun.md`

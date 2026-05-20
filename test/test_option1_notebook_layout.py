@@ -140,35 +140,6 @@ def test_pilot_notebook_treats_bounded_vpcd_truncation_as_comparison_unavailable
     assert 'print("vpcd full-text comparison unavailable:")' in code_text
 
 
-def test_phase4_notebook_exists_with_phase4_sections() -> None:
-    notebook = _load_notebook("On_device_Ai_option1_phase4_gate.ipynb")
-    markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
-    code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
-
-    assert "## Phase 4 Config" in markdown_text
-    assert "### Zipformer Phase 4 Benchmark And Gate" in markdown_text
-    assert "### VPCD Phase 4 Benchmark And Gate" in markdown_text
-    assert "## Phase 4 Recommendation Summary" in markdown_text
-    assert 'ZIPFORMER_RUN_LABEL = "20260519-option1-final-rerun"' in code_text
-    assert 'VPCD_RUN_LABEL = "20260519-option1-final-rerun"' in code_text
-    assert 'VPCD_PHASE2_COMPILE_PILOT_NAME' not in code_text
-    assert "phase2_compile_pilot_name_override=" not in code_text
-    assert "compile_pilot_name=VPCD_PHASE2_COMPILE_PILOT_NAME" not in code_text
-    assert "max_decode_steps=VPCD_PHASE4_MAX_DECODE_STEPS" in code_text
-
-
-def test_phase5_notebook_exists_with_phase5_sections() -> None:
-    notebook = _load_notebook("On_device_Ai_option1_phase5_contract.ipynb")
-    markdown_text = "\n".join(_cell_texts(notebook, cell_type="markdown"))
-    code_text = "\n".join(_cell_texts(notebook, cell_type="code"))
-
-    assert "## Phase 5 Config" in markdown_text
-    assert "### Package Zipformer Phase 5 Contract" in markdown_text
-    assert "### Package VPCD Phase 5 Contract" in markdown_text
-    assert "## Phase 5 Packaging Summary" in markdown_text
-    assert "PHASE5_INCLUDE_ZIPFORMER" in code_text
-    assert "PHASE5_INCLUDE_VPCD" in code_text
-    assert 'ZIPFORMER_RUN_LABEL = "20260519-option1-final-rerun"' in code_text
-    assert 'VPCD_RUN_LABEL = "20260519-option1-final-rerun"' in code_text
-    assert 'VPCD_PHASE2_COMPILE_PILOT_NAME' not in code_text
-    assert "phase2_compile_pilot_name_override=" not in code_text
+def test_retired_phase4_and_phase5_notebooks_are_absent() -> None:
+    assert not (REPO_ROOT / "On_device_Ai_option1_phase4_gate.ipynb").exists()
+    assert not (REPO_ROOT / "On_device_Ai_option1_phase5_contract.ipynb").exists()

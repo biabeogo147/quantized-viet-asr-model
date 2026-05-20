@@ -10,7 +10,8 @@ Use this file after:
 
 If you are working on the retained `Option 1` AI Hub path, read this after:
 
-- `docs/workflows/option1-promotion-handoff.md`
+- `docs/workflows/option1-overview.md`
+- `docs/workflows/option1-rerun.md`
 
 ## Responsibility split
 
@@ -43,7 +44,7 @@ This CLI:
 - rewrites handoff fields in `bundle_manifest.json` when needed
 - keeps variant-family paths aligned with Android naming
 
-The next planned extension is contract-aware `Option 1` sync, where the same CLI will also stage packaged `Phase 5` evidence under the Android asset namespace.
+Current scope is bundle sync only. Retained `Option 1` rerun evidence stays under `build/aihub/records/` and should be referenced separately in BKMeeting handoff notes.
 
 ## Supported handoff targets
 
@@ -158,7 +159,7 @@ It does not prove:
 
 - `docs/workflows/export-verify-smoke.md`
 - `docs/workflows/option1-overview.md`
-- `docs/workflows/option1-promotion-handoff.md`
+- `docs/workflows/option1-rerun.md`
 - `docs/qnn/model-quantization.md`
 - `docs/qnn/preflight.md`
 - `src/tools/README.md`
