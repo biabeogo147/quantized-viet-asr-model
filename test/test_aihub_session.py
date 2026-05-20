@@ -1,4 +1,4 @@
-import json
+﻿import json
 import os
 from pathlib import Path
 
@@ -216,7 +216,7 @@ def _build_zipformer_bool_slice_model() -> onnx.ModelProto:
 
 
 def test_resolve_zipformer_encoder_source_prefers_fixed_shape_encoder_artifact(tmp_path):
-    from tools.aihub_option1_pilots import resolve_zipformer_encoder_pilot_source
+    from aihub.session import resolve_zipformer_encoder_source
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
@@ -226,7 +226,7 @@ def test_resolve_zipformer_encoder_source_prefers_fixed_shape_encoder_artifact(t
     fixed_encoder.parent.mkdir(parents=True, exist_ok=True)
     fixed_encoder.write_bytes(b"encoder")
 
-    source = resolve_zipformer_encoder_pilot_source(repo_root)
+    source = resolve_zipformer_encoder_source(repo_root)
 
     assert source.source_model_path == fixed_encoder
     assert source.bundle_manifest_path == bundle_dir / "bundle_manifest.json"
@@ -236,8 +236,8 @@ def test_resolve_zipformer_encoder_source_prefers_fixed_shape_encoder_artifact(t
 
 
 def test_build_zipformer_encoder_calibration_entries_uses_feature_loader_and_fixed_padding(tmp_path):
-    from tools.aihub_option1_pilots import (
-        ZipformerEncoderPilotSource,
+    from aihub.session import (
+        ZipformerEncoderSource,
         build_zipformer_encoder_calibration_entries,
     )
 
@@ -258,7 +258,7 @@ def test_build_zipformer_encoder_calibration_entries_uses_feature_loader_and_fix
         seen["feature_dim"] = feature_dim
         return np.arange(6, dtype=np.float32).reshape(3, 2)
 
-    source = ZipformerEncoderPilotSource(
+    source = ZipformerEncoderSource(
         repo_root=repo_root,
         source_model_path=repo_root / "build" / "zipformer" / "artifacts" / "fixed_shapes" / "encoder.fixed.onnx",
         bundle_manifest_path=repo_root / "build" / "zipformer" / "bundle_manifest.json",
@@ -282,14 +282,14 @@ def test_build_zipformer_encoder_calibration_entries_uses_feature_loader_and_fix
 
 
 def test_resolve_vpcd_source_reads_fixed_shape_candidate(tmp_path):
-    from tools.aihub_option1_pilots import resolve_vpcd_pilot_source
+    from aihub.session import resolve_vpcd_source
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
     bundle_dir = repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_1024x128"
     _write_vpcd_bundle(bundle_dir, encoder_sequence=1024, decoder_sequence=128)
 
-    source = resolve_vpcd_pilot_source(repo_root)
+    source = resolve_vpcd_source(repo_root)
 
     assert source.bundle_manifest_path == bundle_dir / "bundle_manifest.json"
     assert source.model_path == bundle_dir / "model.mobile.onnx"
@@ -300,8 +300,8 @@ def test_resolve_vpcd_source_reads_fixed_shape_candidate(tmp_path):
     assert source.decoder_start_token_id == 2
 
 
-def test_prepare_vpcd_option1_source_model_rejects_retired_fp32_fixed_strategy(tmp_path):
-    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+def test_prepare_vpcd_source_model_rejects_retired_fp32_fixed_strategy(tmp_path):
+    from aihub.session import prepare_vpcd_source_model, resolve_vpcd_source
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
@@ -310,16 +310,16 @@ def test_prepare_vpcd_option1_source_model_rejects_retired_fp32_fixed_strategy(t
     fp32_model_path = repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
     _write_minimal_vpcd_fp32_model(fp32_model_path)
 
-    source = resolve_vpcd_pilot_source(repo_root)
+    source = resolve_vpcd_source(repo_root)
     with pytest.raises(ValueError, match="Unsupported VPCD Option 1 source strategy"):
-        prepare_vpcd_option1_source_model(
+        prepare_vpcd_source_model(
             source,
             strategy="prefer_fp32_fixed",
         )
 
 
-def test_prepare_vpcd_option1_source_model_defaults_to_local_aimet_compile_candidate(tmp_path, monkeypatch):
-    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+def test_prepare_vpcd_source_model_defaults_to_local_aimet_compile_candidate(tmp_path, monkeypatch):
+    from aihub.session import prepare_vpcd_source_model, resolve_vpcd_source
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
@@ -351,8 +351,8 @@ def test_prepare_vpcd_option1_source_model_defaults_to_local_aimet_compile_candi
         encoding="utf-8",
     )
 
-    source = resolve_vpcd_pilot_source(repo_root)
-    prepared = prepare_vpcd_option1_source_model(source)
+    source = resolve_vpcd_source(repo_root)
+    prepared = prepare_vpcd_source_model(source)
 
     prepared_model = onnx.load(prepared.prepared_model_path.as_posix())
     assert prepared.source_strategy == "local_aimet_compile_candidate"
@@ -370,8 +370,8 @@ def test_prepare_vpcd_option1_source_model_defaults_to_local_aimet_compile_candi
     assert input_dims["decoder_attention_mask"] == ["batch", "decoder_sequence"]
 
 
-def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(tmp_path, monkeypatch):
-    from tools.aihub_option1_pilots import prepare_vpcd_option1_source_model, resolve_vpcd_pilot_source
+def test_prepare_vpcd_source_model_builds_local_aimet_compile_candidate(tmp_path, monkeypatch):
+    from aihub.session import prepare_vpcd_source_model, resolve_vpcd_source
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
@@ -409,8 +409,8 @@ def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(
         encoding="utf-8",
     )
 
-    source = resolve_vpcd_pilot_source(repo_root)
-    prepared = prepare_vpcd_option1_source_model(
+    source = resolve_vpcd_source(repo_root)
+    prepared = prepare_vpcd_source_model(
         source,
         strategy="local_aimet_compile_candidate",
     )
@@ -435,7 +435,7 @@ def test_prepare_vpcd_option1_source_model_builds_local_aimet_compile_candidate(
 
 
 def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):
-    from tools.aihub_option1_pilots import VpcdPilotSource, build_vpcd_single_step_inputs
+    from aihub.session import VpcdSource, build_vpcd_single_step_inputs
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
@@ -454,7 +454,7 @@ def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):
         encoding="utf-8",
     )
 
-    source = VpcdPilotSource(
+    source = VpcdSource(
         repo_root=repo_root,
         bundle_manifest_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "bundle_manifest.json",
         model_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "model.mobile.onnx",
@@ -489,7 +489,7 @@ def test_build_vpcd_single_step_inputs_pads_to_fixed_shapes(tmp_path):
 
 
 def test_build_vpcd_autoregressive_calibration_entries_expands_decoder_prefixes(tmp_path):
-    from tools.aihub_option1_pilots import VpcdPilotSource, build_vpcd_autoregressive_calibration_entries
+    from aihub.session import VpcdSource, build_vpcd_autoregressive_calibration_entries
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
@@ -520,7 +520,7 @@ def test_build_vpcd_autoregressive_calibration_entries_expands_decoder_prefixes(
         encoding="utf-8",
     )
 
-    source = VpcdPilotSource(
+    source = VpcdSource(
         repo_root=repo_root,
         bundle_manifest_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "bundle_manifest.json",
         model_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "model.mobile.onnx",
@@ -576,7 +576,7 @@ def test_build_vpcd_autoregressive_calibration_entries_expands_decoder_prefixes(
 
 
 def test_build_vpcd_autoregressive_calibration_entries_prefers_text_file(tmp_path):
-    from tools.aihub_option1_pilots import VpcdPilotSource, build_vpcd_autoregressive_calibration_entries
+    from aihub.session import VpcdSource, build_vpcd_autoregressive_calibration_entries
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
@@ -599,7 +599,7 @@ def test_build_vpcd_autoregressive_calibration_entries_prefers_text_file(tmp_pat
         encoding="utf-8",
     )
 
-    source = VpcdPilotSource(
+    source = VpcdSource(
         repo_root=repo_root,
         bundle_manifest_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "bundle_manifest.json",
         model_path=repo_root / "build" / "model_bundle" / "vpcd" / "qnn_fixed_8x4" / "model.mobile.onnx",
@@ -638,20 +638,20 @@ def test_build_vpcd_autoregressive_calibration_entries_prefers_text_file(tmp_pat
 
 
 def test_option_helpers_build_precompiled_and_npu_flags():
-    from tools.aihub_option1_pilots import (
+    from aihub.session import (
         build_compile_options,
         coerce_inputs_for_compiled_model,
         build_job_options,
         build_zipformer_encoder_input_specs,
         requires_truncate_64bit_io,
-        ZipformerEncoderPilotSource,
+        ZipformerEncoderSource,
     )
 
     assert build_compile_options() == "--target_runtime precompiled_qnn_onnx"
     assert build_compile_options(qairt_version="2.46.0") == "--target_runtime precompiled_qnn_onnx --qairt_version 2.46.0"
     assert build_job_options() == "--compute_unit npu"
 
-    source = ZipformerEncoderPilotSource(
+    source = ZipformerEncoderSource(
         repo_root=Path("D:/repo"),
         source_model_path=Path("D:/repo/build/encoder.fixed.onnx"),
         bundle_manifest_path=Path("D:/repo/build/bundle_manifest.json"),
@@ -675,13 +675,13 @@ def test_option_helpers_build_precompiled_and_npu_flags():
     assert compiled_inputs["x_lens"][0].dtype == np.int32
 
 
-def test_build_option1_runtime_config_normalizes_defaults(tmp_path):
-    from tools.aihub_option1_pilots import build_option1_runtime_config
+def test_build_runtime_config_normalizes_defaults(tmp_path):
+    from aihub.session import build_runtime_config
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
 
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="  Samsung Galaxy S24 (Family)  ",
         qairt_version=" 2.46.0 ",
         repo_root=repo_root,
@@ -702,8 +702,8 @@ def test_build_option1_runtime_config_normalizes_defaults(tmp_path):
 
 
 def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path):
-    from tools.aihub_option1_pilots import (
-        build_option1_runtime_config,
+    from aihub.session import (
+        build_runtime_config,
         write_prepared_artifact_record,
     )
 
@@ -717,7 +717,7 @@ def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path
     prepared_model_path.parent.mkdir(parents=True, exist_ok=True)
     prepared_model_path.write_bytes(b"prepared-model")
 
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
         qairt_version="2.46.0",
         repo_root=repo_root,
@@ -752,8 +752,8 @@ def test_write_prepared_artifact_record_captures_hashes_and_input_specs(tmp_path
 
 
 def test_write_prepared_artifact_record_captures_local_aimet_compile_metadata(tmp_path):
-    from tools.aihub_option1_pilots import (
-        build_option1_runtime_config,
+    from aihub.session import (
+        build_runtime_config,
         write_prepared_artifact_record,
     )
 
@@ -769,7 +769,7 @@ def test_write_prepared_artifact_record_captures_local_aimet_compile_metadata(tm
     packaging_path = repo_root / "build" / "quantize" / "vpcd" / "local_aimet" / "wint8_aint16_min_max_local_quality_parity" / "model.option1.aimet"
     packaging_path.mkdir(parents=True, exist_ok=True)
 
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
         qairt_version="2.46.0",
         repo_root=repo_root,
@@ -802,8 +802,8 @@ def test_write_prepared_artifact_record_captures_local_aimet_compile_metadata(tm
 
 
 def test_write_live_run_record_summarizes_jobs_and_outputs(tmp_path):
-    from tools.aihub_option1_pilots import (
-        build_option1_runtime_config,
+    from aihub.session import (
+        build_runtime_config,
         write_live_run_record,
     )
 
@@ -815,7 +815,7 @@ def test_write_live_run_record_summarizes_jobs_and_outputs(tmp_path):
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
         qairt_version=None,
         repo_root=repo_root,
@@ -859,8 +859,8 @@ def test_write_live_run_record_summarizes_jobs_and_outputs(tmp_path):
 
 
 def test_write_compile_run_record_captures_target_model_metadata(tmp_path):
-    from tools.aihub_option1_pilots import (
-        build_option1_runtime_config,
+    from aihub.session import (
+        build_runtime_config,
         write_compile_run_record,
     )
 
@@ -878,7 +878,7 @@ def test_write_compile_run_record_captures_target_model_metadata(tmp_path):
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
         qairt_version="2.46.0",
         repo_root=repo_root,
@@ -905,8 +905,8 @@ def test_write_compile_run_record_captures_target_model_metadata(tmp_path):
 
 
 def test_write_compile_run_record_marks_local_aimet_lane_as_quantize_disabled(tmp_path):
-    from tools.aihub_option1_pilots import (
-        build_option1_runtime_config,
+    from aihub.session import (
+        build_runtime_config,
         write_compile_run_record,
     )
 
@@ -924,7 +924,7 @@ def test_write_compile_run_record_marks_local_aimet_lane_as_quantize_disabled(tm
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
         qairt_version="2.46.0",
         repo_root=repo_root,
@@ -951,8 +951,8 @@ def test_write_compile_run_record_marks_local_aimet_lane_as_quantize_disabled(tm
 
 
 def test_write_quantize_run_record_captures_downloaded_quantized_artifact(tmp_path):
-    from tools.aihub_option1_pilots import (
-        build_option1_runtime_config,
+    from aihub.session import (
+        build_runtime_config,
         write_quantize_run_record,
     )
 
@@ -970,7 +970,7 @@ def test_write_quantize_run_record_captures_downloaded_quantized_artifact(tmp_pa
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
         qairt_version=None,
         repo_root=repo_root,
@@ -1015,9 +1015,100 @@ def test_write_quantize_run_record_captures_downloaded_quantized_artifact(tmp_pa
     assert payload["calibration"]["records"] == 8
 
 
+def test_download_compiled_target_model_creates_parent_dir_and_returns_downloaded_path(tmp_path):
+    from aihub.session import download_compiled_target_model
+
+    class FakeModel:
+        def __init__(self) -> None:
+            self.download_calls: list[str] = []
+
+        def download(self, filename: str) -> str:
+            self.download_calls.append(filename)
+            Path(filename).write_bytes(b"compiled-target")
+            return filename
+
+    output_path = tmp_path / "build" / "aihub" / "deploy" / "zipformer" / "encoder.precompiled.onnx"
+    model = FakeModel()
+
+    downloaded_path = download_compiled_target_model(
+        target_model=model,
+        output_path=output_path,
+    )
+
+    assert downloaded_path == output_path.resolve()
+    assert downloaded_path.read_bytes() == b"compiled-target"
+    assert model.download_calls == [output_path.resolve().as_posix()]
+
+
+def test_download_compiled_target_model_fails_when_downloaded_file_missing(tmp_path):
+    from aihub.session import download_compiled_target_model
+
+    class FakeModel:
+        def download(self, filename: str) -> None:
+            return None
+
+    output_path = tmp_path / "build" / "aihub" / "deploy" / "zipformer" / "encoder.precompiled.onnx"
+
+    with pytest.raises(FileNotFoundError, match="Compiled target model was not downloaded"):
+        download_compiled_target_model(
+            target_model=FakeModel(),
+            output_path=output_path,
+        )
+
+
+def test_write_deployment_download_record_captures_downloaded_artifact_metadata(tmp_path):
+    from aihub.session import (
+        build_runtime_config,
+        write_deployment_download_record,
+    )
+
+    class FakeModel:
+        def __init__(self, model_id: str, url: str, name: str) -> None:
+            self.model_id = model_id
+            self.url = url
+            self.name = name
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    config = build_runtime_config(
+        device_name="Samsung Galaxy S24 (Family)",
+        qairt_version="2.46.0",
+        repo_root=repo_root,
+    )
+
+    compile_record_path = config.pilot_record_dir("zipformer_encoder_option1") / "compile-run-unit-test.json"
+    compile_record_path.parent.mkdir(parents=True, exist_ok=True)
+    compile_record_path.write_text('{"record_kind": "compile_run"}', encoding="utf-8")
+
+    artifact_path = repo_root / "build" / "aihub" / "deploy" / "zipformer" / "download" / "encoder.precompiled.onnx"
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_bytes(b"compiled-target")
+
+    record_path = write_deployment_download_record(
+        pilot_name="zipformer_encoder_option1",
+        runtime_config=config,
+        compile_record_path=compile_record_path,
+        target_model=FakeModel("model-1", "https://aihub/models/model-1", "zipformer-target"),
+        downloaded_artifact_path=artifact_path,
+        run_label="unit-test",
+    )
+
+    payload = json.loads(record_path.read_text(encoding="utf-8"))
+    assert payload["record_kind"] == "deployment_download"
+    assert payload["pilot_name"] == "zipformer_encoder_option1"
+    assert payload["device_name"] == "Samsung Galaxy S24 (Family)"
+    assert payload["qairt_version"] == "2.46.0"
+    assert payload["compile_record_path"] == compile_record_path.resolve().as_posix()
+    assert payload["target_model"]["model_id"] == "model-1"
+    assert payload["target_model"]["url"] == "https://aihub/models/model-1"
+    assert payload["target_model"]["name"] == "zipformer-target"
+    assert payload["downloaded_artifact"]["path"] == artifact_path.resolve().as_posix()
+    assert payload["downloaded_artifact"]["size_bytes"] == len(b"compiled-target")
+
+
 def test_resolve_downloaded_quantized_model_path_uses_explicit_value_or_quantize_record(tmp_path):
-    from tools.aihub_option1_pilots import (
-        build_option1_runtime_config,
+    from aihub.session import (
+        build_runtime_config,
         resolve_downloaded_quantized_model_path,
         write_quantize_run_record,
     )
@@ -1036,7 +1127,7 @@ def test_resolve_downloaded_quantized_model_path_uses_explicit_value_or_quantize
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
         qairt_version=None,
         repo_root=repo_root,
@@ -1075,8 +1166,8 @@ def test_resolve_downloaded_quantized_model_path_uses_explicit_value_or_quantize
 
 
 def test_resolve_target_model_id_uses_explicit_value_or_compile_record(tmp_path):
-    from tools.aihub_option1_pilots import (
-        build_option1_runtime_config,
+    from aihub.session import (
+        build_runtime_config,
         resolve_target_model_id,
         write_compile_run_record,
     )
@@ -1095,7 +1186,7 @@ def test_resolve_target_model_id_uses_explicit_value_or_compile_record(tmp_path)
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
-    config = build_option1_runtime_config(
+    config = build_runtime_config(
         device_name="Samsung Galaxy S24 (Family)",
         qairt_version=None,
         repo_root=repo_root,
@@ -1122,7 +1213,7 @@ def test_resolve_target_model_id_uses_explicit_value_or_compile_record(tmp_path)
 
 
 def test_load_env_file_populates_missing_values_without_overriding_existing_env(tmp_path, monkeypatch):
-    from tools.aihub_option1_pilots import load_env_file
+    from aihub.session import load_env_file
 
     env_path = tmp_path / ".env"
     env_path.write_text(
@@ -1142,7 +1233,7 @@ def test_load_env_file_populates_missing_values_without_overriding_existing_env(
 
 
 def test_resolve_qai_hub_api_token_reads_repo_env_file(tmp_path, monkeypatch):
-    from tools.aihub_option1_pilots import resolve_qai_hub_api_token
+    from aihub.session import resolve_qai_hub_api_token
 
     repo_root = tmp_path / "repo"
     _init_repo_root(repo_root)
@@ -1155,7 +1246,7 @@ def test_resolve_qai_hub_api_token_reads_repo_env_file(tmp_path, monkeypatch):
 
 
 def test_compare_output_tensors_reports_diff_stats():
-    from tools.aihub_option1_pilots import compare_output_tensors
+    from aihub.session import compare_output_tensors
 
     reference = {
         "output_0": [np.asarray([[1.0, 2.0]], dtype=np.float32)],
@@ -1177,7 +1268,7 @@ def test_compare_output_tensors_reports_diff_stats():
 
 
 def test_summarize_vpcd_step_logits_uses_active_decoder_position():
-    from tools.aihub_option1_pilots import summarize_vpcd_step_logits
+    from aihub.session import summarize_vpcd_step_logits
 
     logits = np.zeros((1, 1, 4, 6), dtype=np.float32)
     logits[0, 0, 1, 5] = 9.0
@@ -1192,3 +1283,5 @@ def test_summarize_vpcd_step_logits_uses_active_decoder_position():
     assert summary["top_tokens"][0]["score"] == 9.0
     assert summary["top_tokens"][1]["token_id"] == 2
     assert summary["top_tokens"][1]["score"] == 4.0
+
+

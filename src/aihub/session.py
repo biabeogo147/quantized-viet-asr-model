@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import json
@@ -47,7 +47,7 @@ InputSpecs = dict[str, tuple[tuple[int, ...], str]]
 
 
 @dataclass(frozen=True)
-class ZipformerEncoderPilotSource:
+class ZipformerEncoderSource:
     repo_root: Path
     source_model_path: Path
     bundle_manifest_path: Path
@@ -58,7 +58,7 @@ class ZipformerEncoderPilotSource:
 
 
 @dataclass(frozen=True)
-class VpcdPilotSource:
+class VpcdSource:
     repo_root: Path
     bundle_manifest_path: Path
     model_path: Path
@@ -73,7 +73,7 @@ class VpcdPilotSource:
 
 
 @dataclass(frozen=True)
-class PreparedVpcdOption1Source:
+class PreparedVpcdSource:
     prepared_model_path: Path
     is_quantized_source: bool
     source_strategy: str
@@ -91,7 +91,7 @@ class PreparedVpcdOption1Source:
 
 
 @dataclass(frozen=True)
-class Option1RuntimeConfig:
+class AiHubRuntimeConfig:
     repo_root: Path
     device_name: str
     qairt_version: str | None
@@ -151,7 +151,7 @@ def resolve_qai_hub_api_token(
     return _normalize_optional_string(os.environ.get(env_var_name))
 
 
-def build_option1_runtime_config(
+def build_runtime_config(
     *,
     device_name: str,
     qairt_version: str | None = None,
@@ -159,7 +159,7 @@ def build_option1_runtime_config(
     repo_root: str | Path | None = None,
     artifact_root: str | Path | None = None,
     record_root: str | Path | None = None,
-) -> Option1RuntimeConfig:
+) -> AiHubRuntimeConfig:
     resolved_repo_root = _resolve_repo_root(repo_root)
     normalized_device_name = (device_name or "").strip()
     if not normalized_device_name:
@@ -180,7 +180,7 @@ def build_option1_runtime_config(
     resolved_artifact_root.mkdir(parents=True, exist_ok=True)
     resolved_record_root.mkdir(parents=True, exist_ok=True)
 
-    return Option1RuntimeConfig(
+    return AiHubRuntimeConfig(
         repo_root=resolved_repo_root,
         device_name=normalized_device_name,
         qairt_version=normalized_qairt_version,
@@ -225,7 +225,7 @@ def build_job_options(*, compute_unit: str = DEFAULT_COMPUTE_UNIT, qairt_version
     return " ".join(options)
 
 
-def resolve_zipformer_encoder_pilot_source(repo_root: str | Path | None = None) -> ZipformerEncoderPilotSource:
+def resolve_zipformer_encoder_source(repo_root: str | Path | None = None) -> ZipformerEncoderSource:
     root = _resolve_repo_root(repo_root)
     manifest_path = _first_existing_path(
         [
@@ -262,7 +262,7 @@ def resolve_zipformer_encoder_pilot_source(repo_root: str | Path | None = None) 
     if fixed_encoder_frames is None:
         raise ValueError("Zipformer manifest does not expose fixed encoder frames for the AI Hub pilot.")
 
-    return ZipformerEncoderPilotSource(
+    return ZipformerEncoderSource(
         repo_root=root,
         source_model_path=source_model_path,
         bundle_manifest_path=manifest_path,
@@ -273,7 +273,7 @@ def resolve_zipformer_encoder_pilot_source(repo_root: str | Path | None = None) 
     )
 
 
-def build_zipformer_encoder_input_specs(source: ZipformerEncoderPilotSource) -> dict[str, tuple[tuple[int, ...], str]]:
+def build_zipformer_encoder_input_specs(source: ZipformerEncoderSource) -> dict[str, tuple[tuple[int, ...], str]]:
     return {
         "x": ((1, int(source.fixed_encoder_frames), int(source.feature_dim)), "float32"),
         "x_lens": ((1,), "int64"),
@@ -281,7 +281,7 @@ def build_zipformer_encoder_input_specs(source: ZipformerEncoderPilotSource) -> 
 
 
 def build_zipformer_encoder_calibration_entries(
-    source: ZipformerEncoderPilotSource,
+    source: ZipformerEncoderSource,
     *,
     max_samples: int | None = None,
     feature_loader: Callable[..., np.ndarray] | None = None,
@@ -305,7 +305,7 @@ def build_zipformer_encoder_calibration_entries(
 
 
 def build_zipformer_encoder_inference_entries(
-    source: ZipformerEncoderPilotSource,
+    source: ZipformerEncoderSource,
     *,
     sample_id: str | None = None,
     feature_loader: Callable[..., np.ndarray] | None = None,
@@ -333,7 +333,7 @@ def build_zipformer_encoder_inference_entries(
     return dataset
 
 
-def resolve_vpcd_pilot_source(repo_root: str | Path | None = None) -> VpcdPilotSource:
+def resolve_vpcd_source(repo_root: str | Path | None = None) -> VpcdSource:
     root = _resolve_repo_root(repo_root)
     manifest_path = _first_existing_path(
         [
@@ -360,7 +360,7 @@ def resolve_vpcd_pilot_source(repo_root: str | Path | None = None) -> VpcdPilotS
         raise ValueError("VPCD manifest does not include golden_samples.")
 
     quantization = manifest.metadata.get("quantization", {}) if isinstance(manifest.metadata, dict) else {}
-    return VpcdPilotSource(
+    return VpcdSource(
         repo_root=root,
         bundle_manifest_path=manifest_path,
         model_path=manifest_path.parent / manifest.artifacts["model"],
@@ -375,7 +375,7 @@ def resolve_vpcd_pilot_source(repo_root: str | Path | None = None) -> VpcdPilotS
     )
 
 
-def build_vpcd_input_specs(source: VpcdPilotSource) -> dict[str, tuple[tuple[int, ...], str]]:
+def build_vpcd_input_specs(source: VpcdSource) -> dict[str, tuple[tuple[int, ...], str]]:
     return {
         "input_ids": ((1, int(source.encoder_sequence)), "int64"),
         "attention_mask": ((1, int(source.encoder_sequence)), "int64"),
@@ -385,7 +385,7 @@ def build_vpcd_input_specs(source: VpcdPilotSource) -> dict[str, tuple[tuple[int
 
 
 def build_vpcd_fixed_shape_inputs(
-    source: VpcdPilotSource,
+    source: VpcdSource,
     *,
     input_ids: np.ndarray | list[int],
     decoder_prefix: list[int] | np.ndarray | None = None,
@@ -430,7 +430,7 @@ def build_vpcd_fixed_shape_inputs(
 
 
 def build_vpcd_single_step_inputs(
-    source: VpcdPilotSource,
+    source: VpcdSource,
     *,
     sample_index: int = 0,
     decoder_prefix: list[int] | np.ndarray | None = None,
@@ -450,7 +450,7 @@ def build_vpcd_single_step_inputs(
 
 
 def build_vpcd_single_step_calibration_entries(
-    source: VpcdPilotSource,
+    source: VpcdSource,
     *,
     max_samples: int | None = None,
 ) -> dict[str, list[np.ndarray]]:
@@ -471,7 +471,7 @@ def build_vpcd_single_step_calibration_entries(
     return dataset
 
 
-def resolve_vpcd_model_dir(source: VpcdPilotSource) -> Path | None:
+def resolve_vpcd_model_dir(source: VpcdSource) -> Path | None:
     resolved_fp32_path = resolve_vpcd_fp32_source_model_path(source)
     if resolved_fp32_path is not None and resolved_fp32_path.parent.name == "onnx":
         candidate = resolved_fp32_path.parent.parent
@@ -483,7 +483,7 @@ def resolve_vpcd_model_dir(source: VpcdPilotSource) -> Path | None:
     return None
 
 
-def resolve_vpcd_calibration_text_path(source: VpcdPilotSource) -> Path | None:
+def resolve_vpcd_calibration_text_path(source: VpcdSource) -> Path | None:
     return _first_existing_path(
         [
             source.repo_root / "build" / "calibration" / "vlsp2020" / "vpcd_transcriptions.txt",
@@ -492,7 +492,7 @@ def resolve_vpcd_calibration_text_path(source: VpcdPilotSource) -> Path | None:
 
 
 def build_vpcd_autoregressive_calibration_entries(
-    source: VpcdPilotSource,
+    source: VpcdSource,
     *,
     fp32_model_path: str | Path | None = None,
     model_dir: str | Path | None = None,
@@ -651,7 +651,7 @@ def wrap_single_inference_inputs(inputs: dict[str, np.ndarray]) -> dict[str, lis
     return {name: [value] for name, value in inputs.items()}
 
 
-def resolve_vpcd_fp32_source_model_path(source: VpcdPilotSource) -> Path | None:
+def resolve_vpcd_fp32_source_model_path(source: VpcdSource) -> Path | None:
     return _first_existing_path(
         [
             source.repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx",
@@ -676,7 +676,7 @@ def _resolve_default_vpcd_local_aimet_output_root(repo_root: Path) -> Path:
 
 def _build_vpcd_local_aimet_quantize_command_hint(
     *,
-    source: VpcdPilotSource,
+    source: VpcdSource,
 ) -> str:
     model_dir = resolve_vpcd_model_dir(source)
     fp32_source_path = resolve_vpcd_fp32_source_model_path(source)
@@ -697,7 +697,7 @@ def _build_vpcd_local_aimet_quantize_command_hint(
 
 def _resolve_vpcd_local_aimet_quantize_report(
     *,
-    source: VpcdPilotSource,
+    source: VpcdSource,
 ) -> tuple[Path, dict[str, Any]]:
     variant_name = build_vpcd_aimet_variant_name(
         param_type=DEFAULT_AIMET_PARAM_TYPE,
@@ -717,11 +717,11 @@ def _resolve_vpcd_local_aimet_quantize_report(
     return variant_root, json.loads(report_path.read_text(encoding="utf-8"))
 
 
-def prepare_vpcd_option1_source_model(
-    source: VpcdPilotSource,
+def prepare_vpcd_source_model(
+    source: VpcdSource,
     *,
     strategy: str | None = None,
-) -> PreparedVpcdOption1Source:
+) -> PreparedVpcdSource:
     normalized_strategy = _normalize_optional_string(strategy)
     if normalized_strategy is None:
         normalized_strategy = "local_aimet_compile_candidate"
@@ -740,7 +740,7 @@ def prepare_vpcd_option1_source_model(
         report.setdefault("packaging_kind", "aimet_dir")
         report.setdefault("transformation_kind", "aimet_service_export")
         report.setdefault("quantize_root", variant_root.resolve().as_posix())
-        return PreparedVpcdOption1Source(
+        return PreparedVpcdSource(
             prepared_model_path=prepared_output_path,
             is_quantized_source=True,
             source_strategy=normalized_strategy,
@@ -849,7 +849,7 @@ def resolve_active_decoder_position(decoder_attention_mask: np.ndarray) -> int:
 def write_prepared_artifact_record(
     *,
     pilot_name: str,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     source_model_path: str | Path,
     prepared_model_path: str | Path,
     input_specs: InputSpecs | None,
@@ -896,7 +896,7 @@ def write_prepared_artifact_record(
 def write_compile_run_record(
     *,
     pilot_name: str,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     compile_options: str,
     compile_job: Any = None,
     target_model: Any = None,
@@ -936,7 +936,7 @@ def write_compile_run_record(
 def write_quantize_run_record(
     *,
     pilot_name: str,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     quantize_job: Any = None,
     target_model: Any = None,
     quantized_model_path: str | Path,
@@ -979,7 +979,7 @@ def write_quantize_run_record(
 def resolve_downloaded_quantized_model_path(
     *,
     pilot_name: str,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     explicit_quantized_model_path: str | Path | None = None,
     run_label: str | None = None,
 ) -> Path:
@@ -1023,10 +1023,62 @@ def download_quantized_target_model(
     return resolved_output_path
 
 
+def download_compiled_target_model(
+    *,
+    target_model: Any,
+    output_path: str | Path,
+) -> Path:
+    resolved_output_path = Path(output_path).resolve()
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        download_result = target_model.download(filename=resolved_output_path.as_posix())
+    except TypeError:
+        download_result = target_model.download(resolved_output_path.as_posix())
+    if isinstance(download_result, (str, Path)):
+        resolved_output_path = Path(download_result).resolve()
+    if not resolved_output_path.exists():
+        raise FileNotFoundError(f"Compiled target model was not downloaded to: {resolved_output_path}")
+    return resolved_output_path
+
+
+def write_deployment_download_record(
+    *,
+    pilot_name: str,
+    runtime_config: AiHubRuntimeConfig,
+    compile_record_path: str | Path,
+    target_model: Any = None,
+    downloaded_artifact_path: str | Path,
+    run_label: str | None = None,
+    output_path: str | Path | None = None,
+) -> Path:
+    resolved_compile_record_path = Path(compile_record_path).resolve()
+    resolved_downloaded_artifact_path = Path(downloaded_artifact_path).resolve()
+    record_path = _resolve_record_path(
+        runtime_config=runtime_config,
+        pilot_name=pilot_name,
+        record_kind="deployment-download",
+        run_label=run_label,
+        output_path=output_path,
+    )
+    payload = {
+        "record_kind": "deployment_download",
+        "pilot_name": pilot_name,
+        "device_name": runtime_config.device_name,
+        "qairt_version": runtime_config.qairt_version,
+        "compute_unit": runtime_config.compute_unit,
+        "compile_record_path": resolved_compile_record_path.as_posix(),
+        "target_model": _extract_model_metadata(target_model),
+        "downloaded_artifact": _build_file_metadata(resolved_downloaded_artifact_path),
+        "record_path": record_path.as_posix(),
+        "created_at_utc": _utc_now_isoformat(),
+    }
+    return _write_json_record(record_path, payload)
+
+
 def resolve_target_model_id(
     *,
     pilot_name: str,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     explicit_target_model_id: str | None = None,
     run_label: str | None = None,
 ) -> str:
@@ -1059,7 +1111,7 @@ def resolve_target_model_id(
 def write_live_run_record(
     *,
     pilot_name: str,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     compile_options: str,
     job_options: str,
     compile_job: Any = None,
@@ -1192,7 +1244,7 @@ def _build_file_metadata(path: Path) -> dict[str, Any]:
 
 def _resolve_record_path(
     *,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     pilot_name: str,
     record_kind: str,
     run_label: str | None,
@@ -1269,3 +1321,4 @@ def _strip_optional_quotes(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
+

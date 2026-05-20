@@ -1,12 +1,13 @@
-# Option 1 Rerun
+# AI Hub Rerun
 
-Use this doc when you want one fresh retained-lane rerun.
+Use this doc when you want one fresh retained AI Hub rerun.
 
 Run in:
 
 - [On_device_Ai_option1_pilots.ipynb](/D:/DS-AI/BKMeeting-Research/python-model-test/On_device_Ai_option1_pilots.ipynb)
 
-This is now the full retained `Option 1` notebook flow in this repo.
+This is now the full retained AI Hub notebook flow in this repo.
+The notebook filename and record-group names still carry legacy `option1` slugs because they are part of the retained evidence lookup surface.
 
 ## Prerequisites
 
@@ -23,10 +24,10 @@ It also no longer prepares the Zipformer encoder for AI Hub inside the notebook.
 ## Retained defaults
 
 - `Zipformer`
-  - compile pilot: `zipformer_encoder_option1`
+  - legacy compile record group: `zipformer_encoder_option1`
 - `VPCD`
   - source strategy: `local_aimet_compile_candidate`
-  - compile pilot: `vpcd_option1_local_aimet`
+  - legacy compile record group: `vpcd_option1_local_aimet`
 - bounded VPCD guardrails:
   - `VPCD_HYBRID_MAX_SAMPLES = 2`
   - `VPCD_HYBRID_MAX_STEPS = 5`
@@ -52,12 +53,44 @@ It also no longer prepares the Zipformer encoder for AI Hub inside the notebook.
 
 ## Expected record roots
 
+These retained record-group names are intentionally unchanged:
+
 - `build/aihub/records/zipformer_encoder_option1/`
 - `build/aihub/records/zipformer_hybrid_option1/`
 - `build/aihub/records/vpcd_option1_local_aimet/`
 - `build/aihub/records/vpcd_quantized_teacher_forced_option1/`
 - `build/aihub/records/vpcd_teacher_forced_option1/`
 - `build/aihub/records/vpcd_hybrid_option1/`
+
+## Deployment Packaging After The Notebook
+
+After the retained notebook already wrote the records for one `RUN_LABEL`, run deployment packaging separately.
+
+Dry run first:
+
+```bash
+python -m aihub.deployment \
+  --project all \
+  --run-label 20260519-6pm \
+  --device-name "Samsung Galaxy S24 (Family)" \
+  --qairt-version 2.46.0 \
+  --dry-run
+```
+
+Then package the retained deployable artifacts:
+
+```bash
+python -m aihub.deployment \
+  --project all \
+  --run-label 20260519-6pm \
+  --device-name "Samsung Galaxy S24 (Family)" \
+  --qairt-version 2.46.0
+```
+
+Deployment output root:
+
+- `build/aihub/deploy/zipformer/<RUN_LABEL>/`
+- `build/aihub/deploy/vpcd/<RUN_LABEL>/`
 
 ## Stop conditions
 
@@ -67,4 +100,5 @@ Stop and investigate if:
 - the notebook asks for a retired VPCD lane
 - the retained local AIMET artifact is missing
 - VPCD diverges before the retained `5`-step window
-- records are written under stale VPCD pilot names such as `vpcd_option1`
+- records are written outside the expected retained record groups above
+- deployment dry-run cannot resolve the compile or live-run records for the same `RUN_LABEL`

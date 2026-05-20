@@ -8,10 +8,10 @@ Use this file after:
 - candidate-bundle checks pass
 - Python-side QNN preflight passes where applicable
 
-If you are working on the retained `Option 1` AI Hub path, read this after:
+If you are working on the retained AI Hub path, read this after:
 
-- `docs/workflows/option1-overview.md`
-- `docs/workflows/option1-rerun.md`
+- `docs/workflows/aihub-overview.md`
+- `docs/workflows/aihub-rerun.md`
 
 ## Responsibility split
 
@@ -44,7 +44,22 @@ This CLI:
 - rewrites handoff fields in `bundle_manifest.json` when needed
 - keeps variant-family paths aligned with Android naming
 
-Current scope is bundle sync only. Retained `Option 1` rerun evidence stays under `build/aihub/records/` and should be referenced separately in BKMeeting handoff notes.
+Current scope is bundle sync only. Retained AI Hub rerun evidence stays under `build/aihub/records/` and should be referenced separately in BKMeeting handoff notes.
+
+For the retained AI Hub path, start the handoff review from:
+
+- `build/aihub/deploy/zipformer/<RUN_LABEL>/`
+- `build/aihub/deploy/vpcd/<RUN_LABEL>/`
+
+Those deployment packages now freeze:
+
+- the downloaded compiled artifact
+- retained evidence copies
+- `io_contract.json`
+- deploy notes for the CPU / compiled runtime split
+
+The current sync CLI still handles bundle sync only.
+It does not yet consume deployment packages directly.
 
 ## Supported handoff targets
 
@@ -122,6 +137,7 @@ When handing off a candidate, record:
 - project
 - variant
 - source bundle path
+- deployment package path when the handoff comes from the retained AI Hub path
 - destination asset namespace
 - whether the bundle is baseline or QNN-oriented
 - any QNN preflight report path and candidate report files
@@ -148,6 +164,7 @@ Sync only proves:
 
 - the Python-side artifacts were transferred
 - Android now has the bundle assets to attempt runtime integration
+- the retained deployment package was available as the Python-side deployment input if this was an AI Hub handoff
 
 It does not prove:
 
@@ -158,8 +175,8 @@ It does not prove:
 ## Related docs
 
 - `docs/workflows/export-verify-smoke.md`
-- `docs/workflows/option1-overview.md`
-- `docs/workflows/option1-rerun.md`
+- `docs/workflows/aihub-overview.md`
+- `docs/workflows/aihub-rerun.md`
 - `docs/qnn/model-quantization.md`
 - `docs/qnn/preflight.md`
 - `src/tools/README.md`

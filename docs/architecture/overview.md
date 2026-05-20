@@ -63,6 +63,7 @@ python-model-test/
   build/                 # generated artifacts from export and quantize flows
   docs/                  # canonical docs and historical plans
   src/
+    aihub/              # AI Hub compile, evaluation, and deployment helpers
     export/             # export CLIs
     model_bundle/       # shared manifest and bundle contract
     quantize/           # quantization framework
@@ -75,6 +76,8 @@ python-model-test/
 
 - `src/export/`
   - bundle export entrypoints
+- `src/aihub/`
+  - retained AI Hub session, evaluation, and deployment helpers
 - `src/model_bundle/`
   - shared manifest contract and project adapters
 - `src/quantize/`
@@ -122,5 +125,5 @@ Everything else serves that contract:
 - `docs/workflows/README.md`
 - `docs/workflows/export-verify-smoke.md`
 - `docs/workflows/quantize-qnn-candidates.md`
-- `docs/workflows/option1-overview.md`
+- `docs/workflows/aihub-overview.md`
 - `docs/workflows/android-handoff.md`

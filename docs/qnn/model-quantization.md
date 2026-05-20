@@ -15,7 +15,7 @@ Status date:
 
 For full lane history and the retained-lane rationale, read:
 
-- `docs/qnn/option1-retained-lanes.md`
+- `docs/qnn/aihub-retained-lanes.md`
 
 ## Current best lanes
 
@@ -75,7 +75,7 @@ For Android planning:
 
 ## Related docs
 
-- `docs/qnn/option1-retained-lanes.md`
+- `docs/qnn/aihub-retained-lanes.md`
 - `docs/qnn/preflight.md`
-- `docs/workflows/option1-overview.md`
-- `docs/workflows/option1-rerun.md`
+- `docs/workflows/aihub-overview.md`
+- `docs/workflows/aihub-rerun.md`

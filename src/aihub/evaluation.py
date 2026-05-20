@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import time
@@ -21,8 +21,8 @@ from model_bundle.projects.zipformer import (
     trim_encoder_frames,
 )
 from quantize.calibration import greedy_decode_ids, load_decoder_start_token_id, resolve_ort_providers
-from tools.aihub_option1_pilots import (
-    Option1RuntimeConfig,
+from aihub.session import (
+    AiHubRuntimeConfig,
     build_vpcd_fixed_shape_inputs,
     build_job_options,
     build_vpcd_input_specs,
@@ -32,24 +32,24 @@ from tools.aihub_option1_pilots import (
     resolve_vpcd_fp32_source_model_path,
     resolve_vpcd_model_dir,
     resolve_target_model_id,
-    resolve_vpcd_pilot_source,
-    resolve_zipformer_encoder_pilot_source,
+    resolve_vpcd_source,
+    resolve_zipformer_encoder_source,
     summarize_vpcd_step_logits,
 )
 from transformers import AutoTokenizer
 
-ZIPFORMER_PHASE2_PILOT = "zipformer_encoder_option1"
-ZIPFORMER_PHASE3_PILOT = "zipformer_hybrid_option1"
-VPCD_PHASE2_PILOT = "vpcd_option1_local_aimet"
-VPCD_PHASE3_PILOT = "vpcd_hybrid_option1"
-VPCD_TEACHER_FORCED_PILOT = "vpcd_teacher_forced_option1"
-VPCD_QUANTIZED_TEACHER_FORCED_PILOT = "vpcd_quantized_teacher_forced_option1"
+ZIPFORMER_COMPILE_RECORD_NAME = "zipformer_encoder_option1"
+ZIPFORMER_EVALUATION_RECORD_NAME = "zipformer_hybrid_option1"
+VPCD_COMPILE_RECORD_NAME = "vpcd_option1_local_aimet"
+VPCD_EVALUATION_RECORD_NAME = "vpcd_hybrid_option1"
+VPCD_CLOUD_TEACHER_FORCED_RECORD_NAME = "vpcd_teacher_forced_option1"
+VPCD_LOCAL_TEACHER_FORCED_RECORD_NAME = "vpcd_quantized_teacher_forced_option1"
 DEFAULT_ZIPFORMER_MAX_SAMPLES = 2
 DEFAULT_VPCD_MAX_SAMPLES = 4
 
 
 @dataclass(frozen=True)
-class ResolvedCompiledTarget:
+class ResolvedCompiledModel:
     compile_pilot_name: str
     target_model_id: str
     compile_record_path: Path | None
@@ -57,13 +57,13 @@ class ResolvedCompiledTarget:
     explicit_override: bool
 
 
-def resolve_compiled_target_reference(
+def resolve_compiled_model(
     *,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     compile_pilot_name: str,
     explicit_target_model_id: str | None = None,
     run_label: str | None = None,
-) -> ResolvedCompiledTarget:
+) -> ResolvedCompiledModel:
     normalized_explicit_id = _normalize_optional_string(explicit_target_model_id)
     target_model_id = resolve_target_model_id(
         pilot_name=compile_pilot_name,
@@ -78,7 +78,7 @@ def resolve_compiled_target_reference(
             compile_pilot_name=compile_pilot_name,
             run_label=run_label,
         )
-    return ResolvedCompiledTarget(
+    return ResolvedCompiledModel(
         compile_pilot_name=compile_pilot_name,
         target_model_id=target_model_id,
         compile_record_path=compile_record_path,
@@ -104,8 +104,8 @@ def normalize_compiled_output_tensors(
 
 def run_compiled_inference(
     *,
-    target_reference: ResolvedCompiledTarget,
-    runtime_config: Option1RuntimeConfig,
+    target_reference: ResolvedCompiledModel,
+    runtime_config: AiHubRuntimeConfig,
     inputs: Mapping[str, np.ndarray] | Mapping[str, list[np.ndarray]],
     input_specs: Mapping[str, tuple[tuple[int, ...], str]] | None,
     inference_runner: Callable[..., object] | None = None,
@@ -142,9 +142,9 @@ def run_compiled_inference(
     }
 
 
-def run_zipformer_hybrid_evaluation(
+def run_zipformer_split_runtime_evaluation(
     *,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     run_label: str | None = None,
     explicit_target_model_id: str | None = None,
     max_samples: int = DEFAULT_ZIPFORMER_MAX_SAMPLES,
@@ -152,10 +152,10 @@ def run_zipformer_hybrid_evaluation(
     bundle_runtime: object | None = None,
     feature_loader: Callable[..., np.ndarray] | None = None,
 ) -> dict[str, Any]:
-    source = resolve_zipformer_encoder_pilot_source(runtime_config.repo_root)
-    target_reference = resolve_compiled_target_reference(
+    source = resolve_zipformer_encoder_source(runtime_config.repo_root)
+    target_reference = resolve_compiled_model(
         runtime_config=runtime_config,
-        compile_pilot_name=ZIPFORMER_PHASE2_PILOT,
+        compile_pilot_name=ZIPFORMER_COMPILE_RECORD_NAME,
         explicit_target_model_id=explicit_target_model_id,
         run_label=run_label,
     )
@@ -229,15 +229,15 @@ def run_zipformer_hybrid_evaluation(
         )
 
     summary = _summarize_match_results(results)
-    record_path = write_hybrid_run_record(
-        pilot_name=ZIPFORMER_PHASE3_PILOT,
+    record_path = write_evaluation_record(
+        pilot_name=ZIPFORMER_EVALUATION_RECORD_NAME,
         runtime_config=runtime_config,
         target_reference=target_reference,
         sample_results=results,
         run_label=run_label,
     )
     return {
-        "pilot_name": ZIPFORMER_PHASE3_PILOT,
+        "pilot_name": ZIPFORMER_EVALUATION_RECORD_NAME,
         "target_reference": target_reference,
         "results": results,
         "summary": summary,
@@ -245,19 +245,19 @@ def run_zipformer_hybrid_evaluation(
     }
 
 
-def run_vpcd_hybrid_evaluation(
+def run_vpcd_split_runtime_evaluation(
     *,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     run_label: str | None = None,
     explicit_target_model_id: str | None = None,
-    compile_pilot_name: str = VPCD_PHASE2_PILOT,
+    compile_pilot_name: str = VPCD_COMPILE_RECORD_NAME,
     max_samples: int = DEFAULT_VPCD_MAX_SAMPLES,
     max_decode_steps: int | None = None,
     inference_runner: Callable[..., object] | None = None,
     bundle_runtime: BundleOnnxRuntime | None = None,
 ) -> dict[str, Any]:
-    source = resolve_vpcd_pilot_source(runtime_config.repo_root)
-    target_reference = resolve_compiled_target_reference(
+    source = resolve_vpcd_source(runtime_config.repo_root)
+    target_reference = resolve_compiled_model(
         runtime_config=runtime_config,
         compile_pilot_name=compile_pilot_name,
         explicit_target_model_id=explicit_target_model_id,
@@ -347,15 +347,15 @@ def run_vpcd_hybrid_evaluation(
         )
 
     summary = _summarize_match_results(results)
-    record_path = write_hybrid_run_record(
-        pilot_name=VPCD_PHASE3_PILOT,
+    record_path = write_evaluation_record(
+        pilot_name=VPCD_EVALUATION_RECORD_NAME,
         runtime_config=runtime_config,
         target_reference=target_reference,
         sample_results=results,
         run_label=run_label,
     )
     return {
-        "pilot_name": VPCD_PHASE3_PILOT,
+        "pilot_name": VPCD_EVALUATION_RECORD_NAME,
         "target_reference": target_reference,
         "results": results,
         "summary": summary,
@@ -366,10 +366,10 @@ def run_vpcd_hybrid_evaluation(
 
 def run_vpcd_teacher_forced_diagnostics(
     *,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     run_label: str | None = None,
     explicit_target_model_id: str | None = None,
-    compile_pilot_name: str = VPCD_PHASE2_PILOT,
+    compile_pilot_name: str = VPCD_COMPILE_RECORD_NAME,
     sample_index: int = 0,
     max_decode_steps: int | None = None,
     top_k: int = 5,
@@ -377,12 +377,12 @@ def run_vpcd_teacher_forced_diagnostics(
     cpu_model_step_runner: Callable[[dict[str, np.ndarray]], object] | None = None,
     decode_ids_fn: Callable[[str], tuple[dict[str, np.ndarray], list[int]]] | None = None,
 ) -> dict[str, Any]:
-    source = resolve_vpcd_pilot_source(runtime_config.repo_root)
+    source = resolve_vpcd_source(runtime_config.repo_root)
     sample_rows = read_jsonl(source.golden_samples_path)
     if sample_index < 0 or sample_index >= len(sample_rows):
         raise IndexError(f"VPCD sample_index out of range: {sample_index}")
 
-    target_reference = resolve_compiled_target_reference(
+    target_reference = resolve_compiled_model(
         runtime_config=runtime_config,
         compile_pilot_name=compile_pilot_name,
         explicit_target_model_id=explicit_target_model_id,
@@ -516,8 +516,8 @@ def run_vpcd_teacher_forced_diagnostics(
         "reference_stats": reference_stats,
         "steps": step_results,
     }
-    record_path = write_hybrid_run_record(
-        pilot_name=VPCD_TEACHER_FORCED_PILOT,
+    record_path = write_evaluation_record(
+        pilot_name=VPCD_CLOUD_TEACHER_FORCED_RECORD_NAME,
         runtime_config=runtime_config,
         target_reference=target_reference,
         sample_results=[sample_result],
@@ -525,7 +525,7 @@ def run_vpcd_teacher_forced_diagnostics(
     )
     summary = _summarize_match_results([sample_result])
     return {
-        "pilot_name": VPCD_TEACHER_FORCED_PILOT,
+        "pilot_name": VPCD_CLOUD_TEACHER_FORCED_RECORD_NAME,
         "target_reference": target_reference,
         "results": [sample_result],
         "steps": step_results,
@@ -535,20 +535,20 @@ def run_vpcd_teacher_forced_diagnostics(
     }
 
 
-def run_vpcd_quantized_teacher_forced_diagnostics(
+def run_vpcd_local_teacher_forced_diagnostics(
     *,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     run_label: str | None = None,
     sample_index: int = 0,
     max_decode_steps: int | None = None,
     top_k: int = 5,
     explicit_quantized_model_path: str | Path | None = None,
-    compile_pilot_name: str = VPCD_PHASE2_PILOT,
+    compile_pilot_name: str = VPCD_COMPILE_RECORD_NAME,
     cpu_model_step_runner: Callable[[dict[str, np.ndarray]], object] | None = None,
     quantized_model_step_runner: Callable[[dict[str, np.ndarray]], object] | None = None,
     decode_ids_fn: Callable[[str], tuple[dict[str, np.ndarray], list[int]]] | None = None,
 ) -> dict[str, Any]:
-    source = resolve_vpcd_pilot_source(runtime_config.repo_root)
+    source = resolve_vpcd_source(runtime_config.repo_root)
     sample_rows = read_jsonl(source.golden_samples_path)
     if sample_index < 0 or sample_index >= len(sample_rows):
         raise IndexError(f"VPCD sample_index out of range: {sample_index}")
@@ -685,15 +685,15 @@ def run_vpcd_quantized_teacher_forced_diagnostics(
         "reference_stats": reference_stats,
         "steps": step_results,
     }
-    synthetic_reference = ResolvedCompiledTarget(
+    synthetic_reference = ResolvedCompiledModel(
         compile_pilot_name=compile_pilot_name,
         target_model_id=reference_stats["quantized_model_path"] or "local-quantized-vpcd",
         compile_record_path=None,
         run_label=_normalize_optional_string(run_label),
         explicit_override=explicit_quantized_model_path is not None,
     )
-    record_path = write_hybrid_run_record(
-        pilot_name=VPCD_QUANTIZED_TEACHER_FORCED_PILOT,
+    record_path = write_evaluation_record(
+        pilot_name=VPCD_LOCAL_TEACHER_FORCED_RECORD_NAME,
         runtime_config=runtime_config,
         target_reference=synthetic_reference,
         sample_results=[sample_result],
@@ -701,7 +701,7 @@ def run_vpcd_quantized_teacher_forced_diagnostics(
     )
     summary = _summarize_match_results([sample_result])
     return {
-        "pilot_name": VPCD_QUANTIZED_TEACHER_FORCED_PILOT,
+        "pilot_name": VPCD_LOCAL_TEACHER_FORCED_RECORD_NAME,
         "target_reference": synthetic_reference,
         "results": [sample_result],
         "steps": step_results,
@@ -711,7 +711,7 @@ def run_vpcd_quantized_teacher_forced_diagnostics(
     }
 
 
-def _load_compile_record_context(target_reference: ResolvedCompiledTarget) -> dict[str, Any]:
+def _load_compile_record_context(target_reference: ResolvedCompiledModel) -> dict[str, Any]:
     compile_record_path = target_reference.compile_record_path
     if compile_record_path is None or not compile_record_path.exists():
         return {}
@@ -728,11 +728,11 @@ def _load_compile_record_context(target_reference: ResolvedCompiledTarget) -> di
     }
 
 
-def write_hybrid_run_record(
+def write_evaluation_record(
     *,
     pilot_name: str,
-    runtime_config: Option1RuntimeConfig,
-    target_reference: ResolvedCompiledTarget,
+    runtime_config: AiHubRuntimeConfig,
+    target_reference: ResolvedCompiledModel,
     sample_results: list[dict[str, Any]],
     run_label: str | None = None,
     output_path: str | Path | None = None,
@@ -771,7 +771,7 @@ def write_hybrid_run_record(
 def _submit_live_compiled_inference(
     *,
     target_model_id: str,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     inputs: dict[str, list[np.ndarray]],
     inference_name: str | None,
 ) -> tuple[Mapping[str, object], dict[str, Any]]:
@@ -797,7 +797,7 @@ def _submit_live_compiled_inference(
 
 def _resolve_phase2_compile_record_path(
     *,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     compile_pilot_name: str,
     run_label: str | None,
 ) -> Path:
@@ -807,7 +807,7 @@ def _resolve_phase2_compile_record_path(
 
 def _resolve_hybrid_record_path(
     *,
-    runtime_config: Option1RuntimeConfig,
+    runtime_config: AiHubRuntimeConfig,
     pilot_name: str,
     run_label: str | None,
     output_path: str | Path | None,
@@ -1007,3 +1007,4 @@ def _utc_now_isoformat() -> str:
 def _resolve_repo_relative_path(repo_root: Path, value: object) -> Path:
     path = Path(str(value))
     return path if path.is_absolute() else (repo_root / path)
+

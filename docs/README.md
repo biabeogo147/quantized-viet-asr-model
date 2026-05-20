@@ -14,9 +14,9 @@ If you are new to the repo, read the docs in this order:
 3. `docs/workflows/README.md`
 4. `docs/workflows/export-verify-smoke.md`
 5. `docs/workflows/quantize-qnn-candidates.md`
-6. `docs/workflows/option1-overview.md`
+6. `docs/workflows/aihub-overview.md`
 7. `docs/qnn/preflight.md`
-8. `docs/qnn/option1-retained-lanes.md`
+8. `docs/qnn/aihub-retained-lanes.md`
 9. `docs/qnn/model-quantization.md`
 10. `docs/qnn/validation-log.md`
 11. `docs/plans/README.md`
@@ -38,9 +38,9 @@ If you are new to the repo, read the docs in this order:
   - canonical export, verify, and smoke-test flows
 - `docs/workflows/quantize-qnn-candidates.md`
   - calibration, quantization, candidate-bundle generation, and acceptance gates
-- `docs/workflows/option1-overview.md`
-  - current `Option 1` reader guide and evidence chain
-- `docs/workflows/option1-rerun.md`
+- `docs/workflows/aihub-overview.md`
+  - current retained AI Hub reader guide and evidence chain
+- `docs/workflows/aihub-rerun.md`
   - current `Phase 2 + Phase 3` rerun flow in `On_device_Ai_option1_pilots.ipynb`
 - `docs/workflows/android-handoff.md`
   - generic bundle sync handoff into BKMeeting and the Python-vs-Android responsibility split
@@ -49,7 +49,7 @@ If you are new to the repo, read the docs in this order:
 
 - `docs/qnn/preflight.md`
   - what "QNN-ready" means in this repo and what Python preflight does and does not prove
-- `docs/qnn/option1-retained-lanes.md`
+- `docs/qnn/aihub-retained-lanes.md`
   - retained-lane decisions, lane history, and the current notebook defaults
 - `docs/qnn/model-quantization.md`
   - quick current-state summary of quantized assets, CPU-side pieces, and remaining proof gaps
@@ -74,5 +74,5 @@ If you are new to the repo, read the docs in this order:
 - Stable docs should not use date-based filenames.
 - Canonical docs should prefer repo-relative paths and placeholders such as `<BKMEETING_ROOT>`, never machine-specific absolute paths.
 - If two docs say the same thing, keep one as canonical and archive or trim the duplicate.
-- The canonical `Option 1` workflow entrypoints are `option1-overview.md`, `option1-rerun.md`, and `android-handoff.md`.
+- The canonical retained AI Hub workflow entrypoints are `aihub-overview.md`, `aihub-rerun.md`, and `android-handoff.md`.
 - Archived plans may still mention superseded filenames, old interpreter commands, or machine-specific paths because they record historical execution context rather than the current canonical workflow.

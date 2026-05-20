@@ -1,14 +1,31 @@
-# Option 1 Step 5 Deployable Artifact Download Implementation Plan
+# AI Hub Deployment Packaging Implementation Plan
+
+> Historical note: this archive plan preserves some original rollout terminology such as `Option 1` and `Step 5` where it was used to describe exact retained evidence keys. The current implementation now lives under `src/aihub/`, and the current operator docs live under `docs/workflows/aihub-*`.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a deterministic Step 5 flow in `python-model-test` that downloads the AI Hub `precompiled_qnn_onnx` artifact for the retained `zipformer` and `vpcd` pilots, records the exact download metadata, and materializes a Python-side package that later handoff work can consume without reopening AI Hub.
+**Goal:** Add a deterministic AI Hub deployment-packaging flow in `python-model-test` that downloads the AI Hub `precompiled_qnn_onnx` artifact for the retained `zipformer` and `vpcd` projects, records the exact download metadata, and materializes a Python-side package that later handoff work can consume without reopening AI Hub.
 
-**Architecture:** Keep `On_device_Ai_option1_pilots.ipynb` limited to the current prepare / compile / run / hybrid evidence loop. Add a separate Step 5 helper + CLI that resolves existing compile and live-run records by `RUN_LABEL`, downloads the compiled target model from AI Hub, exports a normalized `io_contract.json`, and writes one per-pilot Step 5 package under `build/aihub/step5/option1/...`. Do not sync to BKMeeting and do not change Android runtime code in this phase.
+**Architecture:** Keep `On_device_Ai_option1_pilots.ipynb` limited to the current prepare / compile / run / hybrid evidence loop. Add a separate deployment helper + CLI that resolves existing compile and live-run records by `RUN_LABEL`, downloads the compiled target model from AI Hub, exports a normalized `io_contract.json`, and writes one per-project deployment package under `build/aihub/deploy/...`. Do not sync to BKMeeting and do not change Android runtime code in this phase.
 
-**Tech Stack:** Python, `qai_hub`, existing Option 1 record helpers in `src/tools/aihub_option1_pilots.py`, `ModelBundleManifest`, JSON manifests, Markdown workflow docs, `pytest`
+**Tech Stack:** Python, `qai_hub`, AI Hub session helpers in `src/aihub/session.py`, deployment packaging in `src/aihub/deployment.py`, `ModelBundleManifest`, JSON manifests, Markdown workflow docs, `pytest`
 
 ---
+
+## Implementation Status
+
+Updated `2026-05-20`:
+
+- Tasks 1-5 were implemented directly in `python-model-test`.
+- Shared compiled-target download helpers now live in `src/aihub/session.py`.
+- The deployment resolver, package writer, and CLI now live in `src/aihub/deployment.py`.
+- Workflow docs were refreshed so the post-notebook deployment path is now documented under `docs/workflows/`.
+- Real deployment packages were materialized for both retained projects under:
+  - `build/aihub/deploy/zipformer/20260519-6pm/`
+  - `build/aihub/deploy/vpcd/20260519-6pm/`
+- Focused tests, notebook-layout guards, Python compile verification, CLI dry-run, and one real AI Hub-backed package build all passed.
+- Commit checklist items remain intentionally open because repository commit/integration was not requested in this session.
+- Detailed implementation and verification evidence is recorded in [2026-05-20-aihub-deployment-packaging-results.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/plans/archive/2026-05-20-aihub-deployment-packaging-results.md).
 
 ## Scope And Assumptions
 
@@ -21,8 +38,8 @@
   - `vpcd` compile record:
     - `build/aihub/records/vpcd_option1_local_aimet/compile-run-20260519-6pm.json`
     - target model id: `mmxwpeyen`
-- The shared pilot notebook intentionally excludes downstream Step 5 logic today, and that behavior is locked by [test/test_option1_notebook_layout.py](/D:/DS-AI/BKMeeting-Research/python-model-test/test/test_option1_notebook_layout.py).
-- Step 5 must be runnable **without recompiling** and without moving AI Hub logic into the shared pilot notebook.
+- The shared pilot notebook intentionally excludes downstream deployment-packaging logic today, and that behavior is locked by [test_aihub_notebook_layout.py](/D:/DS-AI/BKMeeting-Research/python-model-test/test/test_aihub_notebook_layout.py).
+- Deployment packaging must be runnable **without recompiling** and without moving AI Hub logic into the shared pilot notebook.
 
 ## Non-Goals
 

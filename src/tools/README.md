@@ -1,8 +1,8 @@
-# Tools Module
+﻿# Tools Module
 
 `src/tools/` keeps small repo utilities that sit around the main export, quantize, verify, and Android handoff flows.
 
-## Retained Option 1 rule
+## Retained AI Hub rule
 
 For `VPCD`, local quantization is no longer built in the notebook helpers.
 
@@ -27,8 +27,19 @@ Then the retained AI Hub notebook only consumes the prebuilt artifact from:
 - `paths.py`
   - stable repo-root path resolution used from inside `src/`
 
+## AI Hub helpers
+
+The retained AI Hub workflow now lives under:
+
+- [src/aihub/README.md](/D:/DS-AI/BKMeeting-Research/python-model-test/src/aihub/README.md)
+  - `aihub.session`
+  - `aihub.evaluation`
+  - `aihub.deployment`
+
 ## Related workflow docs
 
-- [option1-overview.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/option1-overview.md)
-- [option1-rerun.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/option1-rerun.md)
+- [aihub-overview.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/aihub-overview.md)
+- [aihub-rerun.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/aihub-rerun.md)
+- [aihub-deployment.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/aihub-deployment.md)
 - [android-handoff.md](/D:/DS-AI/BKMeeting-Research/python-model-test/docs/workflows/android-handoff.md)
+

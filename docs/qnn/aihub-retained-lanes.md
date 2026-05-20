@@ -1,6 +1,6 @@
-# Option 1 Retained Lanes
+# AI Hub Retained Lanes
 
-This is the canonical lane-history and lane-decision doc for `Option 1`.
+This is the canonical lane-history and lane-decision doc for the retained AI Hub workflow.
 
 Use it when you need to answer:
 
@@ -162,8 +162,8 @@ VPCD:
 
 ## Related docs
 
-- `docs/workflows/option1-overview.md`
-- `docs/workflows/option1-rerun.md`
+- `docs/workflows/aihub-overview.md`
+- `docs/workflows/aihub-rerun.md`
 - `docs/qnn/model-quantization.md`
 - `docs/plans/archive/2026-05-13-vpcd-option1-debug-results.md`
 - `docs/plans/archive/2026-05-11-aihub-option1-npu-pilots.md`
