@@ -12,8 +12,8 @@ import onnxruntime as ort
 
 from model_bundle.fixtures import read_jsonl
 from model_bundle.manifest import ModelBundleManifest
-from model_bundle.projects._vpcd_support import BundleOnnxRuntime
-from model_bundle.projects.zipformer import (
+from model_bundle.vpcd_runtime import BundleOnnxRuntime
+from model_bundle.zipformer_runtime import (
     BundleAcousticRuntime,
     ModelDirAcousticRuntime,
     decode_encoder_frames_greedy,

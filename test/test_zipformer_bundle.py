@@ -101,7 +101,7 @@ def test_audio_fixtures_round_trip():
 
 
 def test_export_zipformer_bundle_writes_manifest_and_model_files(tmp_case_dir):
-    from model_bundle.projects.zipformer import export_bundle
+    from quantize.zipformer_bundle import export_bundle
 
     model_dir = tmp_case_dir / 'model'
     model_dir.mkdir()
@@ -127,7 +127,8 @@ def test_export_zipformer_bundle_writes_manifest_and_model_files(tmp_case_dir):
 
 
 def test_bundle_runtime_uses_only_manifest_paths(tmp_case_dir, monkeypatch):
-    from model_bundle.projects.zipformer import BundleAcousticRuntime, export_bundle
+    from model_bundle.zipformer_runtime import BundleAcousticRuntime
+    from quantize.zipformer_bundle import export_bundle
 
     model_dir = tmp_case_dir / 'model'
     model_dir.mkdir()
@@ -166,7 +167,7 @@ def test_bundle_runtime_uses_only_manifest_paths(tmp_case_dir, monkeypatch):
 
 
 def test_verify_exported_bundle_matches_model_dir_mode(monkeypatch, tmp_case_dir):
-    from model_bundle.projects.zipformer import verify_bundle
+    from quantize.zipformer_bundle import verify_bundle
 
     bundle_dir = tmp_case_dir / 'bundle'
     bundle_dir.mkdir()
@@ -199,9 +200,9 @@ def test_verify_exported_bundle_matches_model_dir_mode(monkeypatch, tmp_case_dir
 
     model_runtime = FakeRuntime('xin chao')
     bundle_runtime = FakeRuntime('xin chao')
-    monkeypatch.setattr('model_bundle.projects.zipformer.ModelDirAcousticRuntime', lambda **kwargs: model_runtime)
+    monkeypatch.setattr('quantize.zipformer_bundle.ModelDirAcousticRuntime', lambda **kwargs: model_runtime)
     monkeypatch.setattr(
-        'model_bundle.projects.zipformer.BundleAcousticRuntime',
+        'quantize.zipformer_bundle.BundleAcousticRuntime',
         type('FakeBundleRuntime', (), {'from_manifest_path': classmethod(lambda cls, manifest_path, provider='CPUExecutionProvider': bundle_runtime)}),
     )
 
@@ -214,7 +215,7 @@ def test_verify_exported_bundle_matches_model_dir_mode(monkeypatch, tmp_case_dir
 
 
 def test_greedy_decode_encoder_frames_reuses_decoder_and_joiner_loop():
-    from model_bundle.projects.zipformer import decode_encoder_frames_greedy
+    from model_bundle.zipformer_runtime import decode_encoder_frames_greedy
 
     class FakeDecoderSession:
         def __init__(self) -> None:

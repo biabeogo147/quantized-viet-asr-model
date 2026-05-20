@@ -2,7 +2,7 @@ import argparse
 import time
 from typing import List, Protocol
 
-from model_bundle.projects.vpcd import (
+from model_bundle.vpcd_runtime import (
     BundleOnnxRuntime,
     DEFAULT_MODEL_DIR,
     DEFAULT_MODEL_VARIANT,

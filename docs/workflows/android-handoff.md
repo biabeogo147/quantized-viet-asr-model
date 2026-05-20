@@ -46,12 +46,18 @@ This CLI:
 
 Current scope is bundle sync only. Retained AI Hub rerun evidence stays under `build/aihub/records/` and should be referenced separately in BKMeeting handoff notes.
 
+The source bundle typically comes from one of these owners:
+
+- `python -m tools.bundle_export ...` for manual baseline bundles
+- `python -m quantize --project zipformer ...` for the retained quantized Zipformer candidate
+- `python -m quantize --project vpcd ...` plus `python -m tools.prepare_vpcd_qnn_candidate ...` for the retained VPCD candidate path
+
 For the retained AI Hub path, start the handoff review from:
 
 - `build/aihub/deploy/zipformer/<RUN_LABEL>/`
 - `build/aihub/deploy/vpcd/<RUN_LABEL>/`
 
-Those deployment packages now freeze:
+Those deployment packages currently freeze:
 
 - the downloaded compiled artifact
 - retained evidence copies
@@ -59,7 +65,7 @@ Those deployment packages now freeze:
 - deploy notes for the CPU / compiled runtime split
 
 The current sync CLI still handles bundle sync only.
-It does not yet consume deployment packages directly.
+It does not yet consume deployment packages directly or replace the future Android-ready AI Hub bundle lane.
 
 ## Supported handoff targets
 

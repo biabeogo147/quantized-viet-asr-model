@@ -1,7 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
-import shutil
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -12,25 +11,23 @@ import numpy as np
 
 from model_bundle.fixtures import TextGoldenSample, serialize_jsonl
 from model_bundle.manifest import ModelBundleManifest
-from model_bundle.projects.vpcd_shapes import (
-    attention_mask_for_length,
-    pad_token_row,
-    resolve_vpcd_model_input_shapes,
-)
+from model_bundle.vpcd_shapes import attention_mask_for_length, pad_token_row, resolve_vpcd_model_input_shapes
 from tools.paths import resolve_repo_path
 
-DEFAULT_ASSET_NAMESPACE = 'models/punctuation/vpcd/vpcd_balanced'
-DEFAULT_MODEL_VARIANT = 'vpcd_balanced'
-MODEL_FILE_NAME = 'model.mobile.onnx'
-TOKENIZER_ENCODE_FILE_NAME = 'tokenizer.encode.onnx'
-TOKENIZER_DECODE_FILE_NAME = 'tokenizer.decode.onnx'
-TOKENIZER_TO_MODEL_ID_MAP_FILE_NAME = 'tokenizer.to_model_id_map.json'
-MODEL_TO_TOKENIZER_ID_MAP_FILE_NAME = 'tokenizer.from_model_id_map.json'
-GOLDEN_SAMPLES_FILE_NAME = 'golden_samples.jsonl'
+
+DEFAULT_MODEL_DIR = Path("assets") / "vietnamese-punc-cap-denorm-v1"
+DEFAULT_ASSET_NAMESPACE = "models/punctuation/vpcd/vpcd_balanced"
+DEFAULT_MODEL_VARIANT = "vpcd_balanced"
+MODEL_FILE_NAME = "model.mobile.onnx"
+TOKENIZER_ENCODE_FILE_NAME = "tokenizer.encode.onnx"
+TOKENIZER_DECODE_FILE_NAME = "tokenizer.decode.onnx"
+TOKENIZER_TO_MODEL_ID_MAP_FILE_NAME = "tokenizer.to_model_id_map.json"
+MODEL_TO_TOKENIZER_ID_MAP_FILE_NAME = "tokenizer.from_model_id_map.json"
+GOLDEN_SAMPLES_FILE_NAME = "golden_samples.jsonl"
 UNK_TOKEN_ID = 3
 DEFAULT_TEXTS = [
-    'hom nay la buoi nham chuc cua toi phuoc thanh',
-    'chao cac ban hom nay chung ta cung nhau den voi bai hoc deep learning phan so muoi ba',
+    "hom nay la buoi nham chuc cua toi phuoc thanh",
+    "chao cac ban hom nay chung ta cung nhau den voi bai hoc deep learning phan so muoi ba",
 ]
 
 
@@ -56,12 +53,12 @@ class TokenizerIdBridge:
         tokenizer_to_model_file = Path(tokenizer_to_model_path)
         model_to_tokenizer_file = Path(model_to_tokenizer_path)
         tokenizer_to_model_file.write_text(
-            json.dumps(self.tokenizer_to_model_ids, ensure_ascii=False, separators=(',', ':')) + '\n',
-            encoding='utf-8',
+            json.dumps(self.tokenizer_to_model_ids, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
         )
         model_to_tokenizer_file.write_text(
-            json.dumps(self.model_to_tokenizer_ids, ensure_ascii=False, separators=(',', ':')) + '\n',
-            encoding='utf-8',
+            json.dumps(self.model_to_tokenizer_ids, ensure_ascii=False, separators=(",", ":")) + "\n",
+            encoding="utf-8",
         )
         return tokenizer_to_model_file.name, model_to_tokenizer_file.name
 
@@ -71,7 +68,7 @@ GoldenSampleBuilder = Callable[..., list[TextGoldenSample]]
 
 
 def ensure_local_vendor_path() -> None:
-    vendor_dir = resolve_repo_path('_vendor', anchor=__file__)
+    vendor_dir = resolve_repo_path("_vendor", anchor=__file__)
     if vendor_dir.exists():
         vendor_path = str(vendor_dir)
         if vendor_path not in sys.path:
@@ -79,12 +76,12 @@ def ensure_local_vendor_path() -> None:
 
 
 def resolve_variant_onnx_path(model_dir: str | Path, model_variant: str) -> Path:
-    variant_file = model_variant if str(model_variant).endswith('.onnx') else f'{model_variant}.onnx'
-    return Path(model_dir) / 'onnx' / variant_file
+    variant_file = model_variant if str(model_variant).endswith(".onnx") else f"{model_variant}.onnx"
+    return Path(model_dir) / "onnx" / variant_file
 
 
 class ModelDirOnnxRuntime:
-    def __init__(self, *, model_dir: str, onnx_path: str, provider: str = 'CPUExecutionProvider'):
+    def __init__(self, *, model_dir: str, onnx_path: str, provider: str = "CPUExecutionProvider"):
         import onnxruntime as ort
         from transformers import AutoTokenizer
 
@@ -97,15 +94,15 @@ class ModelDirOnnxRuntime:
         self.eos_token_id = self.tokenizer.eos_token_id
         self.decoder_start_token_id = self.tokenizer.eos_token_id
 
-        generation_config_path = Path(model_dir) / 'generation_config.json'
+        generation_config_path = Path(model_dir) / "generation_config.json"
         if generation_config_path.exists():
-            generation_config = json.loads(generation_config_path.read_text(encoding='utf-8'))
-            self.decoder_start_token_id = generation_config.get('decoder_start_token_id', self.decoder_start_token_id)
+            generation_config = json.loads(generation_config_path.read_text(encoding="utf-8"))
+            self.decoder_start_token_id = generation_config.get("decoder_start_token_id", self.decoder_start_token_id)
 
     def restore(self, text: str, max_length: int = 128) -> str:
-        encoded = self.tokenizer(text, return_tensors='np', truncation=True, max_length=512)
-        input_ids = encoded['input_ids'].astype(np.int64)
-        attention_mask = encoded['attention_mask'].astype(np.int64)
+        encoded = self.tokenizer(text, return_tensors="np", truncation=True, max_length=512)
+        input_ids = encoded["input_ids"].astype(np.int64)
+        attention_mask = encoded["attention_mask"].astype(np.int64)
         decoder_input_ids = np.array([[self.decoder_start_token_id]], dtype=np.int64)
 
         for _ in range(max_length):
@@ -113,10 +110,10 @@ class ModelDirOnnxRuntime:
             outputs = self.session.run(
                 None,
                 {
-                    'input_ids': input_ids,
-                    'attention_mask': attention_mask,
-                    'decoder_input_ids': decoder_input_ids,
-                    'decoder_attention_mask': decoder_attention_mask,
+                    "input_ids": input_ids,
+                    "attention_mask": attention_mask,
+                    "decoder_input_ids": decoder_input_ids,
+                    "decoder_attention_mask": decoder_attention_mask,
                 },
             )
             logits = outputs[0]
@@ -136,7 +133,7 @@ VietnamesePuncCapDenormOnnx = ModelDirOnnxRuntime
 def bartpho_tokenizer_ortx_alias(tokenizer: object):
     tokenizer_class = tokenizer.__class__
     original_name = tokenizer_class.__name__
-    tokenizer_class.__name__ = 'XLMRobertaTokenizer'
+    tokenizer_class.__name__ = "XLMRobertaTokenizer"
     try:
         yield
     finally:
@@ -191,17 +188,17 @@ def default_tokenizer_exporter(model_dir: str, bundle_dir: str) -> TokenizerExpo
         from onnxruntime_extensions import gen_processing_models
         from transformers import AutoTokenizer
     except ImportError as exc:
-        raise RuntimeError('Tokenizer export requires onnx, transformers, and onnxruntime-extensions.') from exc
+        raise RuntimeError("Tokenizer export requires onnx, transformers, and onnxruntime-extensions.") from exc
 
     tokenizer = AutoTokenizer.from_pretrained(model_dir, local_files_only=True)
     with bartpho_tokenizer_ortx_alias(tokenizer):
         processing_models = gen_processing_models(
             tokenizer,
-            pre_kwargs={'fairseq': True},
-            post_kwargs={'fairseq': True},
+            pre_kwargs={"fairseq": True},
+            post_kwargs={"fairseq": True},
         )
     if len(processing_models) < 2:
-        raise RuntimeError('gen_processing_models did not return both encode and decode graphs.')
+        raise RuntimeError("gen_processing_models did not return both encode and decode graphs.")
 
     bundle_path = Path(bundle_dir)
     encode_path = bundle_path / TOKENIZER_ENCODE_FILE_NAME
@@ -234,14 +231,14 @@ def default_golden_sample_builder(
     for text in DEFAULT_TEXTS:
         encoded = model.tokenizer(
             text,
-            return_tensors='np',
+            return_tensors="np",
             truncation=True,
             max_length=512,
         )
         samples.append(
             TextGoldenSample(
                 raw_text=text,
-                input_ids=encoded['input_ids'][0].astype(int).tolist(),
+                input_ids=encoded["input_ids"][0].astype(int).tolist(),
                 expected_output=model.restore(text, max_length=max_decode_length),
             )
         )
@@ -249,7 +246,7 @@ def default_golden_sample_builder(
 
 
 def _load_json_array(path: str | Path) -> np.ndarray:
-    return np.asarray(json.loads(Path(path).read_text(encoding='utf-8')), dtype=np.int64)
+    return np.asarray(json.loads(Path(path).read_text(encoding="utf-8")), dtype=np.int64)
 
 
 def _flatten_int64_array(value: object) -> np.ndarray:
@@ -260,16 +257,16 @@ def _extract_string(value: object) -> str:
     if isinstance(value, str):
         return value
     flattened = np.asarray(value, dtype=object).reshape(-1)
-    return '' if flattened.size == 0 else str(flattened[0])
+    return "" if flattened.size == 0 else str(flattened[0])
 
 
 def _normalize_input_text(text: str | None, metadata: dict[str, object]) -> str:
-    normalized = '' if text is None else text.strip()
+    normalized = "" if text is None else text.strip()
     if not normalized:
-        return ''
+        return ""
 
-    input_text_case = str(metadata.get('input_text_case', '') or '').strip().lower()
-    if input_text_case == 'lower':
+    input_text_case = str(metadata.get("input_text_case", "") or "").strip().lower()
+    if input_text_case == "lower":
         return normalized.lower()
     return normalized
 
@@ -295,7 +292,7 @@ class BundleOnnxRuntime:
         self.fixed_input_shapes = resolve_vpcd_model_input_shapes(self.metadata)
 
     @classmethod
-    def from_manifest_path(cls, manifest_path: str | Path, provider: str = 'CPUExecutionProvider') -> 'BundleOnnxRuntime':
+    def from_manifest_path(cls, manifest_path: str | Path, provider: str = "CPUExecutionProvider") -> "BundleOnnxRuntime":
         ensure_local_vendor_path()
         import onnxruntime as ort
         from onnxruntime_extensions import get_library_path
@@ -307,19 +304,19 @@ class BundleOnnxRuntime:
 
         return cls(
             manifest=manifest,
-            model_session=ort.InferenceSession(str(bundle_dir / manifest.artifacts['model']), providers=[provider]),
+            model_session=ort.InferenceSession(str(bundle_dir / manifest.artifacts["model"]), providers=[provider]),
             encode_session=ort.InferenceSession(
-                str(bundle_dir / manifest.artifacts['tokenizer_encode']),
+                str(bundle_dir / manifest.artifacts["tokenizer_encode"]),
                 sess_options=session_options,
                 providers=[provider],
             ),
             decode_session=ort.InferenceSession(
-                str(bundle_dir / manifest.artifacts['tokenizer_decode']),
+                str(bundle_dir / manifest.artifacts["tokenizer_decode"]),
                 sess_options=session_options,
                 providers=[provider],
             ),
-            tokenizer_to_model_ids=_load_json_array(bundle_dir / manifest.artifacts['tokenizer_to_model_id_map']),
-            model_to_tokenizer_ids=_load_json_array(bundle_dir / manifest.artifacts['model_to_tokenizer_id_map']),
+            tokenizer_to_model_ids=_load_json_array(bundle_dir / manifest.artifacts["tokenizer_to_model_id_map"]),
+            model_to_tokenizer_ids=_load_json_array(bundle_dir / manifest.artifacts["model_to_tokenizer_id_map"]),
         )
 
     def restore(self, text: str, max_length: int = 128) -> str:
@@ -328,7 +325,7 @@ class BundleOnnxRuntime:
             lambda feeds: self.model_session.run(None, feeds)[0],
             max_length=max_length,
         )
-        return str(result['text'])
+        return str(result["text"])
 
     def restore_with_model_step(
         self,
@@ -340,10 +337,10 @@ class BundleOnnxRuntime:
         normalized = _normalize_input_text(text, self.metadata)
         if not normalized:
             return {
-                'text': '',
-                'decode_steps': 0,
-                'generated_ids': np.asarray([], dtype=np.int64),
-                'ended_with_eos': False,
+                "text": "",
+                "decode_steps": 0,
+                "generated_ids": np.asarray([], dtype=np.int64),
+                "ended_with_eos": False,
             }
 
         model_ids = self._encode_to_model_ids(normalized)
@@ -351,11 +348,18 @@ class BundleOnnxRuntime:
             input_ids = model_ids.reshape(1, -1)
             attention_mask = np.ones_like(input_ids, dtype=np.int64)
         else:
-            input_ids = pad_token_row(model_ids, target_length=self.fixed_input_shapes.encoder_sequence, pad_value=int(self.metadata['pad_token_id']))
-            attention_mask = attention_mask_for_length(actual_length=int(model_ids.size), target_length=self.fixed_input_shapes.encoder_sequence)
+            input_ids = pad_token_row(
+                model_ids,
+                target_length=self.fixed_input_shapes.encoder_sequence,
+                pad_value=int(self.metadata["pad_token_id"]),
+            )
+            attention_mask = attention_mask_for_length(
+                actual_length=int(model_ids.size),
+                target_length=self.fixed_input_shapes.encoder_sequence,
+            )
 
-        decoder_token_ids = np.asarray([int(self.metadata['decoder_start_token_id'])], dtype=np.int64)
-        effective_max_length = max(1, min(max_length, int(self.metadata['max_decode_length'])))
+        decoder_token_ids = np.asarray([int(self.metadata["decoder_start_token_id"])], dtype=np.int64)
+        effective_max_length = max(1, min(max_length, int(self.metadata["max_decode_length"])))
 
         for _ in range(effective_max_length):
             if self.fixed_input_shapes is None:
@@ -367,7 +371,7 @@ class BundleOnnxRuntime:
                 decoder_input_ids = pad_token_row(
                     decoder_token_ids,
                     target_length=self.fixed_input_shapes.decoder_sequence,
-                    pad_value=int(self.metadata['pad_token_id']),
+                    pad_value=int(self.metadata["pad_token_id"]),
                 )
                 decoder_attention_mask = attention_mask_for_length(
                     actual_length=active_decoder_length,
@@ -376,33 +380,33 @@ class BundleOnnxRuntime:
                 logits_position = active_decoder_length - 1
 
             feeds = {
-                'input_ids': input_ids,
-                'attention_mask': attention_mask,
-                'decoder_input_ids': decoder_input_ids,
-                'decoder_attention_mask': decoder_attention_mask,
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "decoder_input_ids": decoder_input_ids,
+                "decoder_attention_mask": decoder_attention_mask,
             }
             logits = model_step_runner(feeds)
             next_token_id = self._argmax_token_at(logits, logits_position)
             decoder_token_ids = np.concatenate([decoder_token_ids, np.asarray([next_token_id], dtype=np.int64)])
-            if next_token_id == int(self.metadata['eos_token_id']):
+            if next_token_id == int(self.metadata["eos_token_id"]):
                 break
 
         generated_ids = decoder_token_ids[1:]
-        ended_with_eos = bool(generated_ids.size and int(generated_ids[-1]) == int(self.metadata['eos_token_id']))
+        ended_with_eos = bool(generated_ids.size and int(generated_ids[-1]) == int(self.metadata["eos_token_id"]))
         return {
-            'text': self._decode_model_ids(generated_ids).strip(),
-            'decode_steps': int(generated_ids.size),
-            'generated_ids': generated_ids,
-            'ended_with_eos': ended_with_eos,
+            "text": self._decode_model_ids(generated_ids).strip(),
+            "decode_steps": int(generated_ids.size),
+            "generated_ids": generated_ids,
+            "ended_with_eos": ended_with_eos,
         }
 
     def _encode_to_model_ids(self, text: str) -> np.ndarray:
-        outputs = self.encode_session.run(None, {'inputs': np.asarray([text], dtype=object)})
+        outputs = self.encode_session.run(None, {"inputs": np.asarray([text], dtype=object)})
         tokenizer_ids = _flatten_int64_array(outputs[0])
         if tokenizer_ids.size == 0:
-            return np.asarray([int(self.metadata['eos_token_id'])], dtype=np.int64)
+            return np.asarray([int(self.metadata["eos_token_id"])], dtype=np.int64)
 
-        effective_max_source_length = max(1, int(self.metadata['max_source_length']))
+        effective_max_source_length = max(1, int(self.metadata["max_source_length"]))
         output_length = min(tokenizer_ids.size, effective_max_source_length)
         model_ids = np.full(output_length, UNK_TOKEN_ID, dtype=np.int64)
         for index in range(output_length):
@@ -410,17 +414,17 @@ class BundleOnnxRuntime:
             if 0 <= tokenizer_id < self.tokenizer_to_model_ids.shape[0]:
                 model_ids[index] = int(self.tokenizer_to_model_ids[tokenizer_id])
         if tokenizer_ids.size > output_length:
-            model_ids[output_length - 1] = int(self.metadata['eos_token_id'])
+            model_ids[output_length - 1] = int(self.metadata["eos_token_id"])
         return model_ids
 
     def _decode_model_ids(self, model_ids: np.ndarray) -> str:
         if model_ids.size == 0:
-            return ''
+            return ""
         tokenizer_ids = np.full(model_ids.size, UNK_TOKEN_ID, dtype=np.int64)
         for index, model_id in enumerate(model_ids.tolist()):
             if 0 <= model_id < self.model_to_tokenizer_ids.shape[0]:
                 tokenizer_ids[index] = int(self.model_to_tokenizer_ids[model_id])
-        outputs = self.decode_session.run(None, {'ids': tokenizer_ids})
+        outputs = self.decode_session.run(None, {"ids": tokenizer_ids})
         return _extract_string(outputs[0])
 
     @staticmethod
@@ -434,7 +438,7 @@ class BundleOnnxRuntime:
             return int(np.argmax(array[index]))
         if array.ndim == 1:
             return int(np.argmax(array))
-        raise ValueError(f'Unsupported logits shape: {array.shape}')
+        raise ValueError(f"Unsupported logits shape: {array.shape}")
 
     @staticmethod
     def _argmax_last_token(logits: object) -> int:

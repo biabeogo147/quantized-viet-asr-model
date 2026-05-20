@@ -8,19 +8,17 @@ import pytest
 
 from model_bundle.fixtures import TextGoldenSample, serialize_jsonl
 from model_bundle.manifest import ModelBundleManifest
-from model_bundle.projects.vpcd import (
+from model_bundle.vpcd_runtime import (
     BundleOnnxRuntime,
-    TokenizerExportArtifacts,
     TokenizerIdBridge,
-    build_vpcd_metadata,
-    export_bundle,
-    verify_bundle,
+    TokenizerExportArtifacts,
 )
-from model_bundle.projects.vpcd_shapes import (
+from model_bundle.vpcd_shapes import (
     attention_mask_for_length,
     pad_token_row,
     resolve_vpcd_model_input_shapes,
 )
+from quantize.vpcd_bundle import build_vpcd_metadata, export_bundle, verify_bundle
 from test.test_punctuation_model_onnx import (
     DEFAULT_MODEL_VARIANT,
     MODEL_DIR,
@@ -666,7 +664,7 @@ def test_verify_vpcd_candidate_bundle_matches_reference(monkeypatch, tmp_case_di
         def restore(self, text: str, max_length: int = 128) -> str:
             return 'Xin chao.'
 
-    monkeypatch.setattr('model_bundle.projects.vpcd.BundleOnnxRuntime', FakeRuntime)
+    monkeypatch.setattr('quantize.vpcd_bundle.BundleOnnxRuntime', FakeRuntime)
 
     report = verify_bundle(reference_bundle=reference_bundle, candidate_bundle=candidate_bundle)
 
@@ -718,7 +716,7 @@ def test_verify_vpcd_candidate_bundle_reports_mismatches(monkeypatch, tmp_case_d
         def restore(self, text: str, max_length: int = 128) -> str:
             return 'Xin chao?' if self.label == 'candidate' else 'Xin chao.'
 
-    monkeypatch.setattr('model_bundle.projects.vpcd.BundleOnnxRuntime', FakeRuntime)
+    monkeypatch.setattr('quantize.vpcd_bundle.BundleOnnxRuntime', FakeRuntime)
 
     report = verify_bundle(reference_bundle=reference_bundle, candidate_bundle=candidate_bundle)
 

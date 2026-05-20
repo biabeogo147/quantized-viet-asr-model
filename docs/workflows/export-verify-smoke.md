@@ -21,7 +21,7 @@ python -m pip install -e .
 ### Step 1. Export the bundle
 
 ```bash
-python -m export.model_bundle \
+python -m tools.bundle_export \
   --project vpcd \
   --model-dir assets/vietnamese-punc-cap-denorm-v1 \
   --output-dir build/model_bundle/vpcd/vpcd_balanced \
@@ -66,7 +66,7 @@ Why this step exists:
 ### Step 1. Export the FP32 reference bundle
 
 ```bash
-python -m export.model_bundle \
+python -m tools.bundle_export \
   --project zipformer \
   --model-dir assets/zipformer \
   --output-dir build/model_bundle/zipformer/fp32 \
@@ -137,13 +137,13 @@ Why this step exists:
 If the source punctuation ONNX needs to be refreshed before bundle export:
 
 ```bash
-python -m export.punctuation_onnx \
+python -m tools.punctuation_onnx \
   --model-dir assets/vietnamese-punc-cap-denorm-v1 \
   --output-dir assets/vietnamese-punc-cap-denorm-v1/onnx
 ```
 
 Use this only when the source ONNX itself needs regeneration.
-Bundle export stays on `python -m export.model_bundle`.
+Bundle export now lives on `python -m tools.bundle_export`.
 
 ## Full test suite
 

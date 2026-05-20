@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from typing import Sequence
 
-from model_bundle.qnn_preflight import verify_qnn_preflight
+from verify.qnn_preflight_core import verify_qnn_preflight
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

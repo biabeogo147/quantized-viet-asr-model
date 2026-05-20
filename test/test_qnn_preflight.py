@@ -7,7 +7,7 @@ from onnx import TensorProto, helper, numpy_helper
 import numpy as np
 
 from model_bundle.manifest import ModelBundleManifest
-from model_bundle.qnn_preflight import inspect_onnx_for_qnn_qdq, verify_qnn_preflight
+from verify.qnn_preflight_core import inspect_onnx_for_qnn_qdq, verify_qnn_preflight
 from verify.qnn_preflight import main
 
 

@@ -143,7 +143,7 @@ This metadata lets Android and Python agree on which shapes and artifacts belong
 
 When a bundle is valid, Python-side tooling can:
 
-- export it
+- export it through project-owned helpers
 - verify it
 - run it through a bundle-manifest smoke path
 - sync it into BKMeeting
@@ -161,5 +161,6 @@ Those are Android-side concerns and are owned by BKMeeting.
 ## Related module docs
 
 - `src/model_bundle/README.md`
-- `src/model_bundle/projects/README.md`
+- `src/verify/README.md`
+- `src/tools/README.md`
 - `docs/qnn/preflight.md`

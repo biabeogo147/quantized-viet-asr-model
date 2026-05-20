@@ -66,10 +66,12 @@ def test_model_bundle_submodules_import_from_src_root():
     with src_only_import_path():
         with fresh_package_import("model_bundle"):
             manifest = importlib.import_module("model_bundle.manifest")
-            projects = importlib.import_module("model_bundle.projects")
+            zipformer_runtime = importlib.import_module("model_bundle.zipformer_runtime")
+            vpcd_runtime = importlib.import_module("model_bundle.vpcd_runtime")
 
     assert str(Path(manifest.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
-    assert str(Path(projects.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
+    assert str(Path(zipformer_runtime.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
+    assert str(Path(vpcd_runtime.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
 
 
 def test_quantize_submodules_import_from_src_root():
@@ -82,23 +84,26 @@ def test_quantize_submodules_import_from_src_root():
     assert str(Path(projects.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
 
 
-def test_export_and_verify_submodules_import_from_src_root():
+def test_verify_submodules_import_from_src_root():
     with src_only_import_path():
-        with fresh_package_import("export"):
-            export_model_bundle = importlib.import_module("export.model_bundle")
         with fresh_package_import("verify"):
             verify_model_bundle = importlib.import_module("verify.model_bundle")
+            qnn_preflight = importlib.import_module("verify.qnn_preflight")
 
-    assert str(Path(export_model_bundle.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
     assert str(Path(verify_model_bundle.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
+    assert str(Path(qnn_preflight.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
 
 
 def test_tools_submodules_import_from_src_root():
     with src_only_import_path():
         with fresh_package_import("tools"):
             convert_bpe2token = importlib.import_module("tools.convert_bpe2token")
+            bundle_export = importlib.import_module("tools.bundle_export")
+            punctuation_onnx = importlib.import_module("tools.punctuation_onnx")
 
     assert str(Path(convert_bpe2token.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
+    assert str(Path(bundle_export.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
+    assert str(Path(punctuation_onnx.__file__).resolve()).startswith(str(SRC_ROOT.resolve()))
 
 
 def test_legacy_repo_root_package_files_are_removed():

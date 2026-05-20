@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from model_bundle.layout import resolve_bundle_dir
 from model_bundle.manifest import ModelBundleManifest
+from tools.bundle_paths import resolve_bundle_dir
 
 
 @dataclass(frozen=True)

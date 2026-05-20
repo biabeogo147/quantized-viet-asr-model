@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from model_bundle.verifier import verify_model_bundle
+from verify.bundle_runtime import verify_model_bundle
 
 
 def evaluate_candidate_bundle(

@@ -12,7 +12,8 @@ from onnxruntime.quantization import CalibrationMethod
 from onnxruntime.tools.symbolic_shape_infer import SymbolicShapeInference
 
 from model_bundle.fixtures import AudioExpectedOutput, AudioSampleFixture, read_jsonl
-from model_bundle.projects.zipformer import DEFAULT_AUDIO_FIXTURES, ModelDirAcousticRuntime, export_bundle
+from model_bundle.zipformer_runtime import ModelDirAcousticRuntime
+from quantize.zipformer_bundle import DEFAULT_AUDIO_FIXTURES, export_bundle
 from quantize.evaluate import evaluate_candidate_bundle
 from quantize.fixed_shapes import freeze_model_inputs
 from quantize.model_introspection import load_model_node_names

@@ -54,9 +54,7 @@ If you are new to the repo, start here:
 
 ## Module docs
 
-- `src/export/README.md`
 - `src/model_bundle/README.md`
-- `src/model_bundle/projects/README.md`
 - `src/quantize/README.md`
 - `src/quantize/projects/README.md`
 - `src/verify/README.md`

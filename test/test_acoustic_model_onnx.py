@@ -4,12 +4,8 @@ import time
 from pathlib import Path
 from typing import List, Protocol
 
-from model_bundle.projects.zipformer import (
-    BundleAcousticRuntime,
-    DEFAULT_AUDIO_FIXTURES,
-    DEFAULT_MODEL_DIR,
-    ModelDirAcousticRuntime,
-)
+from model_bundle.zipformer_runtime import BundleAcousticRuntime, DEFAULT_MODEL_DIR, ModelDirAcousticRuntime
+from quantize.zipformer_bundle import DEFAULT_AUDIO_FIXTURES
 from tools.paths import resolve_repo_path
 
 

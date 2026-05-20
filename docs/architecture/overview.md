@@ -15,7 +15,7 @@ The current repo supports two model families:
 
 This repo owns the Python-side model lifecycle up to Android handoff:
 
-- export shared model bundles
+- export shared model bundles through project-owned helpers
 - verify bundle correctness against a Python reference runtime
 - prepare calibration data
 - quantize supported models
@@ -64,28 +64,25 @@ python-model-test/
   docs/                  # canonical docs and historical plans
   src/
     aihub/              # AI Hub compile, evaluation, and deployment helpers
-    export/             # export CLIs
-    model_bundle/       # shared manifest and bundle contract
+    model_bundle/       # thin manifest, fixture, and runtime keep-set
     quantize/           # quantization framework
     verify/             # verification CLIs
-    tools/              # helper scripts
+    tools/              # helper CLIs and Android sync scripts
   test/                  # smoke runners and pytest coverage
 ```
 
 ## Module map
 
-- `src/export/`
-  - bundle export entrypoints
 - `src/aihub/`
   - retained AI Hub session, evaluation, and deployment helpers
 - `src/model_bundle/`
-  - shared manifest contract and project adapters
+  - shared manifest contract, fixtures, and the small runtime keep-set still used by AI Hub
 - `src/quantize/`
-  - quantization framework and project-specific runners
+  - quantization framework plus project-owned bundle export helpers
 - `src/verify/`
-  - bundle verification and QNN preflight CLIs
+  - bundle verification and QNN preflight ownership
 - `src/tools/`
-  - helper CLIs that support calibration, candidate prep, and Android sync
+  - helper CLIs for manual bundle export, source ONNX refresh, calibration, candidate prep, and Android sync
 - `test/`
   - smoke runners and contract-focused pytest suite
 
@@ -113,7 +110,7 @@ The repo has one central contract:
 
 Everything else serves that contract:
 
-- export produces it
+- tools or project-owned bundle helpers produce it
 - verify checks it
 - quantize prepares improved candidate artifacts for it
 - smoke tests run through it

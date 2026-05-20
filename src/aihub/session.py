@@ -13,12 +13,12 @@ import onnxruntime as ort
 
 from model_bundle.fixtures import AudioSampleFixture, read_jsonl
 from model_bundle.manifest import ModelBundleManifest
-from model_bundle.projects.vpcd_shapes import (
+from model_bundle.vpcd_shapes import (
     attention_mask_for_length,
     pad_token_row,
     resolve_vpcd_model_input_shapes,
 )
-from model_bundle.projects.zipformer import ModelDirAcousticRuntime, prepare_encoder_inputs, resolve_fixed_encoder_frames
+from model_bundle.zipformer_runtime import ModelDirAcousticRuntime, prepare_encoder_inputs, resolve_fixed_encoder_frames
 from quantize.calibration import (
     greedy_decode_ids,
     iter_calibration_texts,

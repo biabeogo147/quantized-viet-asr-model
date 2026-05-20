@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 
 from model_bundle.manifest import ModelBundleManifest
-from model_bundle.projects._vpcd_support import BundleOnnxRuntime
+from model_bundle.vpcd_runtime import BundleOnnxRuntime
 
 
 def test_vpcd_compile_record_name_defaults_to_local_aimet_lane():

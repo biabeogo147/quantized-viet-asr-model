@@ -18,6 +18,8 @@ Then the retained AI Hub notebook only consumes the prebuilt artifact from:
 
 ## Key helpers
 
+- `bundle_export.py`
+  - manual bundle export CLI after the `src/export/` retirement
 - `extract_vlsp2020_calibration_subset.py`
   - emits a shared calibration subset for `zipformer` and `vpcd`
 - `prepare_vpcd_qnn_candidate.py`

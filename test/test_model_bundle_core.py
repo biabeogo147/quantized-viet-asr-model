@@ -1,5 +1,5 @@
 from model_bundle.manifest import ModelBundleManifest
-from model_bundle.projects import list_bundle_projects, resolve_bundle_project
+from verify.bundle_projects import list_bundle_projects, resolve_bundle_project
 
 
 def test_model_bundle_manifest_round_trips_generic_artifacts():
@@ -24,7 +24,7 @@ def test_model_bundle_manifest_round_trips_generic_artifacts():
     assert restored.metadata['max_decode_length'] == 128
 
 
-def test_model_bundle_project_registry_resolves_vpcd_and_zipformer():
+def test_verify_bundle_project_registry_resolves_vpcd_and_zipformer():
     assert set(list_bundle_projects()) >= {'vpcd', 'zipformer'}
     assert resolve_bundle_project('vpcd').name == 'vpcd'
     assert resolve_bundle_project('zipformer').name == 'zipformer'

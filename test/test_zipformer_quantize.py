@@ -79,7 +79,7 @@ def _build_zipformer_bool_slice_model() -> onnx.ModelProto:
 
 
 def test_prepare_encoder_inputs_pads_features_to_fixed_frames():
-    from model_bundle.projects.zipformer import prepare_encoder_inputs
+    from model_bundle.zipformer_runtime import prepare_encoder_inputs
 
     features = np.arange(6, dtype=np.float32).reshape(3, 2)
 
@@ -92,7 +92,7 @@ def test_prepare_encoder_inputs_pads_features_to_fixed_frames():
 
 
 def test_bundle_runtime_reads_fixed_encoder_frames_from_manifest(tmp_case_dir, monkeypatch):
-    from model_bundle.projects.zipformer import BundleAcousticRuntime
+    from model_bundle.zipformer_runtime import BundleAcousticRuntime
 
     manifest = ModelBundleManifest(
         bundle_version=1,

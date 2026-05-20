@@ -9,7 +9,7 @@ import numpy as np
 import onnx
 
 from model_bundle.manifest import ModelBundleManifest
-from model_bundle.projects.vpcd_shapes import resolve_vpcd_model_input_shapes
+from model_bundle.vpcd_shapes import resolve_vpcd_model_input_shapes
 from quantize.aimet import (
     DEFAULT_AIMET_HEALTH_TIMEOUT_SECONDS,
     DEFAULT_AIMET_SERVICE_URL,

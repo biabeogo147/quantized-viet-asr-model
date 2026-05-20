@@ -3,8 +3,8 @@ import json
 import sys
 from typing import Sequence
 
-from model_bundle.projects import resolve_bundle_project
-from model_bundle.verifier import verify_model_bundle
+from verify.bundle_projects import resolve_bundle_project
+from verify.bundle_runtime import verify_model_bundle
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

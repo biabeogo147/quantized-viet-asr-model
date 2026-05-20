@@ -19,7 +19,10 @@ For the canonical repo-wide verification and QNN preflight flow, use:
 ```text
 python-model-test/src/verify/
   __init__.py
+  bundle_projects.py
+  bundle_runtime.py
   model_bundle.py
+  qnn_preflight_core.py
   qnn_preflight.py
   README.md
 ```
@@ -47,7 +50,7 @@ Main functions:
     - `--reference-bundle` + `--candidate-bundle`
     - or adapter defaults when applicable
 - `main(argv=None)`
-  - resolves the project adapter
+  - resolves the verify-owned project registry
   - builds valid kwargs for that project
   - calls `verify_model_bundle(...)`
   - prints the summary:
@@ -128,10 +131,20 @@ python -m verify.qnn_preflight \
   --output build/model_bundle/vpcd/qnn_fixed_1024x128/qnn_preflight_report.json
 ```
 
+## Internal ownership
+
+- `bundle_projects.py`
+  - verify-owned registry for `vpcd` and `zipformer`
+- `bundle_runtime.py`
+  - verify-owned generic dispatch into project bundle verification
+- `qnn_preflight_core.py`
+  - QNN preflight implementation used by the CLI
+
 ## Relationship to other modules
 
-- this CLI is only a wrapper
-- the actual generic verification logic lives in `model_bundle/verifier.py`
-- project-specific comparison logic lives in:
-  - `model_bundle/projects/vpcd.py`
-  - `model_bundle/projects/zipformer.py`
+- this package now owns its registry and generic verification dispatch
+- project-specific export and runtime helpers live under:
+  - `quantize/vpcd_bundle.py`
+  - `quantize/zipformer_bundle.py`
+  - `model_bundle/vpcd_runtime.py`
+  - `model_bundle/zipformer_runtime.py`

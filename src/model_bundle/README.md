@@ -1,6 +1,10 @@
 # Model Bundle Module
 
-`src/model_bundle/` is the shared core for the Python-side export, verification, and bundle-consumption flow.
+`src/model_bundle/` is now a thin internal contract package.
+
+It keeps only the bundle contract pieces that are still shared by AI Hub, verification, quantize-owned bundle helpers, and Android handoff.
+
+It no longer owns the public export or verification CLIs.
 
 For the canonical high-level bundle contract, use:
 
@@ -8,50 +12,24 @@ For the canonical high-level bundle contract, use:
 
 ## Goals
 
-- define one shared bundle contract for multiple model families
-- separate generic bundle mechanics from model-specific logic
-- let Android and Python consume the same layout and manifest structure
+- keep one shared manifest contract for multiple model families
+- keep fixtures and tiny runtime helpers close to that contract
+- avoid keeping retired exporter, verifier, or adapter layers alive by accident
 
 ## File map
 
 ```text
 python-model-test/src/model_bundle/
   __init__.py
-  contracts.py
-  exporter.py
   fixtures.py
-  layout.py
   manifest.py
-  verifier.py
-  projects/
-    __init__.py
-    vpcd.py
-    zipformer.py
-    _vpcd_support.py
+  vpcd_runtime.py
+  vpcd_shapes.py
+  zipformer_runtime.py
   README.md
 ```
 
 ## What each script is responsible for
-
-### `contracts.py`
-
-Defines the shared data types used by the bundle modules.
-
-Main classes and functions:
-- `BundleRuntimeProtocol`
-  - protocol marker for runtimes constructed from bundles
-- `BundleVerificationReport`
-  - dataclass that summarizes verification results
-- `BundleProjectAdapter`
-  - the most important registry dataclass
-  - contains:
-    - `name`
-    - default paths
-    - `export_bundle`
-    - `verify_bundle`
-    - `bundle_runtime_from_manifest`
-- `normalize_path(value)`
-  - helper that converts strings into `Path`
 
 ### `manifest.py`
 
@@ -96,69 +74,40 @@ Main classes and functions:
 - `read_jsonl(path)`
   - reads JSONL into a list of dicts
 
-### `layout.py`
+### `zipformer_runtime.py`
 
-Handles one job:
-- `resolve_bundle_dir(project, variant)`
-  - normalizes output directories into `build/model_bundle/<project>/<variant>`
+Keeps only the retained Zipformer runtime helpers shared by AI Hub and bundle verification.
 
-### `exporter.py`
+Main functions and classes:
 
-Generic dispatcher for bundle export.
+- `prepare_encoder_inputs(...)`
+- `trim_encoder_frames(...)`
+- `resolve_fixed_encoder_frames(...)`
+- `decode_encoder_frames_greedy(...)`
+- `ModelDirAcousticRuntime`
+- `BundleAcousticRuntime`
 
-Main functions:
-- `_filter_kwargs(callable_obj, kwargs)`
-  - passes only the arguments supported by the adapter
-- `export_model_bundle(project, model_dir, output_dir, **kwargs)`
-  - resolves the adapter
-  - routes into `adapter.export_bundle(...)`
+### `vpcd_shapes.py`
 
-### `verifier.py`
-
-Generic dispatcher for bundle verification.
+Keeps the fixed-shape helpers shared by AI Hub and retained VPCD flows.
 
 Main functions:
-- `_filter_kwargs(callable_obj, kwargs)`
-  - same idea as in the exporter
-- `verify_model_bundle(project, **kwargs)`
-  - normalizes path-like kwargs
-  - routes into `adapter.verify_bundle(...)`
 
-### `projects/__init__.py`
+- `resolve_vpcd_model_input_shapes(...)`
+- `pad_token_row(...)`
+- `attention_mask_for_length(...)`
 
-Registry for the shared core.
+### `vpcd_runtime.py`
+
+Keeps the retained VPCD runtime helpers shared by AI Hub, bundle verification, and bundle export.
 
 Main functions:
-- `resolve_bundle_project(name)`
-  - returns the adapter for `vpcd` or `zipformer`
-- `list_bundle_projects()`
-  - returns the tuple of supported project names
 
-## The two main adapters
-
-- `projects/vpcd.py`
-  - adapter for punctuation seq2seq bundles
-- `projects/zipformer.py`
-  - adapter for RNNT acoustic bundles
-
-Adapter details are documented in `src/model_bundle/projects/README.md`.
-
-## Shared flow
-
-### Export flow
-
-`export.model_bundle`
--> `model_bundle.exporter.export_model_bundle(...)`
--> `resolve_bundle_project(project)`
--> `adapter.export_bundle(...)`
--> write `bundle_manifest.json` + artifacts + fixtures
-
-### Verify flow
-
-`verify.model_bundle`
--> `model_bundle.verifier.verify_model_bundle(...)`
--> `resolve_bundle_project(project)`
--> `adapter.verify_bundle(...)`
+- `ensure_local_vendor_path(...)`
+- `resolve_variant_onnx_path(...)`
+- `ModelDirOnnxRuntime`
+- `BundleOnnxRuntime`
+- tokenizer bridge and export helper utilities
 
 ## Shared dependency from `src/tools/`
 
@@ -168,6 +117,17 @@ They resolve those rows through `tools.paths.resolve_repo_path(...)`, which mean
 - bundle verification does not depend on fragile `Path(__file__).parents[...]` assumptions
 - refactors inside `src/` do not break fixture lookup
 - the same manifest rows stay portable across reference and candidate bundle flows
+
+## Public owners outside this package
+
+- manual bundle export CLI:
+  - `python -m tools.bundle_export ...`
+- bundle verification CLI:
+  - `python -m verify.model_bundle ...`
+- QNN preflight CLI:
+  - `python -m verify.qnn_preflight ...`
+- source punctuation ONNX refresh helper:
+  - `python -m tools.punctuation_onnx ...`
 
 ## Standard bundle layout
 
