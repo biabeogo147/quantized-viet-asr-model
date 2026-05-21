@@ -83,3 +83,81 @@ def test_sync_vpcd_qnn_fixed_to_bkmeeting_modelassets(tmp_path):
     assert result.asset_pack == 'modelassets'
     assert result.target_dir == target_dir
     assert target_manifest['asset_namespace'] == 'models/punctuation/vpcd/qnn_fixed_1024x128'
+
+
+def test_sync_zipformer_precompiled_qnn_onnx_bundle_to_bkmeeting_modelassets(tmp_path):
+    source_bundle = tmp_path / 'source' / 'zipformer' / 'precompiled_qnn_onnx'
+    bkmeeting_root = tmp_path / 'BKMeeting'
+    _write_manifest_bundle(
+        source_bundle,
+        project='zipformer',
+        variant='stale-precompiled',
+        namespace='models/asr/zipformer/stale-precompiled',
+    )
+    (source_bundle / 'model.bin').write_text('model.bin', encoding='utf-8')
+    (source_bundle / 'io_contract.json').write_text('{}', encoding='utf-8')
+
+    result = sync_android_bundle(
+        project='zipformer',
+        variant='precompiled_qnn_onnx',
+        source_bundle=source_bundle,
+        bkmeeting_root=bkmeeting_root,
+    )
+
+    target_dir = (
+        bkmeeting_root
+        / 'modelassets'
+        / 'src'
+        / 'main'
+        / 'assets'
+        / 'models'
+        / 'asr'
+        / 'zipformer'
+        / 'precompiled_qnn_onnx'
+    )
+    target_manifest = json.loads((target_dir / 'bundle_manifest.json').read_text(encoding='utf-8'))
+    assert result.target_dir == target_dir
+    assert (target_dir / 'model.bin').exists()
+    assert (target_dir / 'io_contract.json').exists()
+    assert target_manifest['model_name'] == 'zipformer/precompiled_qnn_onnx'
+    assert target_manifest['model_variant'] == 'precompiled_qnn_onnx'
+    assert target_manifest['asset_namespace'] == 'models/asr/zipformer/precompiled_qnn_onnx'
+
+
+def test_sync_vpcd_precompiled_qnn_onnx_bundle_to_bkmeeting_modelassets(tmp_path):
+    source_bundle = tmp_path / 'source' / 'vpcd' / 'precompiled_qnn_onnx'
+    bkmeeting_root = tmp_path / 'BKMeeting'
+    _write_manifest_bundle(
+        source_bundle,
+        project='vpcd',
+        variant='stale-precompiled',
+        namespace='models/punctuation/vpcd/stale-precompiled',
+    )
+    (source_bundle / 'model.bin').write_text('model.bin', encoding='utf-8')
+    (source_bundle / 'io_contract.json').write_text('{}', encoding='utf-8')
+
+    result = sync_android_bundle(
+        project='vpcd',
+        variant='precompiled_qnn_onnx',
+        source_bundle=source_bundle,
+        bkmeeting_root=bkmeeting_root,
+    )
+
+    target_dir = (
+        bkmeeting_root
+        / 'modelassets'
+        / 'src'
+        / 'main'
+        / 'assets'
+        / 'models'
+        / 'punctuation'
+        / 'vpcd'
+        / 'precompiled_qnn_onnx'
+    )
+    target_manifest = json.loads((target_dir / 'bundle_manifest.json').read_text(encoding='utf-8'))
+    assert result.target_dir == target_dir
+    assert (target_dir / 'model.bin').exists()
+    assert (target_dir / 'io_contract.json').exists()
+    assert target_manifest['model_name'] == 'tourmii/vietnamese-punc-cap-denorm-v1'
+    assert target_manifest['model_variant'] == 'precompiled_qnn_onnx'
+    assert target_manifest['asset_namespace'] == 'models/punctuation/vpcd/precompiled_qnn_onnx'

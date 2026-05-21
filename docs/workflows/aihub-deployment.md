@@ -25,6 +25,7 @@ This is the post-notebook deployment bridge between:
 
 This flow does not rerun compile by default.
 It consumes the retained records for one `RUN_LABEL` and downloads the deployable compiled target from AI Hub.
+The Step 6 Android bundle synthesis starts only after this package exists.
 
 ## Inputs
 
@@ -100,6 +101,39 @@ Each package contains:
   - copied prepared, compile, live, and optional hybrid records
   - copied deployment-download record
 
+## Step 6 Handoff Entry
+
+The deployment package is not synced into BKMeeting directly.
+
+Step 6 consumes it through:
+
+```bash
+python -m aihub.android_bundle \
+  --project all \
+  --run-label 20260519-6pm \
+  --repo-root . \
+  --device-name "Samsung Galaxy S24 (Family)" \
+  --qairt-version 2.46.0 \
+  --overwrite
+```
+
+That synthesis step:
+
+- extracts the compiled `model.onnx` plus required `model.bin`
+- renames the compiled ONNX file to the stable Android artifact role
+  - `zipformer`: `encoder.onnx`
+  - `vpcd`: `model.mobile.onnx`
+- copies CPU-side companion artifacts from the source bundle
+- copies `io_contract.json` into the final flat Android-ready bundle root
+- writes a synthesized `bundle_manifest.json` with `metadata.aihub`
+
+Expected outputs:
+
+- `build/aihub/android_bundle/zipformer/<RUN_LABEL>/`
+- `build/aihub/android_bundle/vpcd/<RUN_LABEL>/`
+
+Those synthesized bundle roots are the direct sources for `python -m tools.sync_android_bundle`.
+
 ## What To Inspect First
 
 1. `deployment_manifest.json`
@@ -133,6 +167,7 @@ This deployment packager proves:
 - retained records are sufficient to resolve one deployable target
 - the compiled artifact can be downloaded from AI Hub
 - a deterministic package can be materialized with evidence and an I/O contract
+- Step 6 has the immutable inputs needed to build Android-ready bundles without reopening AI Hub
 
 It does not prove:
 

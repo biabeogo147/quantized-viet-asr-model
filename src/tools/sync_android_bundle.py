@@ -47,6 +47,14 @@ _TARGETS: dict[tuple[str, str], AndroidBundleTarget] = {
         manifest_model_name='zipformer/qnn_u16u8',
         manifest_model_variant='qnn_u16u8',
     ),
+    ('zipformer', 'precompiled_qnn_onnx'): AndroidBundleTarget(
+        project='zipformer',
+        variant='precompiled_qnn_onnx',
+        asset_pack='modelassets',
+        asset_namespace='models/asr/zipformer/precompiled_qnn_onnx',
+        manifest_model_name='zipformer/precompiled_qnn_onnx',
+        manifest_model_variant='precompiled_qnn_onnx',
+    ),
     ('vpcd', 'vpcd_balanced'): AndroidBundleTarget(
         project='vpcd',
         variant='vpcd_balanced',
@@ -59,6 +67,13 @@ _TARGETS: dict[tuple[str, str], AndroidBundleTarget] = {
         variant='qnn_fixed_1024x128',
         asset_pack='modelassets',
         asset_namespace='models/punctuation/vpcd/qnn_fixed_1024x128',
+    ),
+    ('vpcd', 'precompiled_qnn_onnx'): AndroidBundleTarget(
+        project='vpcd',
+        variant='precompiled_qnn_onnx',
+        asset_pack='modelassets',
+        asset_namespace='models/punctuation/vpcd/precompiled_qnn_onnx',
+        manifest_model_variant='precompiled_qnn_onnx',
     ),
 }
 
