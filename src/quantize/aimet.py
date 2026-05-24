@@ -18,7 +18,25 @@ DEFAULT_AIMET_HEALTH_TIMEOUT_SECONDS = 30.0
 DEFAULT_AIMET_EXPORT_TIMEOUT_SECONDS = 3600.0
 
 
-def build_matmul_only_aimet_config() -> dict[str, Any]:
+def _build_aimet_config_for_op_types(op_types: Sequence[str]) -> dict[str, Any]:
+    normalized_op_types = tuple(str(op_type).strip() for op_type in op_types if str(op_type).strip())
+    if not normalized_op_types:
+        raise ValueError("op_types must not be empty.")
+    op_type_config = {
+        op_type: {
+            "is_input_quantized": "True",
+            "is_output_quantized": "True",
+            "params": {
+                "weight": {
+                    "is_quantized": "True",
+                }
+            },
+        }
+        for op_type in normalized_op_types
+    }
+    for op_type in ("Add", "Mul", "Div", "LayerNormalization", "Softmax"):
+        if op_type in op_type_config:
+            op_type_config[op_type].pop("params", None)
     return {
         "defaults": {
             "ops": {},
@@ -32,17 +50,7 @@ def build_matmul_only_aimet_config() -> dict[str, Any]:
                 "is_quantized": "False",
             }
         },
-        "op_type": {
-            "MatMul": {
-                "is_input_quantized": "True",
-                "is_output_quantized": "True",
-                "params": {
-                    "weight": {
-                        "is_quantized": "True",
-                    }
-                },
-            }
-        },
+        "op_type": op_type_config,
         "supergroups": [],
         "model_input": {
             "is_input_quantized": "True",
@@ -51,6 +59,14 @@ def build_matmul_only_aimet_config() -> dict[str, Any]:
             "is_output_quantized": "True",
         },
     }
+
+
+def build_matmul_only_aimet_config() -> dict[str, Any]:
+    return _build_aimet_config_for_op_types(("MatMul",))
+
+
+def build_attention_ffn_aimet_config() -> dict[str, Any]:
+    return _build_aimet_config_for_op_types(("MatMul", "Add", "Mul", "Div", "LayerNormalization"))
 
 
 def write_aimet_config(config: Mapping[str, Any], output_path: str | Path) -> Path:

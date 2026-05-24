@@ -331,6 +331,83 @@ def materialize_vpcd_local_aimet_candidate_bundle(
     return output_dir
 
 
+def materialize_zipformer_component_candidate_bundle(
+    *,
+    candidate_label: str,
+    control_bundle_root: str | Path,
+    quantized_bundle_root: str | Path,
+    output_root: str | Path,
+    component_sources: Mapping[str, str],
+) -> Path:
+    control_bundle = Path(control_bundle_root).resolve()
+    quantized_bundle = Path(quantized_bundle_root).resolve()
+    control_manifest = ModelBundleManifest.from_path(control_bundle / "bundle_manifest.json")
+    quantized_manifest = ModelBundleManifest.from_path(quantized_bundle / "bundle_manifest.json")
+    if control_manifest.project != "zipformer":
+        raise ValueError(f"Expected a zipformer control bundle, got: {control_manifest.project!r}")
+    if quantized_manifest.project != "zipformer":
+        raise ValueError(f"Expected a zipformer quantized bundle, got: {quantized_manifest.project!r}")
+
+    normalized_component_sources = {
+        key: str(value).strip().lower()
+        for key, value in dict(component_sources).items()
+        if str(value).strip()
+    }
+    for component_name in ("encoder", "decoder", "joiner"):
+        source_kind = normalized_component_sources.get(component_name, "control")
+        if source_kind not in {"control", "quantized"}:
+            raise ValueError(
+                f"Unsupported source kind for zipformer component {component_name!r}: {source_kind!r}"
+            )
+        normalized_component_sources[component_name] = source_kind
+
+    output_dir = Path(output_root).resolve() / _slugify_candidate_label(candidate_label)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for artifact_key, artifact_name in control_manifest.artifacts.items():
+        if artifact_key in {"encoder", "decoder", "joiner"}:
+            source_kind = normalized_component_sources.get(artifact_key, "control")
+            source_bundle = quantized_bundle if source_kind == "quantized" else control_bundle
+            _copy_model_with_sidecars(source_bundle / artifact_name, output_dir)
+            continue
+        source_path = control_bundle / artifact_name
+        target_path = output_dir / artifact_name
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, target_path)
+
+    for fixture_name in control_manifest.fixtures.values():
+        source_path = control_bundle / fixture_name
+        target_path = output_dir / fixture_name
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, target_path)
+
+    metadata = dict(control_manifest.metadata)
+    quantization = dict(metadata.get("quantization") or {})
+    quantization["phase7_lane"] = candidate_label
+    metadata["quantization"] = quantization
+    metadata["phase7_candidate"] = {
+        "candidate_label": candidate_label,
+        "component_sources": dict(normalized_component_sources),
+        "control_bundle_root": control_bundle.as_posix(),
+        "quantized_bundle_root": quantized_bundle.as_posix(),
+    }
+
+    candidate_manifest = ModelBundleManifest(
+        bundle_version=control_manifest.bundle_version,
+        project=control_manifest.project,
+        model_family=control_manifest.model_family,
+        model_name=control_manifest.model_name,
+        model_variant=_slugify_candidate_label(candidate_label),
+        asset_namespace=f"{control_manifest.asset_namespace}/phase7/{_slugify_candidate_label(candidate_label)}",
+        runtime_kind=control_manifest.runtime_kind,
+        artifacts=dict(control_manifest.artifacts),
+        fixtures=dict(control_manifest.fixtures),
+        metadata=metadata,
+    )
+    candidate_manifest.write_json(output_dir / "bundle_manifest.json")
+    return output_dir
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Phase 7 golden evaluation and metadata helpers.")
     parser.add_argument("--project", required=True, choices=("vpcd", "zipformer"))

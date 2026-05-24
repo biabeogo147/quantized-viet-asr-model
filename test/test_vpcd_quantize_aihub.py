@@ -90,6 +90,97 @@ def _write_decoder_matmul_policy_model(model_path: Path) -> None:
     onnx.save(model, model_path.as_posix())
 
 
+def _write_decoder_broader_policy_model(model_path: Path) -> None:
+    from onnx import TensorProto, helper, numpy_helper
+
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    decoder_weight = numpy_helper.from_array(np.asarray([[1.0], [2.0]], dtype=np.float32), name="decoder_weight")
+    lm_head_weight = numpy_helper.from_array(np.asarray([[1.0], [1.0]], dtype=np.float32), name="lm_head_weight")
+    add_bias = numpy_helper.from_array(np.asarray([[0.5]], dtype=np.float32), name="decoder_add_bias")
+    mul_scale = numpy_helper.from_array(np.asarray([[0.25]], dtype=np.float32), name="decoder_mul_scale")
+    div_scale = numpy_helper.from_array(np.asarray([[2.0]], dtype=np.float32), name="decoder_div_scale")
+    layernorm_scale = numpy_helper.from_array(np.asarray([1.0], dtype=np.float32), name="decoder_ln_scale")
+    layernorm_bias = numpy_helper.from_array(np.asarray([0.0], dtype=np.float32), name="decoder_ln_bias")
+    encoder_bias = numpy_helper.from_array(np.asarray([[1.0]], dtype=np.float32), name="encoder_add_bias")
+    graph = helper.make_graph(
+        nodes=[
+            helper.make_node(
+                "Cast",
+                inputs=["decoder_input_ids"],
+                outputs=["decoder_hidden"],
+                to=TensorProto.FLOAT,
+                name="/model/decoder/Cast",
+            ),
+            helper.make_node(
+                "MatMul",
+                inputs=["decoder_hidden", "decoder_weight"],
+                outputs=["decoder_projected"],
+                name="/model/decoder/attn/MatMul",
+            ),
+            helper.make_node(
+                "Add",
+                inputs=["decoder_projected", "add_bias"],
+                outputs=["decoder_added"],
+                name="/model/decoder/ffn/Add",
+            ),
+            helper.make_node(
+                "Mul",
+                inputs=["decoder_added", "mul_scale"],
+                outputs=["decoder_scaled"],
+                name="/model/decoder/ffn/Mul",
+            ),
+            helper.make_node(
+                "Div",
+                inputs=["decoder_scaled", "div_scale"],
+                outputs=["decoder_divided"],
+                name="/model/decoder/ffn/Div",
+            ),
+            helper.make_node(
+                "LayerNormalization",
+                inputs=["decoder_divided", "layernorm_scale", "layernorm_bias"],
+                outputs=["decoder_norm"],
+                name="/model/decoder/ffn/LayerNormalization",
+                axis=-1,
+                epsilon=1e-05,
+            ),
+            helper.make_node(
+                "Add",
+                inputs=["decoder_norm", "encoder_add_bias"],
+                outputs=["encoder_like_hidden"],
+                name="/model/encoder/ffn/Add",
+            ),
+            helper.make_node(
+                "MatMul",
+                inputs=["encoder_like_hidden", "lm_head_weight"],
+                outputs=["logits"],
+                name="/lm_head/MatMul",
+            ),
+        ],
+        name="vpcd-decoder-broader-policy",
+        inputs=[
+            helper.make_tensor_value_info("input_ids", TensorProto.INT64, ["batch", "encoder_sequence"]),
+            helper.make_tensor_value_info("attention_mask", TensorProto.INT64, ["batch", "encoder_sequence"]),
+            helper.make_tensor_value_info("decoder_input_ids", TensorProto.INT64, ["batch", "decoder_sequence"]),
+            helper.make_tensor_value_info("decoder_attention_mask", TensorProto.INT64, ["batch", "decoder_sequence"]),
+        ],
+        outputs=[
+            helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["batch", "decoder_sequence"]),
+        ],
+        initializer=[
+            decoder_weight,
+            lm_head_weight,
+            add_bias,
+            mul_scale,
+            div_scale,
+            layernorm_scale,
+            layernorm_bias,
+            encoder_bias,
+        ],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 17)])
+    onnx.save(model, model_path.as_posix())
+
+
 def test_calibration_records_to_fixed_input_dataset_preserves_input_order():
     from quantize.projects.vpcd import calibration_records_to_fixed_input_dataset
 
@@ -361,6 +452,18 @@ def test_build_matmul_only_aimet_config_disables_defaults_but_enables_matmul_wei
     assert config["model_output"]["is_output_quantized"] == "True"
 
 
+def test_build_attention_ffn_aimet_config_enables_broader_decoder_friendly_op_types():
+    from quantize.aimet import build_attention_ffn_aimet_config
+
+    config = build_attention_ffn_aimet_config()
+
+    assert config["op_type"]["MatMul"]["params"]["weight"]["is_quantized"] == "True"
+    assert config["op_type"]["Add"]["is_input_quantized"] == "True"
+    assert config["op_type"]["Mul"]["is_output_quantized"] == "True"
+    assert config["op_type"]["Div"]["is_output_quantized"] == "True"
+    assert config["op_type"]["LayerNormalization"]["is_output_quantized"] == "True"
+
+
 def test_summarize_vpcd_local_quality_policy_reports_decoder_heavy_exclusions(tmp_path):
     from quantize.projects.vpcd import summarize_vpcd_local_quality_policy
 
@@ -393,11 +496,33 @@ def test_summarize_vpcd_aimet_policy_decoder_expanded_reenables_decoder_matmul(t
     assert "/model/decoder/attn/MatMul" in summary.quantizable_matmul_node_names
 
 
+def test_summarize_vpcd_aimet_policy_broader_attention_ffn_keeps_decoder_ops_only(tmp_path):
+    from quantize.projects.vpcd import summarize_vpcd_aimet_policy
+
+    model_path = tmp_path / "model.fp32.onnx"
+    _write_decoder_broader_policy_model(model_path)
+
+    summary = summarize_vpcd_aimet_policy(model_path, policy_mode="broader_attention_ffn")
+
+    assert summary.preset == "broader_attention_ffn"
+    assert summary.excluded_lm_head_node_count == 1
+    assert summary.excluded_decoder_node_count == 0
+    assert summary.excluded_node_count >= 2
+    assert set(summary.op_types_to_quantize) == {"MatMul", "Add", "Mul", "Div", "LayerNormalization"}
+    assert summary.quantizable_matmul_node_count == 1
+    assert summary.quantizable_node_count_by_op_type["Add"] == 1
+    assert summary.quantizable_node_count_by_op_type["LayerNormalization"] == 1
+    assert "/model/decoder/ffn/Add" in summary.quantizable_node_names
+    assert "/model/encoder/ffn/Add" not in summary.quantizable_node_names
+
+
 def test_should_write_vpcd_aimet_policy_manifest_accepts_decoder_expanded():
     from quantize.projects.vpcd import should_write_vpcd_aimet_policy_manifest
 
     assert should_write_vpcd_aimet_policy_manifest("local_quality_parity") is True
     assert should_write_vpcd_aimet_policy_manifest("decoder_expanded") is True
+    assert should_write_vpcd_aimet_policy_manifest("broader_attention_ffn") is True
+    assert should_write_vpcd_aimet_policy_manifest("aggressive_int8") is True
     assert should_write_vpcd_aimet_policy_manifest("none") is False
 
 
@@ -478,6 +603,63 @@ def test_build_vpcd_aimet_quantize_recipe_reuses_fixed_shape_calibration(monkeyp
         recipe.calibration_inputs[1].inputs["decoder_attention_mask"][0],
         np.asarray([1, 1, 0, 0], dtype=np.int64),
     )
+
+
+def test_build_vpcd_aimet_quantize_recipe_aggressive_int8_uses_distinct_variant(monkeypatch, tmp_path):
+    from quantize.projects.vpcd import build_vpcd_aimet_quantize_recipe
+
+    records = [
+        CalibrationSample(
+            inputs={
+                "input_ids": np.asarray([[7, 8, 2]], dtype=np.int64),
+                "attention_mask": np.asarray([[1, 1, 1]], dtype=np.int64),
+                "decoder_input_ids": np.asarray([[2, 9]], dtype=np.int64),
+                "decoder_attention_mask": np.asarray([[1, 1]], dtype=np.int64),
+            }
+        ),
+    ]
+
+    def fake_build_calibration_records(**_kwargs):
+        return (
+            records,
+            {
+                "requested_provider": "cpu",
+                "session_providers": "CPUExecutionProvider",
+                "source_files": 1,
+                "text_samples": 1,
+                "records": 1,
+                "max_encoder_len": 3,
+                "max_decoder_len": 2,
+            },
+        )
+
+    monkeypatch.setattr("quantize.projects.vpcd.build_calibration_records", fake_build_calibration_records)
+    _write_decoder_broader_policy_model(tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx")
+
+    recipe = build_vpcd_aimet_quantize_recipe(
+        model_dir=tmp_path / "assets" / "vpcd",
+        fp32_onnx_path=tmp_path / "assets" / "vpcd" / "onnx" / "model.fp32.onnx",
+        calibration_source_path=tmp_path / "build" / "calibration" / "vpcd_transcriptions.txt",
+        max_calibration_samples=16,
+        max_generation_length=32,
+        ort_provider="cpu",
+        fixed_input_shapes={
+            "input_ids": (1, 8),
+            "attention_mask": (1, 8),
+            "decoder_input_ids": (1, 4),
+            "decoder_attention_mask": (1, 4),
+        },
+        pad_token_id=1,
+        policy_mode="aggressive_int8",
+        activation_type="int8",
+        config_file="vpcd_attention_ffn",
+    )
+
+    assert recipe.activation_type == "int8"
+    assert recipe.policy_mode == "aggressive_int8"
+    assert recipe.variant_name == "wint8_aint8_min_max_aggressive_int8"
+    assert recipe.calibration_stats["local_quality_policy"]["preset"] == "aggressive_int8"
+    assert recipe.local_quality_policy["quantizable_node_count_by_op_type"]["Add"] >= 1
 
 
 def test_quantize_cli_defaults_vpcd_to_retained_aimet_only():

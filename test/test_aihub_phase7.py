@@ -356,3 +356,51 @@ def test_materialize_vpcd_local_aimet_candidate_bundle_copies_qdq_bundle_shape(t
     assert (candidate_dir / "tokenizer.decode.onnx").read_bytes() == b"decode"
     assert (candidate_dir / "tokenizer.to_model_id_map.json").read_text(encoding="utf-8") == "[0,1,2]\n"
     assert (candidate_dir / "model.to_tokenizer_id_map.json").read_text(encoding="utf-8") == "[0,1,2]\n"
+
+
+def test_materialize_zipformer_component_candidate_bundle_mixes_control_and_quantized_components(tmp_path):
+    from aihub.phase7 import materialize_zipformer_component_candidate_bundle
+
+    repo_root = tmp_path / "repo"
+    control_bundle_dir = _write_zipformer_bundle(
+        repo_root / "build" / "model_bundle" / "zipformer" / "fp32",
+        sample_rows=[{"sample_id": "sample-1", "audio_path": "assets/speech/sample-1.wav"}],
+        expected_rows=[{"sample_id": "sample-1", "audio_path": "assets/speech/sample-1.wav", "text": "XIN CHAO"}],
+    )
+    quantized_bundle_dir = _write_zipformer_bundle(
+        repo_root / "build" / "model_bundle" / "zipformer" / "qnn_u16u8",
+        sample_rows=[{"sample_id": "sample-1", "audio_path": "assets/speech/sample-1.wav"}],
+        expected_rows=[{"sample_id": "sample-1", "audio_path": "assets/speech/sample-1.wav", "text": "XIN CHAO"}],
+    )
+
+    for bundle_dir, prefix in ((control_bundle_dir, b"control"), (quantized_bundle_dir, b"quantized")):
+        (bundle_dir / "encoder.onnx").write_bytes(prefix + b"-encoder")
+        (bundle_dir / "decoder.onnx").write_bytes(prefix + b"-decoder")
+        (bundle_dir / "joiner.onnx").write_bytes(prefix + b"-joiner")
+        (bundle_dir / "tokens.txt").write_text("tok\n", encoding="utf-8")
+
+    candidate_dir = materialize_zipformer_component_candidate_bundle(
+        candidate_label="ZIP-L2-decoder-joiner-qnn",
+        control_bundle_root=control_bundle_dir,
+        quantized_bundle_root=quantized_bundle_dir,
+        output_root=repo_root / "build" / "phase7" / "candidates",
+        component_sources={
+            "encoder": "control",
+            "decoder": "quantized",
+            "joiner": "quantized",
+        },
+    )
+
+    manifest = ModelBundleManifest.from_path(candidate_dir / "bundle_manifest.json")
+    assert manifest.model_variant == "zip-l2-decoder-joiner-qnn"
+    assert manifest.metadata["phase7_candidate"]["candidate_label"] == "ZIP-L2-decoder-joiner-qnn"
+    assert manifest.metadata["phase7_candidate"]["component_sources"] == {
+        "encoder": "control",
+        "decoder": "quantized",
+        "joiner": "quantized",
+    }
+    assert manifest.metadata["quantization"]["phase7_lane"] == "ZIP-L2-decoder-joiner-qnn"
+    assert (candidate_dir / "encoder.onnx").read_bytes() == b"control-encoder"
+    assert (candidate_dir / "decoder.onnx").read_bytes() == b"quantized-decoder"
+    assert (candidate_dir / "joiner.onnx").read_bytes() == b"quantized-joiner"
+    assert (candidate_dir / "tokens.txt").read_text(encoding="utf-8") == "tok\n"

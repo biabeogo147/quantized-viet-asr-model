@@ -27,9 +27,12 @@ class VpcdLocalQualityPolicySummary:
     excluded_decoder_node_count: int
     excluded_lm_head_node_count: int
     quantizable_matmul_node_count: int
+    quantizable_node_count: int
     op_types_to_quantize: tuple[str, ...]
     excluded_node_names: tuple[str, ...]
     quantizable_matmul_node_names: tuple[str, ...]
+    quantizable_node_names: tuple[str, ...]
+    quantizable_node_count_by_op_type: dict[str, int]
 
 
 @dataclass(frozen=True)

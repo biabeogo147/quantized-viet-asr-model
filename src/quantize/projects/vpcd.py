@@ -14,6 +14,7 @@ from quantize.aimet import (
     DEFAULT_AIMET_HEALTH_TIMEOUT_SECONDS,
     DEFAULT_AIMET_SERVICE_URL,
     DEFAULT_AIMET_SERVICE_WORKSPACE_ROOT,
+    build_attention_ffn_aimet_config,
     build_matmul_only_aimet_config,
     build_vpcd_local_quality_policy_manifest,
     healthcheck_aimet_service,
@@ -45,7 +46,10 @@ DEFAULT_AIMET_OUTPUT_ROOT = Path("build") / "quantize" / "vpcd" / "local_aimet"
 DEFAULT_FIXED_BUNDLE_MANIFEST = Path("build") / "model_bundle" / "vpcd" / "qnn_fixed_1024x128" / "bundle_manifest.json"
 LOCAL_QUALITY_POLICY_REFERENCE = "local_quality_parity"
 DECODER_EXPANDED_POLICY_REFERENCE = "decoder_expanded"
+BROADER_ATTENTION_FFN_POLICY_REFERENCE = "broader_attention_ffn"
+AGGRESSIVE_INT8_POLICY_REFERENCE = "aggressive_int8"
 LOCAL_QUALITY_QUANTIZABLE_OP_TYPES = ("MatMul",)
+BROADER_ATTENTION_FFN_QUANTIZABLE_OP_TYPES = ("MatMul", "Add", "Mul", "Div", "LayerNormalization")
 
 
 def apply_default_arguments(parser) -> None:
@@ -124,6 +128,13 @@ def _is_excluded_from_decoder_expanded_policy(node_name: str) -> bool:
     return str(node_name) == "/lm_head/MatMul"
 
 
+def _is_excluded_from_broader_attention_ffn_policy(node_name: str) -> bool:
+    normalized_name = str(node_name)
+    if normalized_name == "/lm_head/MatMul":
+        return True
+    return "/decoder/" not in normalized_name
+
+
 def should_write_vpcd_aimet_policy_manifest(policy_mode: str) -> bool:
     normalized_policy_mode = str(policy_mode).strip().lower()
     return normalized_policy_mode not in {"", "none", "off", "disabled"}
@@ -138,9 +149,19 @@ def summarize_vpcd_aimet_policy(
     if normalized_policy_mode == LOCAL_QUALITY_POLICY_REFERENCE:
         preset = LOCAL_QUALITY_POLICY_REFERENCE
         exclusion_predicate = _is_excluded_from_local_quality_policy
+        op_types_to_quantize = LOCAL_QUALITY_QUANTIZABLE_OP_TYPES
     elif normalized_policy_mode == DECODER_EXPANDED_POLICY_REFERENCE:
         preset = DECODER_EXPANDED_POLICY_REFERENCE
         exclusion_predicate = _is_excluded_from_decoder_expanded_policy
+        op_types_to_quantize = LOCAL_QUALITY_QUANTIZABLE_OP_TYPES
+    elif normalized_policy_mode == BROADER_ATTENTION_FFN_POLICY_REFERENCE:
+        preset = BROADER_ATTENTION_FFN_POLICY_REFERENCE
+        exclusion_predicate = _is_excluded_from_broader_attention_ffn_policy
+        op_types_to_quantize = BROADER_ATTENTION_FFN_QUANTIZABLE_OP_TYPES
+    elif normalized_policy_mode == AGGRESSIVE_INT8_POLICY_REFERENCE:
+        preset = AGGRESSIVE_INT8_POLICY_REFERENCE
+        exclusion_predicate = _is_excluded_from_broader_attention_ffn_policy
+        op_types_to_quantize = BROADER_ATTENTION_FFN_QUANTIZABLE_OP_TYPES
     else:
         raise ValueError(f"Unsupported VPCD AIMET policy mode: {policy_mode!r}")
 
@@ -150,11 +171,25 @@ def summarize_vpcd_aimet_policy(
     excluded_node_set = set(excluded_node_names)
 
     model = onnx.load(resolved_model_path.as_posix(), load_external_data=False)
-    quantizable_matmul_node_names = tuple(
+    quantizable_node_names = tuple(
         str(node.name)
         for node in model.graph.node
-        if node.name and node.op_type in LOCAL_QUALITY_QUANTIZABLE_OP_TYPES and node.name not in excluded_node_set
+        if node.name and node.op_type in op_types_to_quantize and node.name not in excluded_node_set
     )
+    quantizable_matmul_node_names = tuple(
+        node_name
+        for node_name in quantizable_node_names
+        if node_name in {
+            str(node.name)
+            for node in model.graph.node
+            if node.name and node.op_type == "MatMul"
+        }
+    )
+    quantizable_node_count_by_op_type: dict[str, int] = {}
+    for node in model.graph.node:
+        if not node.name or node.name in excluded_node_set or node.op_type not in op_types_to_quantize:
+            continue
+        quantizable_node_count_by_op_type[node.op_type] = int(quantizable_node_count_by_op_type.get(node.op_type, 0)) + 1
     return VpcdLocalQualityPolicySummary(
         preset=preset,
         total_named_nodes=len(node_names),
@@ -162,9 +197,12 @@ def summarize_vpcd_aimet_policy(
         excluded_decoder_node_count=sum(1 for node_name in excluded_node_names if "/decoder/" in node_name),
         excluded_lm_head_node_count=sum(1 for node_name in excluded_node_names if node_name == "/lm_head/MatMul"),
         quantizable_matmul_node_count=len(quantizable_matmul_node_names),
-        op_types_to_quantize=LOCAL_QUALITY_QUANTIZABLE_OP_TYPES,
+        quantizable_node_count=len(quantizable_node_names),
+        op_types_to_quantize=op_types_to_quantize,
         excluded_node_names=excluded_node_names,
         quantizable_matmul_node_names=quantizable_matmul_node_names,
+        quantizable_node_names=quantizable_node_names,
+        quantizable_node_count_by_op_type=quantizable_node_count_by_op_type,
     )
 
 
@@ -352,7 +390,9 @@ def build_vpcd_aimet_quantize_recipe(
         "excluded_decoder_node_count": int(local_quality_policy.excluded_decoder_node_count),
         "excluded_lm_head_node_count": int(local_quality_policy.excluded_lm_head_node_count),
         "quantizable_matmul_node_count": int(local_quality_policy.quantizable_matmul_node_count),
+        "quantizable_node_count": int(local_quality_policy.quantizable_node_count),
         "op_types_to_quantize": list(local_quality_policy.op_types_to_quantize),
+        "quantizable_node_count_by_op_type": dict(local_quality_policy.quantizable_node_count_by_op_type),
     }
     recipe_stats.update(
         summarize_fixed_input_calibration_dataset(
@@ -380,9 +420,12 @@ def build_vpcd_aimet_quantize_recipe(
             "excluded_decoder_node_count": int(local_quality_policy.excluded_decoder_node_count),
             "excluded_lm_head_node_count": int(local_quality_policy.excluded_lm_head_node_count),
             "quantizable_matmul_node_count": int(local_quality_policy.quantizable_matmul_node_count),
+            "quantizable_node_count": int(local_quality_policy.quantizable_node_count),
             "op_types_to_quantize": list(local_quality_policy.op_types_to_quantize),
             "excluded_node_names": list(local_quality_policy.excluded_node_names),
             "quantizable_matmul_node_names": list(local_quality_policy.quantizable_matmul_node_names),
+            "quantizable_node_names": list(local_quality_policy.quantizable_node_names),
+            "quantizable_node_count_by_op_type": dict(local_quality_policy.quantizable_node_count_by_op_type),
         },
     )
 
@@ -502,8 +545,13 @@ def _run_retained_aimet_pipeline(args) -> int:
     config_file_value = str(recipe.config_file)
     policy_manifest_path: Path | None = None
     if should_write_vpcd_aimet_policy_manifest(recipe.policy_mode):
+        config_payload = (
+            build_attention_ffn_aimet_config()
+            if recipe.policy_mode in {BROADER_ATTENTION_FFN_POLICY_REFERENCE, AGGRESSIVE_INT8_POLICY_REFERENCE}
+            else build_matmul_only_aimet_config()
+        )
         config_path = write_aimet_config(
-            build_matmul_only_aimet_config(),
+            config_payload,
             variant_root / "aimet.config.json",
         )
         policy_manifest_path = write_aimet_policy_manifest(
