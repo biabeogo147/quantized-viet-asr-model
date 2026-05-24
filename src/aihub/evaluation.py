@@ -788,6 +788,7 @@ def _submit_live_compiled_inference(
         ),
         name=inference_name or f"compiled-inference-{target_model_id}",
     )
+    inference_job.verbose = False
     return inference_job.download_output_data(), {
         "job_id": getattr(inference_job, "job_id", None),
         "url": getattr(inference_job, "url", None),

@@ -216,6 +216,61 @@ def test_resolve_target_or_inference_adapter_reads_compile_record_when_override_
     assert resolved.compile_record_path == compile_record_path
 
 
+def test_submit_live_compiled_inference_disables_verbose_spinner(monkeypatch, tmp_path):
+    from aihub.evaluation import _submit_live_compiled_inference
+    from aihub.session import build_runtime_config
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    runtime_config = build_runtime_config(
+        device_name="Samsung Galaxy S24",
+        repo_root=repo_root,
+    )
+
+    seen: dict[str, object] = {}
+
+    class FakeInferenceJob:
+        def __init__(self) -> None:
+            self.job_id = "infer-1"
+            self.url = "https://example/jobs/infer-1"
+            self.status = "SUCCESS"
+            self.verbose = True
+
+        def download_output_data(self):
+            seen["verbose_before_download"] = self.verbose
+            return {"output_0": [np.asarray([[1.0]], dtype=np.float32)]}
+
+    class FakeHubModule:
+        Device = lambda self, name: {"device_name": name}
+
+        def get_model(self, target_model_id: str):
+            seen["target_model_id"] = target_model_id
+            return {"model_id": target_model_id}
+
+        def submit_inference_job(self, *, model, device, inputs, options, name):
+            seen["model"] = model
+            seen["device"] = device
+            seen["inputs"] = inputs
+            seen["options"] = options
+            seen["name"] = name
+            return FakeInferenceJob()
+
+    import sys
+
+    monkeypatch.setitem(sys.modules, "qai_hub", FakeHubModule())
+
+    outputs, metadata = _submit_live_compiled_inference(
+        target_model_id="model-123",
+        runtime_config=runtime_config,
+        inputs={"input_ids": [np.asarray([[1, 2]], dtype=np.int32)]},
+        inference_name="phase7-live-test",
+    )
+
+    assert seen["verbose_before_download"] is False
+    assert metadata["job_id"] == "infer-1"
+    assert outputs["output_0"][0].shape == (1, 1)
+
+
 def test_zipformer_hybrid_runner_decodes_expected_text(tmp_path):
     from aihub.evaluation import run_zipformer_split_runtime_evaluation
     from aihub.session import build_runtime_config, write_compile_run_record

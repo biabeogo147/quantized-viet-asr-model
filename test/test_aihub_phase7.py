@@ -229,6 +229,41 @@ def test_collect_phase7_candidate_metadata_reads_bundle_and_compile_records(tmp_
     assert metadata["compile"]["qairt_version"] == "2.45"
 
 
+def test_collect_phase7_candidate_metadata_includes_hybrid_record_when_present(tmp_path):
+    from aihub.phase7 import collect_phase7_candidate_metadata
+
+    bundle_dir = _write_vpcd_bundle(
+        tmp_path / "vpcd",
+        samples=[{"raw_text": "xin chao", "expected_output": "Xin chao."}],
+    )
+    (bundle_dir / "model.mobile.onnx").write_bytes(b"onnx")
+
+    hybrid_record = tmp_path / "hybrid-run.json"
+    hybrid_record.write_text(
+        json.dumps(
+            {
+                "device_name": "Samsung Galaxy S23 (Family)",
+                "qairt_version": "2.45",
+                "compile_options": "--target_runtime precompiled_qnn_onnx --truncate_64bit_io",
+                "target_model_id": "hybrid-model-1",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    metadata = collect_phase7_candidate_metadata(
+        project="vpcd",
+        candidate_label="VPCD-L2-decoder-expanded",
+        model_root=bundle_dir,
+        hybrid_record_path=hybrid_record,
+    )
+
+    assert metadata["hybrid"]["target_model_id"] == "hybrid-model-1"
+    assert metadata["hybrid"]["qairt_version"] == "2.45"
+
+
 def test_evaluate_vpcd_golden_explains_precompiled_qnn_cpu_incompatibility(monkeypatch, tmp_path):
     from aihub import phase7
 
@@ -253,3 +288,71 @@ def test_evaluate_vpcd_golden_explains_precompiled_qnn_cpu_incompatibility(monke
         assert "source bundle" in str(exc)
     else:
         raise AssertionError("Expected a RuntimeError for precompiled CPU-incompatible bundles.")
+
+
+def test_materialize_vpcd_local_aimet_candidate_bundle_copies_qdq_bundle_shape(tmp_path):
+    from aihub.phase7 import materialize_vpcd_local_aimet_candidate_bundle
+
+    control_bundle_dir = _write_vpcd_bundle(
+        tmp_path / "control",
+        samples=[{"raw_text": "xin chao", "expected_output": "Xin chao."}],
+    )
+    control_manifest = ModelBundleManifest.from_path(control_bundle_dir / "bundle_manifest.json")
+    (control_bundle_dir / control_manifest.artifacts["model"]).write_bytes(b"control-model")
+    (control_bundle_dir / control_manifest.artifacts["tokenizer_encode"]).write_bytes(b"encode")
+    (control_bundle_dir / control_manifest.artifacts["tokenizer_decode"]).write_bytes(b"decode")
+    (control_bundle_dir / control_manifest.artifacts["tokenizer_to_model_id_map"]).write_text("[0,1,2]\n", encoding="utf-8")
+    (control_bundle_dir / control_manifest.artifacts["model_to_tokenizer_id_map"]).write_text("[0,1,2]\n", encoding="utf-8")
+
+    quantize_root = tmp_path / "quantize" / "wint8_aint16_min_max_local_quality_parity"
+    qdq_model_path = quantize_root / "model.option1.qdq.onnx"
+    qdq_data_path = quantize_root / "model.option1.qdq.onnx.data"
+    package_dir = quantize_root / "model.option1.aimet"
+    package_dir.mkdir(parents=True, exist_ok=True)
+    qdq_model_path.write_bytes(b"qdq-model")
+    qdq_data_path.write_bytes(b"qdq-data")
+
+    quantize_report_path = quantize_root / "quantize_report.json"
+    quantize_report_path.write_text(
+        json.dumps(
+            {
+                "source_strategy": "local_aimet_compile_candidate",
+                "variant_name": "wint8_aint16_min_max_local_quality_parity",
+                "package_dir": package_dir.resolve().as_posix(),
+                "packaging_path": package_dir.resolve().as_posix(),
+                "qdq_reference_model_path": qdq_model_path.resolve().as_posix(),
+                "aimet": {
+                    "param_type": "int8",
+                    "activation_type": "int16",
+                    "quant_scheme": "min_max",
+                    "policy_mode": "local_quality_parity",
+                },
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    candidate_dir = materialize_vpcd_local_aimet_candidate_bundle(
+        candidate_label="VPCD-L1-parity-matmul-only",
+        control_bundle_root=control_bundle_dir,
+        quantize_report_path=quantize_report_path,
+        output_root=tmp_path / "phase7-candidates",
+    )
+
+    manifest = ModelBundleManifest.from_path(candidate_dir / "bundle_manifest.json")
+    assert candidate_dir.name == "vpcd-l1-parity-matmul-only"
+    assert manifest.artifacts["model"] == "model.option1.qdq.onnx"
+    assert manifest.fixtures["golden_samples"] == "golden_samples.jsonl"
+    assert manifest.metadata["phase7_candidate"]["candidate_label"] == "VPCD-L1-parity-matmul-only"
+    assert manifest.metadata["phase7_candidate"]["source_strategy"] == "local_aimet_compile_candidate"
+    assert manifest.metadata["phase7_candidate"]["variant_name"] == "wint8_aint16_min_max_local_quality_parity"
+    assert manifest.metadata["phase7_candidate"]["qdq_reference_model_path"].endswith("model.option1.qdq.onnx")
+    assert manifest.metadata["quantization"]["phase7_lane"] == "VPCD-L1-parity-matmul-only"
+    assert (candidate_dir / "model.option1.qdq.onnx").read_bytes() == b"qdq-model"
+    assert (candidate_dir / "model.option1.qdq.onnx.data").read_bytes() == b"qdq-data"
+    assert (candidate_dir / "tokenizer.encode.onnx").read_bytes() == b"encode"
+    assert (candidate_dir / "tokenizer.decode.onnx").read_bytes() == b"decode"
+    assert (candidate_dir / "tokenizer.to_model_id_map.json").read_text(encoding="utf-8") == "[0,1,2]\n"
+    assert (candidate_dir / "model.to_tokenizer_id_map.json").read_text(encoding="utf-8") == "[0,1,2]\n"

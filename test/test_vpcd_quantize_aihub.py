@@ -46,6 +46,50 @@ def _write_minimal_vpcd_fp32_model(model_path: Path) -> None:
     onnx.save(model, model_path.as_posix())
 
 
+def _write_decoder_matmul_policy_model(model_path: Path) -> None:
+    from onnx import TensorProto, helper, numpy_helper
+
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    decoder_weight = numpy_helper.from_array(np.asarray([[1.0], [2.0]], dtype=np.float32), name="decoder_weight")
+    lm_head_weight = numpy_helper.from_array(np.asarray([[1.0], [1.0]], dtype=np.float32), name="lm_head_weight")
+    graph = helper.make_graph(
+        nodes=[
+            helper.make_node(
+                "Cast",
+                inputs=["decoder_input_ids"],
+                outputs=["decoder_hidden"],
+                to=TensorProto.FLOAT,
+                name="/model/decoder/Cast",
+            ),
+            helper.make_node(
+                "MatMul",
+                inputs=["decoder_hidden", "decoder_weight"],
+                outputs=["decoder_projected"],
+                name="/model/decoder/attn/MatMul",
+            ),
+            helper.make_node(
+                "MatMul",
+                inputs=["decoder_projected", "lm_head_weight"],
+                outputs=["logits"],
+                name="/lm_head/MatMul",
+            ),
+        ],
+        name="vpcd-decoder-policy",
+        inputs=[
+            helper.make_tensor_value_info("input_ids", TensorProto.INT64, ["batch", "encoder_sequence"]),
+            helper.make_tensor_value_info("attention_mask", TensorProto.INT64, ["batch", "encoder_sequence"]),
+            helper.make_tensor_value_info("decoder_input_ids", TensorProto.INT64, ["batch", "decoder_sequence"]),
+            helper.make_tensor_value_info("decoder_attention_mask", TensorProto.INT64, ["batch", "decoder_sequence"]),
+        ],
+        outputs=[
+            helper.make_tensor_value_info("logits", TensorProto.FLOAT, ["batch", "decoder_sequence"]),
+        ],
+        initializer=[decoder_weight, lm_head_weight],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    onnx.save(model, model_path.as_posix())
+
+
 def test_calibration_records_to_fixed_input_dataset_preserves_input_order():
     from quantize.projects.vpcd import calibration_records_to_fixed_input_dataset
 
@@ -332,6 +376,29 @@ def test_summarize_vpcd_local_quality_policy_reports_decoder_heavy_exclusions(tm
     assert summary.excluded_lm_head_node_count == 1
     assert summary.op_types_to_quantize == ("MatMul",)
     assert summary.quantizable_matmul_node_count == 0
+
+
+def test_summarize_vpcd_aimet_policy_decoder_expanded_reenables_decoder_matmul(tmp_path):
+    from quantize.projects.vpcd import summarize_vpcd_aimet_policy
+
+    model_path = tmp_path / "model.fp32.onnx"
+    _write_decoder_matmul_policy_model(model_path)
+
+    summary = summarize_vpcd_aimet_policy(model_path, policy_mode="decoder_expanded")
+
+    assert summary.preset == "decoder_expanded"
+    assert summary.excluded_lm_head_node_count == 1
+    assert summary.excluded_decoder_node_count == 0
+    assert summary.quantizable_matmul_node_count == 1
+    assert "/model/decoder/attn/MatMul" in summary.quantizable_matmul_node_names
+
+
+def test_should_write_vpcd_aimet_policy_manifest_accepts_decoder_expanded():
+    from quantize.projects.vpcd import should_write_vpcd_aimet_policy_manifest
+
+    assert should_write_vpcd_aimet_policy_manifest("local_quality_parity") is True
+    assert should_write_vpcd_aimet_policy_manifest("decoder_expanded") is True
+    assert should_write_vpcd_aimet_policy_manifest("none") is False
 
 
 def test_build_vpcd_aimet_quantize_recipe_reuses_fixed_shape_calibration(monkeypatch, tmp_path):

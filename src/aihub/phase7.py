@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -227,6 +228,7 @@ def collect_phase7_candidate_metadata(
     compile_record_path: str | Path | None = None,
     prepared_record_path: str | Path | None = None,
     live_record_path: str | Path | None = None,
+    hybrid_record_path: str | Path | None = None,
 ) -> dict[str, Any]:
     bundle_root = Path(model_root).resolve()
     manifest_path = bundle_root / "bundle_manifest.json"
@@ -255,8 +257,78 @@ def collect_phase7_candidate_metadata(
         "compile": _summarize_record_payload(compile_record_path),
         "prepared": _summarize_record_payload(prepared_record_path),
         "live": _summarize_record_payload(live_record_path),
+        "hybrid": _summarize_record_payload(hybrid_record_path),
     }
     return payload
+
+
+def materialize_vpcd_local_aimet_candidate_bundle(
+    *,
+    candidate_label: str,
+    control_bundle_root: str | Path,
+    quantize_report_path: str | Path,
+    output_root: str | Path,
+) -> Path:
+    control_bundle = Path(control_bundle_root).resolve()
+    control_manifest = ModelBundleManifest.from_path(control_bundle / "bundle_manifest.json")
+
+    quantize_report = json.loads(Path(quantize_report_path).resolve().read_text(encoding="utf-8"))
+    qdq_reference_model_path = Path(str(quantize_report["qdq_reference_model_path"])).resolve()
+    if not qdq_reference_model_path.exists():
+        raise FileNotFoundError(f"Missing qdq_reference_model_path for Phase 7 candidate: {qdq_reference_model_path}")
+
+    output_dir = Path(output_root).resolve() / _slugify_candidate_label(candidate_label)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for artifact_name in control_manifest.artifacts.values():
+        if artifact_name == control_manifest.artifacts.get("model"):
+            continue
+        source_path = control_bundle / artifact_name
+        target_path = output_dir / artifact_name
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, target_path)
+
+    for fixture_name in control_manifest.fixtures.values():
+        source_path = control_bundle / fixture_name
+        target_path = output_dir / fixture_name
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, target_path)
+
+    _copy_model_with_sidecars(qdq_reference_model_path, output_dir)
+
+    metadata = dict(control_manifest.metadata)
+    quantization = dict(metadata.get("quantization") or {})
+    quantization["phase7_lane"] = candidate_label
+    metadata["quantization"] = quantization
+    metadata["phase7_candidate"] = {
+        "candidate_label": candidate_label,
+        "source_strategy": str(quantize_report.get("source_strategy") or ""),
+        "variant_name": str(quantize_report.get("variant_name") or ""),
+        "qdq_reference_model_path": qdq_reference_model_path.as_posix(),
+        "packaging_path": str(quantize_report.get("packaging_path") or quantize_report.get("package_dir") or ""),
+        "packaging_kind": str(quantize_report.get("packaging_kind") or "aimet_dir"),
+        "source_kind": str(quantize_report.get("source_kind") or "local_aimet"),
+        "transformation_kind": str(quantize_report.get("transformation_kind") or "aimet_service_export"),
+        "aimet": dict(quantize_report.get("aimet") or {}),
+    }
+
+    candidate_manifest = ModelBundleManifest(
+        bundle_version=control_manifest.bundle_version,
+        project=control_manifest.project,
+        model_family=control_manifest.model_family,
+        model_name=control_manifest.model_name,
+        model_variant=_slugify_candidate_label(candidate_label),
+        asset_namespace=f"{control_manifest.asset_namespace}/phase7/{_slugify_candidate_label(candidate_label)}",
+        runtime_kind=control_manifest.runtime_kind,
+        artifacts={
+            **dict(control_manifest.artifacts),
+            "model": qdq_reference_model_path.name,
+        },
+        fixtures=dict(control_manifest.fixtures),
+        metadata=metadata,
+    )
+    candidate_manifest.write_json(output_dir / "bundle_manifest.json")
+    return output_dir
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -270,6 +342,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--compile-record", default=None)
     parser.add_argument("--prepared-record", default=None)
     parser.add_argument("--live-record", default=None)
+    parser.add_argument("--hybrid-record", default=None)
     parser.add_argument("--mode", required=True, choices=("golden", "metadata"))
     return parser
 
@@ -298,6 +371,7 @@ def cli(argv: Sequence[str] | None = None) -> int:
             compile_record_path=args.compile_record,
             prepared_record_path=args.prepared_record,
             live_record_path=args.live_record,
+            hybrid_record_path=args.hybrid_record,
         )
 
     output_path = Path(args.output).resolve() if args.output else None
@@ -314,6 +388,15 @@ def _read_optional_json(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _copy_model_with_sidecars(model_path: Path, bundle_root: Path) -> None:
+    target_path = bundle_root / model_path.name
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(model_path, target_path)
+    for sibling in sorted(model_path.parent.glob(f"{model_path.name}.*")):
+        if sibling.is_file():
+            shutil.copy2(sibling, bundle_root / sibling.name)
 
 
 def _rewrite_runtime_error(exc: Exception, *, project: str, bundle_root: Path) -> RuntimeError:
@@ -446,3 +529,8 @@ def _levenshtein_distance(left: str, right: str) -> int:
             )
         previous = current
     return previous[-1]
+
+
+def _slugify_candidate_label(value: str) -> str:
+    slug = re.sub(r"[^0-9A-Za-z]+", "-", str(value).strip()).strip("-").lower()
+    return slug or "phase7-candidate"

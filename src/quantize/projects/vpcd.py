@@ -44,6 +44,7 @@ DEFAULT_AIMET_POLICY_MODE = "local_quality_parity"
 DEFAULT_AIMET_OUTPUT_ROOT = Path("build") / "quantize" / "vpcd" / "local_aimet"
 DEFAULT_FIXED_BUNDLE_MANIFEST = Path("build") / "model_bundle" / "vpcd" / "qnn_fixed_1024x128" / "bundle_manifest.json"
 LOCAL_QUALITY_POLICY_REFERENCE = "local_quality_parity"
+DECODER_EXPANDED_POLICY_REFERENCE = "decoder_expanded"
 LOCAL_QUALITY_QUANTIZABLE_OP_TYPES = ("MatMul",)
 
 
@@ -119,12 +120,33 @@ def _is_excluded_from_local_quality_policy(node_name: str) -> bool:
     return "/decoder/" in normalized_name or normalized_name == "/lm_head/MatMul"
 
 
-def summarize_vpcd_local_quality_policy(
+def _is_excluded_from_decoder_expanded_policy(node_name: str) -> bool:
+    return str(node_name) == "/lm_head/MatMul"
+
+
+def should_write_vpcd_aimet_policy_manifest(policy_mode: str) -> bool:
+    normalized_policy_mode = str(policy_mode).strip().lower()
+    return normalized_policy_mode not in {"", "none", "off", "disabled"}
+
+
+def summarize_vpcd_aimet_policy(
     fp32_onnx_path: str | Path,
+    *,
+    policy_mode: str,
 ) -> VpcdLocalQualityPolicySummary:
+    normalized_policy_mode = str(policy_mode).strip().lower()
+    if normalized_policy_mode == LOCAL_QUALITY_POLICY_REFERENCE:
+        preset = LOCAL_QUALITY_POLICY_REFERENCE
+        exclusion_predicate = _is_excluded_from_local_quality_policy
+    elif normalized_policy_mode == DECODER_EXPANDED_POLICY_REFERENCE:
+        preset = DECODER_EXPANDED_POLICY_REFERENCE
+        exclusion_predicate = _is_excluded_from_decoder_expanded_policy
+    else:
+        raise ValueError(f"Unsupported VPCD AIMET policy mode: {policy_mode!r}")
+
     resolved_model_path = Path(fp32_onnx_path).resolve()
     node_names = load_model_node_names(resolved_model_path)
-    excluded_node_names = tuple(node_name for node_name in node_names if _is_excluded_from_local_quality_policy(node_name))
+    excluded_node_names = tuple(node_name for node_name in node_names if exclusion_predicate(node_name))
     excluded_node_set = set(excluded_node_names)
 
     model = onnx.load(resolved_model_path.as_posix(), load_external_data=False)
@@ -134,7 +156,7 @@ def summarize_vpcd_local_quality_policy(
         if node.name and node.op_type in LOCAL_QUALITY_QUANTIZABLE_OP_TYPES and node.name not in excluded_node_set
     )
     return VpcdLocalQualityPolicySummary(
-        preset=LOCAL_QUALITY_POLICY_REFERENCE,
+        preset=preset,
         total_named_nodes=len(node_names),
         excluded_node_count=len(excluded_node_names),
         excluded_decoder_node_count=sum(1 for node_name in excluded_node_names if "/decoder/" in node_name),
@@ -143,6 +165,15 @@ def summarize_vpcd_local_quality_policy(
         op_types_to_quantize=LOCAL_QUALITY_QUANTIZABLE_OP_TYPES,
         excluded_node_names=excluded_node_names,
         quantizable_matmul_node_names=quantizable_matmul_node_names,
+    )
+
+
+def summarize_vpcd_local_quality_policy(
+    fp32_onnx_path: str | Path,
+) -> VpcdLocalQualityPolicySummary:
+    return summarize_vpcd_aimet_policy(
+        fp32_onnx_path,
+        policy_mode=LOCAL_QUALITY_POLICY_REFERENCE,
     )
 
 
@@ -310,7 +341,10 @@ def build_vpcd_aimet_quantize_recipe(
     recipe_stats["quant_scheme"] = str(quant_scheme)
     recipe_stats["config_file"] = str(config_file)
     recipe_stats["policy_mode"] = str(policy_mode)
-    local_quality_policy = summarize_vpcd_local_quality_policy(fp32_onnx_path)
+    local_quality_policy = summarize_vpcd_aimet_policy(
+        fp32_onnx_path,
+        policy_mode=str(policy_mode),
+    )
     recipe_stats["local_quality_policy"] = {
         "preset": local_quality_policy.preset,
         "total_named_nodes": int(local_quality_policy.total_named_nodes),
@@ -467,7 +501,7 @@ def _run_retained_aimet_pipeline(args) -> int:
 
     config_file_value = str(recipe.config_file)
     policy_manifest_path: Path | None = None
-    if str(recipe.policy_mode).strip().lower() == "local_quality_parity":
+    if should_write_vpcd_aimet_policy_manifest(recipe.policy_mode):
         config_path = write_aimet_config(
             build_matmul_only_aimet_config(),
             variant_root / "aimet.config.json",
