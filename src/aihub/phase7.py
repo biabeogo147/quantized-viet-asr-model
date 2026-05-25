@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import statistics
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -127,6 +129,107 @@ def evaluate_vpcd_golden(
         ),
         "reports": reports,
         "mismatches": mismatches,
+    }
+
+
+def evaluate_vpcd_latency(
+    model_root: str | Path,
+    *,
+    candidate_label: str,
+    provider: str = "CPUExecutionProvider",
+) -> dict[str, Any]:
+    bundle_root = Path(model_root).resolve()
+    manifest = ModelBundleManifest.from_path(bundle_root / "bundle_manifest.json")
+    golden_path = bundle_root / str(manifest.fixtures["golden_samples"])
+    samples = read_jsonl(golden_path)
+
+    session_started = time.perf_counter()
+    try:
+        runtime = BundleOnnxRuntime.from_manifest_path(bundle_root / "bundle_manifest.json", provider=provider)
+    except Exception as exc:  # pragma: no cover - exercised via unit test with monkeypatch
+        raise _rewrite_runtime_error(exc, project="vpcd", bundle_root=bundle_root) from exc
+    session_init_ms = round((time.perf_counter() - session_started) * 1000.0, 3)
+
+    max_decode_length = int(manifest.metadata.get("max_decode_length", 128))
+    reports: list[dict[str, Any]] = []
+    latencies_ms: list[float] = []
+    exact_match_count = 0
+    total_char_distance = 0
+    total_expected_chars = 0
+    critical_regression_count = 0
+    canonical_index = _resolve_vpcd_canonical_index(samples)
+    canonical_exact = False
+
+    for index, sample in enumerate(samples):
+        raw_text = str(sample["raw_text"])
+        expected_text = str(sample.get("expected_output", ""))
+        started = time.perf_counter()
+        actual_text = str(runtime.restore(raw_text, max_length=max_decode_length))
+        process_ms = round((time.perf_counter() - started) * 1000.0, 3)
+        latencies_ms.append(process_ms)
+
+        normalized_expected = normalize_whitespace_text(expected_text)
+        normalized_actual = normalize_whitespace_text(actual_text)
+        exact_match = normalized_expected == normalized_actual
+        char_distance = _levenshtein_distance(normalized_expected, normalized_actual)
+        expected_chars = max(1, len(normalized_expected))
+        cer = round(char_distance / expected_chars, 6)
+        critical_regressions = _detect_vpcd_critical_regressions(
+            expected_text=normalized_expected,
+            actual_text=normalized_actual,
+        )
+        if exact_match:
+            exact_match_count += 1
+        if index == canonical_index:
+            canonical_exact = exact_match
+        total_char_distance += char_distance
+        total_expected_chars += expected_chars
+        critical_regression_count += len(critical_regressions)
+        reports.append(
+            {
+                "sample_index": index,
+                "raw_text": raw_text,
+                "expected_text": expected_text,
+                "actual_text": actual_text,
+                "normalized_expected_text": normalized_expected,
+                "normalized_actual_text": normalized_actual,
+                "exact_match": exact_match,
+                "cer": cer,
+                "critical_regressions": critical_regressions,
+                "process_ms": process_ms,
+            }
+        )
+
+    exact_match_rate = exact_match_count / len(samples) if samples else 0.0
+    normalized_cer = total_char_distance / max(1, total_expected_chars)
+    median_process_ms = round(statistics.median(latencies_ms), 3) if latencies_ms else 0.0
+    p95_process_ms = _percentile_ms(latencies_ms, 0.95)
+    total_process_ms = round(sum(latencies_ms), 3)
+
+    return {
+        "project": "vpcd",
+        "candidate_label": candidate_label,
+        "bundle_manifest_path": (bundle_root / "bundle_manifest.json").as_posix(),
+        "golden_path": golden_path.as_posix(),
+        "sample_count": len(samples),
+        "session_init_ms": session_init_ms,
+        "median_process_ms": median_process_ms,
+        "p95_process_ms": p95_process_ms,
+        "total_process_ms": total_process_ms,
+        "exact_match_count": exact_match_count,
+        "exact_match_rate": round(exact_match_rate, 6),
+        "normalized_cer": round(normalized_cer, 6),
+        "canonical_sample_index": canonical_index,
+        "canonical_exact_match": canonical_exact,
+        "critical_regression_count": critical_regression_count,
+        "passed": bool(
+            samples
+            and canonical_exact
+            and exact_match_rate >= 0.95
+            and normalized_cer <= 0.01
+            and critical_regression_count == 0
+        ),
+        "reports": reports,
     }
 
 
@@ -420,7 +523,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--prepared-record", default=None)
     parser.add_argument("--live-record", default=None)
     parser.add_argument("--hybrid-record", default=None)
-    parser.add_argument("--mode", required=True, choices=("golden", "metadata"))
+    parser.add_argument("--mode", required=True, choices=("golden", "metadata", "latency"))
     return parser
 
 
@@ -440,6 +543,14 @@ def cli(argv: Sequence[str] | None = None) -> int:
                 repo_root=args.repo_root,
                 provider=args.provider,
             )
+    elif args.mode == "latency":
+        if args.project != "vpcd":
+            raise ValueError("Latency mode currently supports only project='vpcd'.")
+        payload = evaluate_vpcd_latency(
+            args.model_root,
+            candidate_label=args.candidate,
+            provider=args.provider,
+        )
     else:
         payload = collect_phase7_candidate_metadata(
             project=args.project,
@@ -606,6 +717,16 @@ def _levenshtein_distance(left: str, right: str) -> int:
             )
         previous = current
     return previous[-1]
+
+
+def _percentile_ms(values: Sequence[float], quantile: float) -> float:
+    if not values:
+        return 0.0
+    normalized = sorted(float(value) for value in values)
+    if len(normalized) == 1:
+        return round(normalized[0], 3)
+    position = max(0, min(len(normalized) - 1, int(round((len(normalized) - 1) * quantile))))
+    return round(normalized[position], 3)
 
 
 def _slugify_candidate_label(value: str) -> str:

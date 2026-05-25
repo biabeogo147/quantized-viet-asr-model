@@ -156,6 +156,50 @@ def test_evaluate_vpcd_golden_flags_critical_regressions(monkeypatch, tmp_path):
     assert "proper_name_capitalization" in mismatch["critical_regressions"]
 
 
+def test_evaluate_vpcd_latency_reports_session_and_process_metrics(monkeypatch, tmp_path):
+    from aihub import phase7
+
+    bundle_dir = _write_vpcd_bundle(
+        tmp_path / "vpcd",
+        samples=[
+            {"raw_text": "xin chao", "expected_output": "Xin chao."},
+            {"raw_text": "chao cac ban", "expected_output": "Chao cac ban."},
+        ],
+    )
+
+    outputs = {
+        "xin chao": "Xin chao.",
+        "chao cac ban": "Chao cac ban.",
+    }
+
+    class FakeRuntime:
+        @classmethod
+        def from_manifest_path(cls, _manifest_path: Path, provider: str = "CPUExecutionProvider"):
+            assert provider == "CPUExecutionProvider"
+            return cls()
+
+        def restore(self, raw_text: str, max_length: int = 32) -> str:
+            assert max_length == 32
+            return outputs[raw_text]
+
+    perf_ticks = iter((1.0, 1.25, 2.0, 2.02, 3.0, 3.08))
+    monkeypatch.setattr(phase7, "BundleOnnxRuntime", FakeRuntime)
+    monkeypatch.setattr(phase7.time, "perf_counter", lambda: next(perf_ticks))
+
+    report = phase7.evaluate_vpcd_latency(bundle_dir, candidate_label="control")
+
+    assert report["project"] == "vpcd"
+    assert report["candidate_label"] == "control"
+    assert report["sample_count"] == 2
+    assert report["session_init_ms"] == 250.0
+    assert report["median_process_ms"] == 50.0
+    assert report["p95_process_ms"] == 80.0
+    assert report["total_process_ms"] == 100.0
+    assert report["exact_match_rate"] == 1.0
+    assert report["normalized_cer"] == 0.0
+    assert [row["process_ms"] for row in report["reports"]] == [20.0, 80.0]
+
+
 def test_evaluate_zipformer_golden_normalizes_wordpiece_separators(monkeypatch, tmp_path):
     from aihub import phase7
 
