@@ -72,3 +72,49 @@ def test_write_phase8_vpcd_override_manifest_rewrites_lengths(tmp_path):
     assert manifest.metadata["fixed_input_shapes"]["model"]["decoder_attention_mask"] == [1, 64]
     assert manifest.metadata["phase8_candidate"]["candidate_label"] == "VPCD-A1-512x64-L2"
     assert manifest.metadata["phase8_candidate"]["policy_mode"] == "decoder_expanded"
+
+
+def test_materialize_phase8_vpcd_candidate_bundle_uses_phase7_bundle_shape(tmp_path):
+    from aihub.phase8_vpcd import materialize_phase8_vpcd_candidate_bundle, resolve_phase8_vpcd_lane_spec
+
+    control_dir = tmp_path / "control"
+    manifest_path = _write_control_manifest(control_dir / "bundle_manifest.json")
+    (control_dir / "model.mobile.onnx").write_bytes(b"control-model")
+    (control_dir / "golden_samples.jsonl").write_text('{"raw_text":"xin chao","expected_output":"Xin chao."}\n', encoding="utf-8")
+
+    quantize_dir = tmp_path / "quantize"
+    qdq_model_path = quantize_dir / "model.option1.qdq.onnx"
+    qdq_data_path = quantize_dir / "model.option1.qdq.onnx.data"
+    qdq_model_path.parent.mkdir(parents=True, exist_ok=True)
+    qdq_model_path.write_bytes(b"qdq-model")
+    qdq_data_path.write_bytes(b"qdq-data")
+
+    quantize_report_path = quantize_dir / "quantize_report.json"
+    quantize_report_path.write_text(
+        """{
+  "source_strategy": "local_aimet_compile_candidate",
+  "variant_name": "wint8_aint16_min_max_decoder_expanded",
+  "qdq_reference_model_path": "%s",
+  "packaging_path": "%s",
+  "packaging_kind": "aimet_dir",
+  "source_kind": "local_aimet",
+  "transformation_kind": "aimet_service_export",
+  "aimet": {
+    "policy_mode": "decoder_expanded"
+  }
+}
+""" % (qdq_model_path.as_posix(), quantize_dir.as_posix()),
+        encoding="utf-8",
+    )
+
+    output_dir = materialize_phase8_vpcd_candidate_bundle(
+        lane_spec=resolve_phase8_vpcd_lane_spec("VPCD-A1-512x64-L2"),
+        control_bundle_root=control_dir,
+        quantize_report_path=quantize_report_path,
+        output_root=tmp_path / "phase8-candidates",
+    )
+
+    manifest = ModelBundleManifest.from_path(output_dir / "bundle_manifest.json")
+    assert manifest.metadata["phase7_candidate"]["candidate_label"] == "VPCD-A1-512x64-L2"
+    assert (output_dir / "model.option1.qdq.onnx").exists()
+    assert (output_dir / "model.option1.qdq.onnx.data").exists()

@@ -441,6 +441,14 @@ def _resolve_fixed_bundle_manifest_path(path_like: str | Path) -> Path:
     return (_resolve_repo_root() / candidate).resolve()
 
 
+def _resolve_repo_relative_path(path_like: str | Path, *, repo_root: Path | None = None) -> Path:
+    candidate = Path(path_like)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    resolved_root = repo_root.resolve() if repo_root is not None else _resolve_repo_root()
+    return (resolved_root / candidate).resolve()
+
+
 def _resolve_vpcd_fixed_input_shapes_from_bundle(manifest_path: Path) -> tuple[dict[str, tuple[int, int]], int]:
     manifest = ModelBundleManifest.from_path(manifest_path)
     if manifest.project != "vpcd":
@@ -457,8 +465,8 @@ def _resolve_vpcd_fixed_input_shapes_from_bundle(manifest_path: Path) -> tuple[d
     }, pad_token_id
 
 
-def _resolve_output_root(args) -> Path:
-    return Path(args.output_root).resolve()
+def _resolve_output_root(args, *, repo_root: Path | None = None) -> Path:
+    return _resolve_repo_relative_path(args.output_root, repo_root=repo_root)
 
 
 def _write_vpcd_aimet_quantize_report(
@@ -511,13 +519,13 @@ def _run_retained_aimet_pipeline(args) -> int:
     repo_root = _resolve_repo_root()
     fixed_bundle_manifest_path = _resolve_fixed_bundle_manifest_path(args.fixed_bundle_manifest)
     fixed_input_shapes, pad_token_id = _resolve_vpcd_fixed_input_shapes_from_bundle(fixed_bundle_manifest_path)
-    output_root = _resolve_output_root(args)
+    output_root = _resolve_output_root(args, repo_root=repo_root)
     output_root.mkdir(parents=True, exist_ok=True)
 
     recipe = build_vpcd_aimet_quantize_recipe(
-        model_dir=Path(args.model_dir),
-        fp32_onnx_path=Path(args.fp32_onnx),
-        calibration_source_path=Path(args.calibration_text),
+        model_dir=_resolve_repo_relative_path(args.model_dir, repo_root=repo_root),
+        fp32_onnx_path=_resolve_repo_relative_path(args.fp32_onnx, repo_root=repo_root),
+        calibration_source_path=_resolve_repo_relative_path(args.calibration_text, repo_root=repo_root),
         max_calibration_samples=args.max_calibration_samples,
         max_generation_length=args.max_generation_length,
         ort_provider=args.ort_provider,

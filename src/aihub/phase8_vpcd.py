@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from aihub.phase7 import materialize_vpcd_local_aimet_candidate_bundle
 from model_bundle.manifest import ModelBundleManifest
 
 
@@ -83,6 +84,62 @@ def write_phase8_vpcd_override_manifest(
     )
     manifest.write_json(output_path)
     return output_path
+
+
+def materialize_phase8_vpcd_candidate_bundle(
+    *,
+    lane_spec: Phase8VpcdLaneSpec,
+    control_bundle_root: str | Path,
+    quantize_report_path: str | Path,
+    output_root: str | Path,
+) -> Path:
+    control_bundle = Path(control_bundle_root).resolve()
+    control_manifest = ModelBundleManifest.from_path(control_bundle / "bundle_manifest.json")
+
+    output_dir = materialize_vpcd_local_aimet_candidate_bundle(
+        candidate_label=lane_spec.candidate_label,
+        control_bundle_root=control_bundle,
+        quantize_report_path=quantize_report_path,
+        output_root=output_root,
+    )
+
+    candidate_manifest = ModelBundleManifest.from_path(output_dir / "bundle_manifest.json")
+    metadata = dict(candidate_manifest.metadata)
+    metadata["max_source_length"] = int(lane_spec.encoder_sequence)
+    metadata["max_decode_length"] = int(lane_spec.decoder_sequence)
+    metadata["fixed_input_shapes"] = {
+        "model": {
+            "input_ids": [1, int(lane_spec.encoder_sequence)],
+            "attention_mask": [1, int(lane_spec.encoder_sequence)],
+            "decoder_input_ids": [1, int(lane_spec.decoder_sequence)],
+            "decoder_attention_mask": [1, int(lane_spec.decoder_sequence)],
+        }
+    }
+    metadata["phase8_candidate"] = {
+        "candidate_label": lane_spec.candidate_label,
+        "encoder_sequence": int(lane_spec.encoder_sequence),
+        "decoder_sequence": int(lane_spec.decoder_sequence),
+        "policy_mode": lane_spec.policy_mode,
+        "control_manifest_path": (control_bundle / "bundle_manifest.json").as_posix(),
+    }
+    quantization = dict(metadata.get("quantization") or {})
+    quantization["phase8_lane"] = lane_spec.candidate_label
+    metadata["quantization"] = quantization
+
+    manifest = ModelBundleManifest(
+        bundle_version=control_manifest.bundle_version,
+        project=control_manifest.project,
+        model_family=control_manifest.model_family,
+        model_name=control_manifest.model_name,
+        model_variant=lane_spec.candidate_label.lower().replace("/", "-").replace(" ", "-").replace("_", "-"),
+        asset_namespace=f"{control_manifest.asset_namespace}/phase8/{lane_spec.candidate_label.lower().replace('/', '-').replace(' ', '-').replace('_', '-')}",
+        runtime_kind=control_manifest.runtime_kind,
+        artifacts=dict(candidate_manifest.artifacts),
+        fixtures=dict(candidate_manifest.fixtures),
+        metadata=metadata,
+    )
+    manifest.write_json(output_dir / "bundle_manifest.json")
+    return output_dir
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

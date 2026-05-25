@@ -1,10 +1,12 @@
 import json
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from urllib import request as urllib_request
 
 import numpy as np
 import onnx
+import pytest
 
 from quantize.types import CalibrationSample
 
@@ -671,6 +673,67 @@ def test_quantize_cli_defaults_vpcd_to_retained_aimet_only():
     assert args.aimet_service_url == "http://127.0.0.1:18080"
     assert not hasattr(args, "pipeline")
     assert not hasattr(args, "preset")
+
+
+def test_run_retained_aimet_pipeline_resolves_repo_relative_inputs(monkeypatch, tmp_path):
+    from quantize.projects import vpcd
+
+    repo_root = tmp_path / "python-model-test"
+    captured: dict[str, Path] = {}
+
+    class StopPipeline(RuntimeError):
+        pass
+
+    def fake_build_recipe(**kwargs):
+        captured["model_dir"] = kwargs["model_dir"]
+        captured["fp32_onnx_path"] = kwargs["fp32_onnx_path"]
+        captured["calibration_source_path"] = kwargs["calibration_source_path"]
+        raise StopPipeline("captured")
+
+    monkeypatch.setattr(vpcd, "_resolve_repo_root", lambda: repo_root)
+    monkeypatch.setattr(vpcd, "_resolve_fixed_bundle_manifest_path", lambda _path: repo_root / "build" / "model_bundle" / "bundle_manifest.json")
+    monkeypatch.setattr(
+        vpcd,
+        "_resolve_vpcd_fixed_input_shapes_from_bundle",
+        lambda _path: (
+            {
+                "input_ids": (1, 1024),
+                "attention_mask": (1, 1024),
+                "decoder_input_ids": (1, 128),
+                "decoder_attention_mask": (1, 128),
+            },
+            1,
+        ),
+    )
+    monkeypatch.setattr(vpcd, "_resolve_output_root", lambda _args, repo_root=None: (repo_root or tmp_path) / "build" / "quantize" / "vpcd")
+    monkeypatch.setattr(vpcd, "build_vpcd_aimet_quantize_recipe", fake_build_recipe)
+
+    args = SimpleNamespace(
+        model_dir=str(Path("assets") / "vietnamese-punc-cap-denorm-v1"),
+        fp32_onnx=str(Path("assets") / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"),
+        calibration_text=str(Path("build") / "calibration" / "vlsp2020" / "vpcd_transcriptions.txt"),
+        fixed_bundle_manifest=str(Path("build") / "model_bundle" / "vpcd" / "qnn_fixed_1024x128" / "bundle_manifest.json"),
+        output_root=str(Path("build") / "quantize" / "vpcd" / "local_aimet"),
+        max_calibration_samples=24,
+        max_generation_length=64,
+        ort_provider="cpu",
+        aimet_param_type="int8",
+        aimet_activation_type="int16",
+        aimet_quant_scheme="min_max",
+        aimet_config_file="vpcd_matmul_only",
+        aimet_policy_mode="decoder_expanded",
+        aimet_service_url="http://127.0.0.1:18080",
+        aimet_service_workspace_root="/workspace",
+        aimet_health_timeout_seconds=10.0,
+        dry_run=False,
+    )
+
+    with pytest.raises(StopPipeline, match="captured"):
+        vpcd._run_retained_aimet_pipeline(args)
+
+    assert captured["model_dir"] == repo_root / "assets" / "vietnamese-punc-cap-denorm-v1"
+    assert captured["fp32_onnx_path"] == repo_root / "assets" / "vietnamese-punc-cap-denorm-v1" / "onnx" / "model.fp32.onnx"
+    assert captured["calibration_source_path"] == repo_root / "build" / "calibration" / "vlsp2020" / "vpcd_transcriptions.txt"
 
 
 def test_aimet_service_http_contract_supports_health_and_export(tmp_path):
