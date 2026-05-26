@@ -10,6 +10,7 @@ from model_bundle.fixtures import TextGoldenSample, serialize_jsonl
 from model_bundle.manifest import ModelBundleManifest
 from model_bundle.vpcd_runtime import (
     BundleOnnxRuntime,
+    DEFAULT_GOLDEN_SAMPLES,
     TokenizerIdBridge,
     TokenizerExportArtifacts,
 )
@@ -142,6 +143,21 @@ def test_text_golden_samples_serialize_to_jsonl():
     serialized = serialize_jsonl([sample])
 
     assert serialized == sample.to_jsonl_line()
+
+
+def test_default_vpcd_golden_samples_are_pinned_to_source_of_truth():
+    assert [sample.raw_text for sample in DEFAULT_GOLDEN_SAMPLES] == [
+        "h\u00f4m nay l\u00e0 bu\u1ed5i nh\u1eadm ch\u1ee9c c\u1ee7a t\u00f4i ph\u01b0\u1edbc th\u00e0nh",
+        "ch\u00e0o c\u00e1c b\u1ea1n h\u00f4m nay ch\u00fang ta c\u00f9ng nhau \u0111\u1ebfn v\u1edbi b\u00e0i h\u1ecdc deep learning ph\u1ea7n s\u1ed1 m\u01b0\u1eddi ba",
+    ]
+    assert [sample.input_ids for sample in DEFAULT_GOLDEN_SAMPLES] == [
+        [0, 799, 177, 9, 847, 559, 2306, 115, 7, 80, 1386, 1338, 58, 2],
+        [0, 1740, 10, 144, 799, 177, 248, 336, 120, 383, 30, 15, 635, 71, 19466, 18436, 221, 52, 3125, 712, 2],
+    ]
+    assert [sample.expected_output for sample in DEFAULT_GOLDEN_SAMPLES] == [
+        "H\u00f4m nay l\u00e0 bu\u1ed5i nh\u1eadm ch\u1ee9c c\u1ee7a t\u00f4i - Ph\u01b0\u1edbc Th\u00e0nh.",
+        "Ch\u00e0o c\u00e1c b\u1ea1n, h\u00f4m nay ch\u00fang ta c\u00f9ng nhau \u0111\u1ebfn v\u1edbi b\u00e0i h\u1ecdc Deep Learning ph\u1ea7n s\u1ed1 13.",
+    ]
 
 
 def test_create_runtime_defaults_to_model_dir_mode():

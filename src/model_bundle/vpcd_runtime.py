@@ -25,10 +25,19 @@ TOKENIZER_TO_MODEL_ID_MAP_FILE_NAME = "tokenizer.to_model_id_map.json"
 MODEL_TO_TOKENIZER_ID_MAP_FILE_NAME = "tokenizer.from_model_id_map.json"
 GOLDEN_SAMPLES_FILE_NAME = "golden_samples.jsonl"
 UNK_TOKEN_ID = 3
-DEFAULT_TEXTS = [
-    "hom nay la buoi nham chuc cua toi phuoc thanh",
-    "chao cac ban hom nay chung ta cung nhau den voi bai hoc deep learning phan so muoi ba",
+DEFAULT_GOLDEN_SAMPLES = [
+    TextGoldenSample(
+        raw_text="h\u00f4m nay l\u00e0 bu\u1ed5i nh\u1eadm ch\u1ee9c c\u1ee7a t\u00f4i ph\u01b0\u1edbc th\u00e0nh",
+        input_ids=[0, 799, 177, 9, 847, 559, 2306, 115, 7, 80, 1386, 1338, 58, 2],
+        expected_output="H\u00f4m nay l\u00e0 bu\u1ed5i nh\u1eadm ch\u1ee9c c\u1ee7a t\u00f4i - Ph\u01b0\u1edbc Th\u00e0nh.",
+    ),
+    TextGoldenSample(
+        raw_text="ch\u00e0o c\u00e1c b\u1ea1n h\u00f4m nay ch\u00fang ta c\u00f9ng nhau \u0111\u1ebfn v\u1edbi b\u00e0i h\u1ecdc deep learning ph\u1ea7n s\u1ed1 m\u01b0\u1eddi ba",
+        input_ids=[0, 1740, 10, 144, 799, 177, 248, 336, 120, 383, 30, 15, 635, 71, 19466, 18436, 221, 52, 3125, 712, 2],
+        expected_output="Ch\u00e0o c\u00e1c b\u1ea1n, h\u00f4m nay ch\u00fang ta c\u00f9ng nhau \u0111\u1ebfn v\u1edbi b\u00e0i h\u1ecdc Deep Learning ph\u1ea7n s\u1ed1 13.",
+    ),
 ]
+DEFAULT_TEXTS = [sample.raw_text for sample in DEFAULT_GOLDEN_SAMPLES]
 
 
 @dataclass(frozen=True)
@@ -228,18 +237,24 @@ def default_golden_sample_builder(
 ) -> list[TextGoldenSample]:
     model = VietnamesePuncCapDenormOnnx(model_dir=model_dir, onnx_path=onnx_path)
     samples: list[TextGoldenSample] = []
-    for text in DEFAULT_TEXTS:
+    for sample in DEFAULT_GOLDEN_SAMPLES:
         encoded = model.tokenizer(
-            text,
+            sample.raw_text,
             return_tensors="np",
             truncation=True,
             max_length=512,
         )
+        encoded_ids = encoded["input_ids"][0].astype(int).tolist()
+        if encoded_ids != sample.input_ids:
+            raise ValueError(
+                "Pinned VPCD golden sample tokenizer ids drifted for "
+                f"{sample.raw_text!r}: expected {sample.input_ids}, got {encoded_ids}"
+            )
         samples.append(
             TextGoldenSample(
-                raw_text=text,
-                input_ids=encoded["input_ids"][0].astype(int).tolist(),
-                expected_output=model.restore(text, max_length=max_decode_length),
+                raw_text=sample.raw_text,
+                input_ids=encoded_ids,
+                expected_output=sample.expected_output,
             )
         )
     return samples
