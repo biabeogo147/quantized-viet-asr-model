@@ -100,6 +100,55 @@ def _write_vpcd_bundle(repo_root: Path) -> Path:
     return bundle_dir
 
 
+def _write_phase8_vpcd_bundle(repo_root: Path) -> Path:
+    bundle_dir = repo_root / "build" / "phase8" / "candidate-bundles" / "vpcd-a4-384x64-l1"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    manifest = ModelBundleManifest(
+        bundle_version=1,
+        project="vpcd",
+        model_family="bartpho-seq2seq",
+        model_name="tourmii/vietnamese-punc-cap-denorm-v1",
+        model_variant="vpcd-a4-384x64-l1",
+        asset_namespace="models/punctuation/vpcd/phase8/vpcd-a4-384x64-l1",
+        runtime_kind="text_seq2seq",
+        artifacts={
+            "model": "model.option1.qdq.onnx",
+            "tokenizer_encode": "tokenizer.encode.onnx",
+            "tokenizer_decode": "tokenizer.decode.onnx",
+            "tokenizer_to_model_id_map": "tokenizer.to_model_id_map.json",
+            "model_to_tokenizer_id_map": "tokenizer.from_model_id_map.json",
+        },
+        fixtures={"golden_samples": "golden_samples.jsonl"},
+        metadata={
+            "pad_token_id": 1,
+            "eos_token_id": 2,
+            "decoder_start_token_id": 2,
+            "max_source_length": 384,
+            "max_decode_length": 64,
+            "input_text_case": "lower",
+            "fixed_input_shapes": {
+                "model": {
+                    "input_ids": [1, 384],
+                    "attention_mask": [1, 384],
+                    "decoder_input_ids": [1, 64],
+                    "decoder_attention_mask": [1, 64],
+                }
+            },
+        },
+    )
+    manifest.write_json(bundle_dir / "bundle_manifest.json")
+    for file_name in (
+        "model.option1.qdq.onnx",
+        "tokenizer.encode.onnx",
+        "tokenizer.decode.onnx",
+        "tokenizer.to_model_id_map.json",
+        "tokenizer.from_model_id_map.json",
+        "golden_samples.jsonl",
+    ):
+        (bundle_dir / file_name).write_text(file_name, encoding="utf-8")
+    return bundle_dir
+
+
 class FakeJob:
     def __init__(self, job_id: str, url: str, status: str) -> None:
         self.job_id = job_id
@@ -327,6 +376,24 @@ def test_resolve_deployment_inputs_reads_retained_zipformer_records(tmp_path):
     ).resolve()
 
 
+def test_resolve_deployment_inputs_prefers_explicit_source_bundle_manifest_for_vpcd(tmp_path):
+    from aihub.deployment import resolve_deployment_inputs
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    config, _record_paths = _build_vpcd_records(repo_root)
+    phase8_bundle_dir = _write_phase8_vpcd_bundle(repo_root)
+
+    resolved = resolve_deployment_inputs(
+        runtime_config=config,
+        project="vpcd",
+        run_label="unit-deploy",
+        source_bundle_manifest_path=phase8_bundle_dir / "bundle_manifest.json",
+    )
+
+    assert resolved.source_bundle_manifest_path == (phase8_bundle_dir / "bundle_manifest.json").resolve()
+
+
 def test_materialize_deployment_package_downloads_artifact_and_writes_io_contract_for_vpcd(tmp_path):
     from aihub.deployment import materialize_deployment_package
 
@@ -366,6 +433,29 @@ def test_materialize_deployment_package_downloads_artifact_and_writes_io_contrac
     ]
     assert (result.package_dir / "evidence" / "compile-run-unit-deploy.json").exists()
     assert (result.package_dir / "evidence" / "deployment-download-unit-deploy.json").exists()
+
+
+def test_materialize_deployment_package_uses_explicit_phase8_vpcd_bundle(tmp_path):
+    from aihub.deployment import materialize_deployment_package
+
+    repo_root = tmp_path / "repo"
+    _init_repo_root(repo_root)
+    config, _record_paths = _build_vpcd_records(repo_root)
+    phase8_bundle_dir = _write_phase8_vpcd_bundle(repo_root)
+    fake_model = FakeTargetModel("vpcd-model-1", "https://aihub/models/vpcd-model-1", "vpcd-target")
+
+    result = materialize_deployment_package(
+        runtime_config=config,
+        project="vpcd",
+        run_label="unit-deploy",
+        source_bundle_manifest_path=phase8_bundle_dir / "bundle_manifest.json",
+        target_model_resolver=lambda target_model_id: fake_model,
+    )
+
+    manifest_payload = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    assert manifest_payload["source_bundle_manifest"] == (
+        phase8_bundle_dir / "bundle_manifest.json"
+    ).resolve().as_posix()
 
 
 def test_deployment_cli_dry_run_resolves_all_projects_without_materializing_packages(tmp_path, capsys):

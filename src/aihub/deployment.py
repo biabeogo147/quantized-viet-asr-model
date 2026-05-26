@@ -93,6 +93,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--device-name", default="Samsung Galaxy S24 (Family)")
     parser.add_argument("--qairt-version", default=None)
+    parser.add_argument("--source-bundle-manifest", default=None)
     parser.add_argument("--dry-run", action="store_true")
     return parser
 
@@ -103,6 +104,7 @@ def resolve_deployment_inputs(
     project: str,
     run_label: str,
     explicit_target_model_id: str | None = None,
+    source_bundle_manifest_path: str | Path | None = None,
 ) -> ResolvedDeploymentInputs:
     layout = _resolve_layout(project)
     normalized_run_label = _normalize_optional_string(run_label) or "latest"
@@ -141,6 +143,7 @@ def resolve_deployment_inputs(
     source_bundle_manifest_path = _resolve_source_bundle_manifest_path(
         runtime_config=runtime_config,
         layout=layout,
+        source_bundle_manifest_path=source_bundle_manifest_path,
     )
 
     return ResolvedDeploymentInputs(
@@ -166,6 +169,7 @@ def materialize_deployment_package(
     project: str,
     run_label: str,
     explicit_target_model_id: str | None = None,
+    source_bundle_manifest_path: str | Path | None = None,
     target_model_resolver: TargetModelResolver | None = None,
 ) -> DeploymentPackageResult:
     resolved = resolve_deployment_inputs(
@@ -173,6 +177,7 @@ def materialize_deployment_package(
         project=project,
         run_label=run_label,
         explicit_target_model_id=explicit_target_model_id,
+        source_bundle_manifest_path=source_bundle_manifest_path,
     )
     resolver = target_model_resolver or _default_target_model_resolver
 
@@ -251,6 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runtime_config=runtime_config,
                 project=project,
                 run_label=args.run_label,
+                source_bundle_manifest_path=args.source_bundle_manifest,
             )
             print(f"[dry-run] project={project}")
             print("  target_model_id:", resolved.target_model_id)
@@ -264,6 +270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             runtime_config=runtime_config,
             project=project,
             run_label=args.run_label,
+            source_bundle_manifest_path=args.source_bundle_manifest,
         )
         print(f"Deployment package ready for {project}.")
         print("  target_model_id:", result.target_model_id)
@@ -339,7 +346,13 @@ def _resolve_source_bundle_manifest_path(
     *,
     runtime_config: AiHubRuntimeConfig,
     layout: DeploymentLayout,
+    source_bundle_manifest_path: str | Path | None = None,
 ) -> Path:
+    if source_bundle_manifest_path is not None:
+        explicit_path = Path(source_bundle_manifest_path).resolve()
+        if not explicit_path.is_file():
+            raise FileNotFoundError(f"Missing explicit source bundle manifest: {explicit_path}")
+        return explicit_path
     if layout.project == "zipformer":
         return resolve_zipformer_encoder_source(runtime_config.repo_root).bundle_manifest_path.resolve()
     if layout.project == "vpcd":
