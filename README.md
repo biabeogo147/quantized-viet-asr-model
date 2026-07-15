@@ -1,62 +1,41 @@
-# Python Model Test Repo
+# Model Pipeline
 
-`python-model-test/` is the Python workspace for exporting, verifying, quantizing, and smoke-testing the model bundles that are later handed off to BKMeeting Android.
+Repo này là nguồn sự thật duy nhất cho việc chuẩn bị, quantize, validate, compile và đóng gói Zipformer/VPCD cho BKMeeting.
 
-## What this repo does
-
-The repo currently supports two model families:
-
-- `vpcd`
-  - punctuation / capitalization / denormalization
-- `zipformer`
-  - RNNT acoustic model
-
-Current responsibilities:
-
-- export shared model bundles
-- verify those bundles against Python reference runtimes
-- prepare calibration inputs
-- quantize supported models
-- build QNN-oriented candidate bundles
-- smoke-test bundle-manifest consumption
-- sync verified bundles into BKMeeting Android assets
-
-## Repository layout
+## Public contract
 
 ```text
-python-model-test/
-  assets/
-  build/
-  docs/
-  src/
-  test/
+RecipeSpec → source → prepare → quantize/explicit-skip → validate → compile → package → sync
 ```
 
-## Quick start
+CLI công khai duy nhất:
 
-Install the repo in editable mode:
-
-```bash
-python -m pip install -e .
+```powershell
+python -m model_pipeline run --model zipformer --profile production --through sync
+python -m model_pipeline run --model vpcd --profile production --through sync
 ```
 
-Run commands from `python-model-test/`.
+Thêm `--dry-run` để xem recipe và stage mà không đọc model hay gọi AI Hub. Profile `fp32` là control; profile `production` không có nghĩa mọi component đều chạy NPU. Manifest v2 ghi execution target riêng cho từng component.
 
-## Read this next
+## Cài đặt
 
-If you are new to the repo, start here:
+```powershell
+python -m pip install -e ".[onnx,datasets,aihub,test]"
+python -m pytest -q
+```
 
-1. `docs/README.md`
-2. `docs/architecture/overview.md`
-3. `docs/workflows/export-verify-smoke.md`
-4. `docs/workflows/quantize-qnn-candidates.md`
-5. `docs/workflows/android-handoff.md`
+AIMET ONNX chạy trong Docker Linux đã pin dependency; xem [AI Hub → Android operations](docs/aihub-android-operations.md).
 
-## Module docs
+## Working agreement
 
-- `src/model_bundle/README.md`
-- `src/quantize/README.md`
-- `src/quantize/projects/README.md`
-- `src/verify/README.md`
-- `src/tools/README.md`
-- `test/README.md`
+Mọi thay đổi tracked phải tuân theo [AGENTS.md](AGENTS.md): thực hiện read-only discovery, tạo plan từ [template](docs/plans/TEMPLATE.md), cập nhật task trong [active plans](docs/plans/active/), đồng bộ canonical docs, rồi chuyển plan đã kiểm chứng sang [completed plans](docs/plans/completed/).
+
+## Tài liệu canonical
+
+- [Kiến trúc pipeline](docs/architecture.md)
+- [Zipformer recipe](docs/zipformer-recipe.md)
+- [VPCD recipe](docs/vpcd-recipe.md)
+- [AI Hub → Android operations](docs/aihub-android-operations.md)
+- [Retained artifact evidence](docs/evidence/retained-artifacts.json)
+
+Model adapter ưu tiên model đã materialize trong `assets/`, rồi fallback sang FP32 bundle được track ở repo `BKMeeting` cùng cấp; vì vậy clean clone của workspace hai repo vẫn resolve được source. Các fixture speech/golden nhỏ được track để test và refresh deterministic. `build/` chỉ là cache/output, không phải nguồn sự thật.

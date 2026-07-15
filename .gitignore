@@ -1,4 +1,12 @@
-assets
+/assets/*
+!/assets/speech/
+!/assets/punctuation/
+/assets/speech/*
+!/assets/speech/fixture_manifest.jsonl
+!/assets/speech/*.wav
+!/assets/speech/*.mp3
+/assets/punctuation/*
+!/assets/punctuation/default_golden_samples.jsonl
 _tmp
 __pycache__
 .idea
@@ -7,5 +15,4 @@ __pycache__
 *.egg-info
 .env
 .env.*
-!.env.example
 .pytest*

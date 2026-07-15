@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "recorded_from_existing_local_evidence": "2026-07-15",
+  "artifacts": [
+    {
+      "artifact_id": "zipformer__q-none-fp32-fp32-none__s-enc1x2009x80-dec1x2-join1x512__c-aihub-qnn-htp-encoder",
+      "source_checksums": {
+        "encoder": "b0daa9842a1f39d146e57d6e951edc8910ddd234cbb00e9b5015a5280a5ba221",
+        "decoder": "cf2aa385b82c9d5d40cd29c3188af52d0249b3b78f0d4b7eb84ad502d50c7e7f",
+        "joiner": "d861afe55f7ff43c90069cad0a5d07261a408be5c7fd2aac8c84b1f3225da021"
+      },
+      "packaged_checksums": {
+        "encoder": "61cdf62007cfab5033a27af2b60520df95de4a84a5a835b3392a53e25d422b4a",
+        "decoder": "511fa13d573d320513ede233f4c7ec37ffc7df5d0b3a73cb2fb136f553093846",
+        "joiner": "11b3d8358551f4e13eaa95499e9ebb341319acf8918baaf6af18d7998a1397e4"
+      },
+      "aihub": {"target_model_id": "mmd24d33q", "device": "Samsung Galaxy S23 (Family)", "qairt": "2.45"}
+    },
+    {
+      "artifact_id": "vpcd__q-aimet-int8-int16-encoder-matmul__s-src1x384-dec1x64__c-aihub-qnn-htp-model",
+      "source_checksums": {
+        "fp32_model": "e9b517c185501d56d0b32c9a2a35e6e736de82e12f4457e586a75e0a7adbb8b4",
+        "fixed_model": "28a4def4cd8a83a6a786427a4d0e24d39a8cee150c3c2b539ba4a2334eba2dcf",
+        "aimet_package": null
+      },
+      "packaged_checksums": {"model": "e3a317b50ed64894a3ad2ff7b76835557a883def7cae5b4abe87275d68e496aa"},
+      "aihub": {
+        "compile_job_id": "jp8w9nxop",
+        "live_run_job_id": "j5wmvklmg",
+        "target_model_id": "mnjd5v7xn",
+        "device": "Samsung Galaxy S23 (Family)",
+        "qairt": "2.45",
+        "truncate_64bit_io": true
+      },
+      "reuse_status": "blocked-until-aimet-input-package-is-rebuilt-and-checksummed"
+    }
+  ]
+}
