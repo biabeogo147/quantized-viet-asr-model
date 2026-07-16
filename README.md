@@ -1,6 +1,12 @@
-# Model Pipeline
+# quantized-viet-asr-model
 
-Repo này là nguồn sự thật duy nhất cho việc chuẩn bị, quantize, validate, compile và đóng gói Zipformer/VPCD cho BKMeeting.
+`quantized-viet-asr-model` là nguồn sự thật duy nhất cho việc chuẩn bị, quantize, validate, compile và đóng gói Zipformer/VPCD cho BKMeeting.
+
+## Bắt đầu từ đây
+
+Dev mới đọc [documentation index](docs/README.md), sau đó hoàn thành [local walkthrough](docs/getting-started.md) trước khi thay đổi model hoặc pipeline. Index cung cấp tuyến đọc chung, nhánh theo vai trò, source-code tour và tiêu chí hoàn thành onboarding.
+
+Clean clone không chứa model binary, VLSP parquet hoặc output `build/`. Team phải cấp các asset ngoài Git cùng checksum baseline; walkthrough dùng placeholder portable và giải thích đúng layout cần materialize. Sibling BKMeeting cũng không tự biến binary bị ignore thành tracked source.
 
 ## Public contract
 
@@ -10,19 +16,12 @@ RecipeSpec → source → prepare → quantize/explicit-skip → validate → co
 
 CLI công khai duy nhất:
 
-```powershell
+```bash
 python -m model_pipeline run --model zipformer --configuration ortqnn-uint8-uint16-encoder-matmul --through sync
 python -m model_pipeline run --model vpcd --configuration aimet-int8-int16-encoder-matmul --through sync
 ```
 
 Thêm `--dry-run` để xem recipe và stage mà không đọc model hay gọi AI Hub. Configuration `fp32-fixed-shape` là control local; tên configuration mô tả trực tiếp engine, precision, shape, operator scope hoặc compile target. Manifest v2 ghi execution target riêng cho từng component.
-
-## Cài đặt
-
-```powershell
-python -m pip install -e ".[onnx,runtime-gpu,datasets,aihub,test]"
-python -m pytest -q
-```
 
 `runtime-cpu` và `runtime-gpu` là hai lựa chọn loại trừ nhau; không cài đồng thời hai distribution ONNX Runtime. Pipeline pin `1.22.0` vì fixed-shape Zipformer optimizer đã được kiểm chứng ở version này, trong khi `1.26.0` lỗi khi đồng thời cố định batch và time dimensions. Chỉ ghi kết quả GPU khi profiler cho thấy node chạy trên `CUDAExecutionProvider`.
 
@@ -34,11 +33,14 @@ Mọi thay đổi tracked phải tuân theo [AGENTS.md](AGENTS.md): thực hiệ
 
 ## Tài liệu canonical
 
+- [Documentation index và learning paths](docs/README.md)
+- [Local getting started](docs/getting-started.md)
 - [Kiến trúc pipeline](docs/architecture.md)
+- [Source-code guide](docs/source-code-guide.md)
 - [Zipformer recipe](docs/zipformer-recipe.md)
 - [VPCD recipe](docs/vpcd-recipe.md)
 - [AI Hub → Android operations](docs/aihub-android-operations.md)
 - [Báo cáo VLSP 100 mẫu và compile Qualcomm HTP](docs/evidence/2026-07-15-vlsp100-quantization-compile.md)
 - [Retained artifact evidence](docs/evidence/retained-artifacts.json)
 
-Model adapter ưu tiên model đã materialize trong `assets/`, rồi fallback sang FP32 bundle được track ở repo `BKMeeting` cùng cấp; vì vậy clean clone của workspace hai repo vẫn resolve được source. Các fixture speech/golden nhỏ được track để test và refresh deterministic. `build/` chỉ là cache/output, không phải nguồn sự thật.
+Model adapter ưu tiên model đã materialize trong `assets/`, rồi fallback sang FP32 bundle đã materialize ở repo `BKMeeting` cùng cấp. Fallback là filesystem convention, không phải downloader và không bảo đảm clean clone có binary. Các fixture speech/golden nhỏ được track để test và refresh deterministic. `build/` chỉ là cache/output, không phải nguồn sự thật.

@@ -2,7 +2,7 @@
 
 ## Mission And Scope
 
-`python-model-test` owns model preparation, quantization, validation, Qualcomm AI Hub compilation, evidence, and Android bundle synchronization for Zipformer and VPCD.
+`quantized-viet-asr-model` owns model preparation, quantization, validation, Qualcomm AI Hub compilation, evidence, and Android bundle synchronization for Zipformer and VPCD.
 
 These instructions apply to the entire repository. Preserve unrelated work in a dirty worktree and never reset, discard, commit, or publish changes without explicit authorization.
 
@@ -91,7 +91,7 @@ Do not use notebook names, numbered experiment labels, chronological stage label
 
 ## Verification Discipline
 
-Use the `speech2text` Conda environment (for example, `conda run -n speech2text python`) for repository Python commands unless the task explicitly establishes another environment.
+Use the repository's configured Python environment for verification. Documentation should describe project-specific contracts and commands, not environment activation or interpreter-discovery steps.
 
 Match verification to the changed surface, then run all gates named by the active plan. Fresh command output is required before claiming success. At minimum, source changes require focused tests, full pytest, `compileall src`, and `git diff --check`; model or artifact changes also require the graph, checksum, packaging, AI Hub, and Android gates defined by the canonical operations documentation.
 
@@ -101,6 +101,11 @@ Do not infer NPU success from filenames, manifests alone, or CPU execution. Pres
 
 1. `README.md`
 2. `AGENTS.md`
-3. `docs/architecture.md`
-4. The active plan for the current task
-5. The model recipe and operations documents relevant to the task
+3. `docs/README.md`
+4. `docs/getting-started.md`
+5. `docs/architecture.md`
+6. `docs/source-code-guide.md`
+7. The active plan for the current task
+8. The model recipe and operations documents relevant to the task
+
+Complete the common foundation before following the role-specific paths in `docs/README.md`. Read BKMeeting documentation only after reaching the Android handoff boundary; do not infer Android behavior from the Python package alone.

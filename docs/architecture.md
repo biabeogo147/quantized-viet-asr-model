@@ -1,68 +1,232 @@
 # Kiến trúc Model Pipeline
 
-`src/model_pipeline/` là package công khai duy nhất.
+`quantized-viet-asr-model` biến source model và calibration data thành artifact có identity, validation và provenance rõ ràng. Package công khai duy nhất là `src/model_pipeline/`; BKMeeting chỉ tiêu thụ output sau bước package/sync.
 
-```text
-core                 specs, manifest v2, checksum, cache/resume
-models/zipformer     fixed shapes, HTP bool-mask rewrite, graph validation
-models/vpcd          calibration 384x64, AIMET INT8/INT16 policy, tokenizer/runtime
-models/aimet*        shared calibration format and model-independent Docker service
-evaluation           normalized metrics, ORT profiler attribution, JSON/JSONL evidence
-datasets             VLSP extraction, fixture selection/audio/golden refresh
-integrations/aihub   compile client, wait/download/live-run, checksum evidence
-integrations/android deterministic bundle và BKMeeting sync
-pipeline.py          điều phối bảy stage; được phép phụ thuộc mọi adapter
+## Bức tranh toàn cảnh
+
+```mermaid
+flowchart LR
+    S["FP32 model assets"]
+    D["VLSP calibration/evaluation"]
+    P["model_pipeline"]
+    M["AIMET service trong Docker"]
+    E["Local validation và evidence"]
+    H["Qualcomm AI Hub / QAIRT"]
+    C["EPContext ONNX + model.bin"]
+    B["Android bundle"]
+    A["BKMeeting trên Snapdragon"]
+
+    S --> P
+    D --> P
+    P <--> M
+    P --> E
+    P --> H
+    H --> C
+    C --> P
+    P --> B
+    B --> A
 ```
 
-Dependency boundary được khóa bằng test: `core` không import model/integration; model không import integration; integration không import model.
+Local pipeline chứng minh graph, quantization scope và output parity trước compile. AI Hub chứng minh artifact có thể compile/live-run trên Qualcomm target. Chỉ BKMeeting strict test trên thiết bị thật mới chứng minh Android runtime dùng Qualcomm Hexagon Tensor Processor (HTP) mà không fallback.
 
-AIMET service nhận duy nhất fixed-shape FP32 model, calibration directory, MatMul-only config, operator policy và output directory. Service không biết Zipformer hay VPCD; model adapter sở hữu calibration semantics và graph-scope policy. Docker image pin CPU-only Torch dependencies để không kéo CUDA runtime vào quantization service.
+## Package và dependency boundary
 
-## Artifact identity
+```mermaid
+flowchart TD
+    CLI["cli.py / runtime.py"] --> PIPE["pipeline.py"]
+    PIPE --> CORE["core"]
+    PIPE --> MODEL["models"]
+    PIPE --> INT["integrations"]
+    MODEL --> CORE
+    MODEL --> DATA["datasets"]
+    EVAL["evaluation"] --> MODEL
+    EVAL --> DATA
+    INT --> CORE
 
-Grammar:
+    CORE -. "không import" .-> MODEL
+    CORE -. "không import" .-> INT
+    MODEL -. "không import" .-> INT
+    INT -. "không import" .-> MODEL
+```
+
+| Khu vực | Sở hữu | Không sở hữu |
+|---|---|---|
+| `core` | specs, manifest v2, checksum, deterministic stage runner | model semantics, cloud SDK, Android |
+| `models` | recipe, source resolution, prepare, calibration, graph transform, quantization, local runtime | AI Hub/Android client |
+| `datasets` | VLSP streaming/selection/materialization và golden fixtures | model inference policy |
+| `evaluation` | metrics, provider attribution, JSON/JSONL reports | graph mutation hoặc cloud submission |
+| `integrations/aihub` | authentication, compile/reuse, download, hosted inference, compiled validation | model-specific calibration |
+| `integrations/android` | manifest-v2 bundle và deterministic sync | Android runtime/provider implementation |
+| `pipeline.py` | orchestration giữa mọi boundary | model-specific graph details |
+
+Boundary được khóa bằng `test/test_model_pipeline_boundaries.py`.
+
+## Public execution flow
+
+```mermaid
+sequenceDiagram
+    participant CLI
+    participant Runtime
+    participant Pipeline
+    participant Adapter
+    participant Runner as StageRunner
+    participant Hub as AI Hub
+    participant Android
+
+    CLI->>Runtime: RecipeSpec + through + paths
+    Runtime->>Pipeline: adapter, clients, build root
+    Pipeline->>Adapter: source_files()
+    Pipeline->>Runner: source
+    Pipeline->>Adapter: prepare()
+    Pipeline->>Runner: prepare
+    Pipeline->>Adapter: quantize() hoặc explicit skip
+    Pipeline->>Runner: quantize
+    Pipeline->>Adapter: validate()
+    Pipeline->>Runner: validate
+    Pipeline->>Adapter: compile_inputs()
+    Pipeline->>Hub: compile/reuse nếu recipe yêu cầu
+    Pipeline->>Runner: compile
+    Pipeline->>Adapter: bundle_components()
+    Pipeline->>Runner: package
+    Pipeline->>Android: sync nếu có destination
+    Pipeline->>Runner: sync
+```
+
+| Stage | Input chính | Output chính | Owner | Failure điển hình | Resume khi |
+|---|---|---|---|---|---|
+| `source` | recipe và filesystem | source files đã copy vào stage | adapter + pipeline | thiếu asset hoặc calibration | source checksum và recipe digest khớp |
+| `prepare` | FP32 components | fixed-shape/rewritten ONNX | model adapter/graph | shape hoặc graph rewrite sai | input/output checksum khớp |
+| `quantize` | prepared graph + calibration | AIMET package, Q/DQ ONNX hoặc explicit skip | model adapter + AIMET | calibration/policy/export lỗi | action, recipe và bytes khớp |
+| `validate` | quantized/prepared components | `validation.json` | model adapter | graph count, encoding hoặc scope sai | component checksums khớp |
+| `compile` | validated ONNX/package | `EPContext` ONNX và external context | AI Hub integration | unsupported op/dtype/target | checksum-keyed evidence còn hợp lệ |
+| `package` | validated CPU + compiled target components | manifest-v2 bundle | Android integration | thiếu component/metadata | toàn bộ input/output digest khớp |
+| `sync` | package bundle + destination identity | destination reconciliation record | Android integration | destination contract không tương thích | bundle và destination digest khớp |
+
+Mỗi stage chỉ được tạo file bên trong stage directory. `StageRunner` xóa riêng stage cache invalid trước khi chạy lại; không tin `stage-state.json` nếu output file mất hoặc checksum đổi.
+
+## Recipe, artifact và manifest lifecycle
+
+`RecipeSpec` là lựa chọn hành vi: configuration, component roles, shape, graph contract và stage actions. `RecipeSpec.digest` thay đổi khi bất kỳ field định nghĩa recipe nào thay đổi.
+
+`ArtifactSpec` là identity có thể parse/round-trip:
 
 ```text
 <model>__q-<engine>-<weight>-<activation>-<scope>__s-<shape>__c-<compiler>-<target>-<compiled-scope>
 ```
 
-Allowlist hiện có ba quantization contract:
+Ví dụ:
 
-- không quantize: `none-fp32-fp32-none`;
-- AIMET signed 8-bit weight, signed 16-bit activation, encoder MatMul: `aimet-int8-int16-encoder-matmul`;
-- ONNX Runtime QNN unsigned 8-bit weight, unsigned 16-bit activation, encoder MatMul: `ortqnn-uint8-uint16-encoder-matmul`.
+```text
+vpcd__q-aimet-int8-int16-encoder-matmul__s-src1x384-dec1x64__c-aihub-qnn-htp-model
+```
 
-Không có alias theo tên thử nghiệm hay công cụ tương tác cũ. Recipe được chọn bằng `configuration`; mỗi giá trị phải tự mô tả engine, precision, shape, operator scope hoặc execution target.
+Artifact ID mô tả model, quantization, fixed shape và compilation target; không chứa tên notebook, thử nghiệm hay đánh giá chủ quan.
 
-Các configuration công khai:
+Manifest v2 được tạo ở package stage. Mỗi component ghi:
 
-- VPCD: `fp32-fixed-shape`, `aimet-int8-int16-encoder-matmul`;
-- Zipformer: `fp32-fixed-shape`, `fp32-fixed-shape-aihub-encoder`, `ortqnn-uint8-uint16-encoder-matmul`, `aimet-int8-int16-encoder-matmul`.
+- role và filename;
+- format và precision;
+- named input shapes;
+- quantization engine/scope;
+- execution target;
+- SHA-256 checksum.
 
-## Manifest v2
+Manifest còn ghi source checksums, recipe digest, validation, runtime metadata và fixture references. Backend không được suy từ tên thư mục.
 
-Mỗi component ghi: `role`, `file`, `format`, `precision`, `input_shapes`, quantization engine/scope, `execution_target`, checksum. Manifest còn ghi source checksum, recipe digest, validation và runtime metadata. Android chọn provider từ `execution_target`, không từ tên thư mục.
+```mermaid
+flowchart LR
+    R["RecipeSpec"] --> RD["recipe digest"]
+    R --> AS["ArtifactSpec / artifact ID"]
+    SRC["source checksums"] --> ST["stage-state.json"]
+    RD --> ST
+    AS --> ST
+    ST --> VM["validation result"]
+    VM --> MF["manifest v2"]
+    SRC --> MF
+    AS --> MF
+    MF --> EV["local/cloud/Android evidence"]
+```
 
-## Cache và provenance
+## AIMET service boundary
 
-Một stage chỉ resume khi artifact ID, recipe digest, toàn bộ input digest và checksum output đều khớp. Package AIMET được hash theo danh sách `{relative path, file checksum}`, không chứa đường dẫn máy. AI Hub evidence resolve bằng checksum package đầu vào và kiểm tra lại blob đầu ra trước khi reuse.
+AIMET service nhận duy nhất:
 
-## VLSP calibration và evaluation
+- fixed-shape FP32 ONNX;
+- directory các calibration `.npz`;
+- MatMul-only config;
+- operator allow/disable policy;
+- output directory nằm trong repo mount.
 
-Dataset adapter chọn calibration từ shard VLSP đầu tiên và evaluation từ các shard còn lại. Evaluation chỉ nhận audio 2–12 giây với transcription 4–40 từ; shard, row và transcription không được trùng giữa hai partition. Manifest chỉ lưu audio path tương đối, shard, row, audio checksum và text checksum. Hai model dùng chung transcription calibration để giữ input provenance có thể so sánh.
+Service không biết Zipformer hay VPCD. Adapter sở hữu cách tạo calibration và operator policy. Với operator-name allowlist, service tắt toàn bộ tensor quantizer rồi chỉ bật quantizer gắn với node được chọn. VPCD còn bắt buộc selected activation quantizer dùng symmetric signed 16-bit range với offset `-32768` để đáp ứng HTP MatMul contract.
 
-## Local evaluation runtime
+## Zipformer data flow
 
-Zipformer local runtime tạo centered log-Mel spectrogram trực tiếp từ waveform chuẩn hóa, chạy fixed-shape encoder trên provider ONNX Runtime được cấu hình, rồi dùng decoder/joiner FP32 trên CPU. Recurrent neural network transducer greedy loop được phép emit nhiều token trên cùng encoder frame và chỉ chuyển frame sau khi gặp blank. VPCD local runtime chạy model session fixed shape, còn tokenizer và autoregressive loop luôn chạy CPU. CPU/GPU latency được tách theo run; CUDA chỉ được ghi nhận khi ONNX Runtime profiler cho thấy ít nhất một node thực sự chạy trên `CUDAExecutionProvider`. Per-sample JSONL và summary JSON được serialize deterministic dưới `build/`.
+```mermaid
+flowchart LR
+    WAV["16 kHz waveform"] --> FEAT["centered log-Mel 1×2009×80"]
+    FEAT --> ENC["encoder: 278 MatMul"]
+    ENC --> DEC["decoder FP32 CPU"]
+    DEC --> JOIN["joiner FP32 CPU"]
+    JOIN --> TXT["token IDs → transcript"]
+```
 
-VLSP selector stream parquet rows và dừng ngay khi đủ 24 calibration cùng 100 evaluation records; không giữ toàn bộ audio corpus trong RAM. ONNX Runtime CPU và GPU là hai installation surface loại trừ nhau. Version `1.22.0` được pin cho local runtime vì fixed-shape Zipformer Extended optimizer chạy đúng ở version này; `1.26.0` đã được tái hiện lỗi khi cả batch và time dimensions cùng cố định.
+Prepare freeze cả ba component. Encoder được ONNX Runtime Extended optimize với `MatMulAddFusion` tắt, symbolic shape inference và boolean-mask rewrite. AIMET configuration quantize encoder MatMul bằng signed 8-bit weight và signed 16-bit activation; decoder/joiner `Gemm` giữ FP32.
+
+Local CPU/CUDA chỉ thay provider của encoder; decoder và joiner luôn CPU. Sau AI Hub compile, Android dùng `encoder.onnx` dạng `EPContext` cùng adjacent `model.bin` trên QNN HTP, rồi tiếp tục decode bằng decoder/joiner CPU.
+
+## VPCD data flow
+
+```mermaid
+flowchart LR
+    TXT["raw transcript"] --> TOKE["tokenizer encode CPU"]
+    TOKE --> SRC["source IDs/mask 1×384"]
+    LOOP["autoregressive loop CPU"] --> DEC["decoder IDs/mask 1×64"]
+    SRC --> MODEL["VPCD ONNX"]
+    DEC --> MODEL
+    MODEL --> LOGITS["logits + encoder state"]
+    LOGITS --> LOOP
+    LOOP --> TOKD["tokenizer decode CPU"]
+    TOKD --> OUT["restored text"]
+```
+
+Graph có 265 MatMul: 96 encoder, 168 decoder và một language-model head. Chỉ 96 encoder MatMul được chọn; decoder/language-model head/non-MatMul giữ nguyên. Attention mask dùng `Cast(INT32) → Equal(0)` để tránh floating-point-to-boolean cast bị HTP từ chối.
+
+VPCD model session có thể chạy trên CPU, CUDA/mixed hoặc post-compile HTP. Tokenizer và host autoregressive loop luôn CPU. Vì mỗi decode step gọi lại model, one-step hosted top-1 parity không thay thế full Android autoregressive validation.
+
+## Phân biệt các artifact
+
+| Artifact | Dùng ở đâu | Nội dung | Có chạy local CPU/GPU? |
+|---|---|---|---|
+| FP32 prepared ONNX | control/compile input | fixed shape và graph rewrite | Có |
+| AIMET package trước compile | local parity và AI Hub input | `model.onnx`, `model.encodings`, policy/config | Có |
+| ORT-QNN Q/DQ ONNX | Zipformer local alternative | ONNX có Q/DQ | Có nếu provider hỗ trợ |
+| Post-compile package | Qualcomm deployment | ONNX wrapper có `EPContext` + adjacent `model.bin` | Không trên CPU/NVIDIA local |
+| Android bundle | BKMeeting asset delivery | post-compile target + CPU support files + manifests/fixtures | Chỉ đúng khi Android runtime contract khớp |
+
+Không copy file `quantize/aimet/model.onnx` vào Android rồi gọi đó là model NPU. Artifact deployment là cặp post-compile `.onnx + model.bin`; Zipformer cần thêm decoder/joiner/tokens, VPCD cần tokenizer/mappings và host-loop contract.
+
+## Local, cloud và device truth
+
+| Tầng | Chứng minh được | Không chứng minh được |
+|---|---|---|
+| Local CPU/CUDA | graph contract, quantization coverage, output parity, provider-attributed host latency | Qualcomm HTP execution hoặc Android packaging |
+| AI Hub compile/hosted | QAIRT chấp nhận graph, downloaded package contract, bounded HTP inference | full Android runtime, memory, startup hoặc 100-sample device quality |
+| BKMeeting physical Snapdragon | asset loading, QNN provider, strict no-fallback execution, app latency/output | model-training hoặc calibration provenance nếu manifest thiếu |
+
+Kết luận phải nêu đúng tầng evidence. Filename, manifest hoặc emulator không đủ để tuyên bố NPU success.
+
+## Dataset và evaluation
+
+VLSP selector stream parquet, chọn 24 calibration từ shard đầu và 100 evaluation từ shard sau, rồi dừng; không giữ corpus trong RAM. Evaluation lọc audio 2–12 giây và transcription 4–40 từ. Manifest chỉ lưu relative audio path, shard/row và audio/text checksum.
+
+Zipformer evaluation đo normalized character/word error rate, exact transcript parity, empty/collapse và latency. VPCD đo full-output parity, character edit distance, first-five-step top-1, early end-of-sequence/collapse và latency. CUDA chỉ được ghi nhận khi ONNX Runtime profiler thấy node thực thi trên CUDA.
+
+## Android handoff boundary
+
+`integrations/android` hiện tạo manifest v2 và copy component files đã khai báo. BKMeeting live namespace còn cần `bundle_manifest.json`, `io_contract.json` và fixtures riêng. Vì sync hiện xóa file ngoài manifest v2, không chạy trực tiếp vào live BKMeeting namespace cho đến khi bundle materializer bảo toàn đầy đủ Android contract.
+
+Sau handoff, BKMeeting sở hữu asset resolver, ONNX Runtime Android QNN options, CPU fallback, strict HTP test, app pipeline và release packaging. Xem [AI Hub → Android operations](aihub-android-operations.md).
 
 ## Development contract
 
-`AGENTS.md` là nguồn quy tắc làm việc duy nhất cho repository. Mọi thay đổi tracked phải có plan đang active trước khi implementation bắt đầu; plan ghi các phương án đã cân nhắc, quyết định, task, verification và canonical docs cần đồng bộ. Plan chỉ được chuyển sang `docs/plans/completed/` sau khi mọi gate đạt.
-
-Source change luôn đi cùng canonical-doc update ngoài plan. Function Python viết tay trong `src/model_pipeline/` và `test/` dùng Google-style English docstring để mô tả purpose, input, output/yield và exception contract.
-
-## AIMET operator boundary và Qualcomm HTP
-
-Operator-name allowlist là boundary thực thi quantization: service tắt tất cả tensor quantizer, sau đó chỉ bật quantizer gắn với node MatMul được model policy chọn. VPCD yêu cầu selected activation quantizer dùng symmetric signed 16-bit range với offset `-32768`, vì Qualcomm HTP MatMul không chấp nhận asymmetric signed 16-bit offset. Decoder và language-model head không được phép xuất hiện trong VPCD encodings.
+Mọi tracked change phải tuân theo [AGENTS.md](../AGENTS.md). Source change phải đi cùng canonical-doc update ngoài plan. Function Python viết tay trong `src/model_pipeline/` và `test/` dùng Google-style English docstring. Đọc [source-code guide](source-code-guide.md) trước khi chọn extension point.

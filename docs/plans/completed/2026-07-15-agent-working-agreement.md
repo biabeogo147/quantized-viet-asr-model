@@ -4,7 +4,7 @@
 
 **Goal:** Establish one repository working agreement, a traceable active-to-completed plan lifecycle, and complete Google-style docstrings for all handwritten Python functions.
 
-**Scope:** Only `python-model-test`; preserve the existing dirty worktree and do not modify `BKMeeting`.
+**Scope:** Only `quantized-viet-asr-model`; preserve the existing dirty worktree and do not modify `BKMeeting`.
 
 ## Options Considered
 
@@ -40,8 +40,8 @@ Plan files do not count as canonical documentation updates.
 ## Verification Gates
 
 - A non-tracked AST audit reports no missing function docstrings, argument documentation, or return/yield documentation.
-- `conda run -n speech2text python -m pytest -q` passes.
-- `conda run -n speech2text python -m compileall -q src` passes.
+- `python -m pytest -q` passes.
+- `python -m compileall -q src` passes.
 - All four `zipformer|vpcd x fp32|production` CLI dry-runs pass.
 - `git diff --check` passes and repository scans find no stale rollout names, machine-local paths, or tracked secrets.
 - README workflow links resolve and no completed plan remains in `docs/plans/active/`.

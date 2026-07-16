@@ -4,7 +4,7 @@
 
 **Goal:** Replace opaque model terminology, rebuild Zipformer and VPCD quantization from an empty Python build directory, evaluate 100 held-out VLSP records locally, compile eligible quantized artifacts, validate at most five hosted inputs per model, and publish evidence-backed Vietnamese results.
 
-**Scope:** Only `python-model-test`; delete only its `build/` directory, preserve BKMeeting and Docker caches, do not sync Android assets, and do not commit or publish changes.
+**Scope:** Only `quantized-viet-asr-model`; delete only its `build/` directory, preserve BKMeeting and Docker caches, do not sync Android assets, and do not commit or publish changes.
 
 ## Options Considered
 
@@ -37,7 +37,7 @@ Replace profile and rollout naming with explicit configuration identifiers. Mate
 
 ## Tasks
 
-- [x] Record the clean-start inventory, delete only `python-model-test/build/`, and verify the resolved target is absent.
+- [x] Record the clean-start inventory, delete only `quantized-viet-asr-model/build/`, and verify the resolved target is absent.
 - [x] Replace opaque naming and the profile API with descriptive configurations; remove the Android compatibility alias and pass focused contract tests.
 - [x] Add deterministic disjoint VLSP calibration/evaluation materialization and pass dataset tests.
 - [x] Add provider auditing, metrics, model runtimes, and deterministic evaluation reports; pass focused tests.
@@ -51,8 +51,8 @@ Replace profile and rollout naming with explicit configuration identifiers. Mate
 
 ## Verification Gates
 
-- `<speech2text-python> -m pytest -q` — all tests pass independently of order.
-- `<speech2text-python> -m compileall -q src` — exits zero.
+- `python -m pytest -q` — all tests pass independently of order.
+- `python -m compileall -q src` — exits zero.
 - CLI dry-runs for every descriptive configuration — emit canonical artifact IDs and no `--profile` support.
 - AST docstring audit — every handwritten function documents purpose, arguments, and returns or yields.
 - Naming scan — no prohibited opaque identifier remains in current source, tests, or canonical docs.
@@ -65,7 +65,7 @@ Replace profile and rollout naming with explicit configuration identifiers. Mate
 ## Progress Log
 
 - 2026-07-15: Plan created on a clean worktree before any other tracked change; implementation is running directly on the user-authorized current branch without commits.
-- 2026-07-15: Resolved the deletion target to `python-model-test/build/`, inventoried 219 readable files totaling 2,247,119,826 bytes, and deleted no BKMeeting, Gradle, or Docker cache paths. Two pytest temporary directories had restrictive Windows ACLs; after confirming the literal target, they were removed through the existing local AIMET Docker image bind mount. Host verification confirms `python-model-test/build/` is absent.
+- 2026-07-15: Resolved the deletion target to `quantized-viet-asr-model/build/`, inventoried 219 readable files totaling 2,247,119,826 bytes, and deleted no BKMeeting, Gradle, or Docker cache paths. Two pytest temporary directories had restrictive Windows ACLs; after confirming the literal target, they were removed through the existing local AIMET Docker image bind mount. Host verification confirms `quantized-viet-asr-model/build/` is absent.
 - 2026-07-15: Replaced recipe/CLI/runtime naming with explicit configurations, added ORT-QNN and AIMET Zipformer identities, removed the Android namespace compatibility module, renamed model data-flow arguments by state, and synchronized `AGENTS.md`, README, architecture, and recipe/operations docs. The prohibited-name scan returned no matches in current source, tests, or canonical docs; focused naming tests passed 18/18 and the full suite passed 41/41 using `speech2text`.
 - 2026-07-15: Added deterministic VLSP calibration/evaluation selection and materialization. Calibration comes only from the first shard; evaluation comes from later shards, applies the 2–12 second and 4–40 word filters, and enforces shard/row/transcription disjointness. The portable manifest records relative audio paths plus audio/text SHA-256 checksums. Focused dataset tests passed 4/4.
 - 2026-07-15: Added normalized transcript and VPCD parity metrics, invalid-output detection, deterministic latency/JSON/JSONL evidence, profiler-backed CPU/CUDA node attribution, a fixed-shape Zipformer RNN-T local runtime with FP32 CPU decoder/joiner, and a fixed-shape VPCD autoregressive runtime with CPU tokenizer/host loop. Focused evaluation/runtime tests passed 7/7 and the full suite passed 50/50.

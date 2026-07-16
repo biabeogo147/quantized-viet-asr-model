@@ -1,5 +1,7 @@
 # Zipformer recipe
 
+Dev mới nên hoàn thành [local walkthrough](getting-started.md#chạy-zipformer-đến-validate), rồi đọc phần Zipformer trong [source-code guide](source-code-guide.md#zipformer) trước khi chỉnh recipe, adapter, graph hoặc quantization policy.
+
 FP32 AI Hub encoder artifact:
 
 ```text
@@ -35,3 +37,5 @@ Local transcript evaluation dùng centered log-Mel spectrogram trên waveform ch
 ## Evidence 2026-07-15/16
 
 Clean rebuild xác nhận ORT-QNN đạt local quality gate nhưng AI Hub từ chối `com.microsoft::DequantizeLinear`. AIMET fallback đạt 100/100 transcript parity với FP32 trên VLSP, compile job `jp1vnn07p` thành công và hosted transcript parity đạt 5/5. Chi tiết nằm trong [báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md).
+
+Post-compile Android input không phải AIMET `model.onnx`: đó là cặp `encoder.onnx` chứa `EPContext` và adjacent `model.bin`, cộng decoder/joiner/tokens CPU. Xem [artifact taxonomy](architecture.md#phân-biệt-các-artifact) và [operations guide](aihub-android-operations.md).
