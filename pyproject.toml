@@ -14,10 +14,15 @@ dependencies = [
 [project.optional-dependencies]
 onnx = [
   "onnx>=1.17,<2",
-  "onnxruntime>=1.22,<2",
   "onnxruntime-extensions>=0.14,<1",
   "transformers>=5.3,<6",
   "sentencepiece>=0.2,<1",
+]
+runtime-cpu = [
+  "onnxruntime==1.22.0",
+]
+runtime-gpu = [
+  "onnxruntime-gpu==1.22.0",
 ]
 datasets = [
   "pyarrow>=20,<24",

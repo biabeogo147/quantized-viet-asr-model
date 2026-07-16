@@ -8,16 +8,22 @@ from typing import Mapping
 
 from model_pipeline.core import RecipeSpec, ValidationResult
 from model_pipeline.models.base import CompileInput
+from model_pipeline.models.aimet import (
+    build_matmul_only_aimet_config,
+    write_aimet_calibration_inputs,
+)
 from model_pipeline.models.onnx_tools import freeze_input_shapes
 from model_pipeline.models.vpcd.calibration import build_calibration_batches
-from model_pipeline.models.vpcd.graph import inspect_vpcd_matmuls
+from model_pipeline.models.vpcd.graph import (
+    inspect_vpcd_matmuls,
+    rewrite_encoder_attention_mask_boolean_casts_for_qnn,
+)
 from model_pipeline.models.vpcd.quantization import (
     build_encoder_matmul_policy,
-    build_matmul_only_aimet_config,
-    write_calibration_batches,
+    inspect_encoder_matmul_aimet_encodings,
 )
 from model_pipeline.models.vpcd.tokenizer import export_tokenizer
-from model_pipeline.models.vpcd.service import AimetServiceClient
+from model_pipeline.models.aimet_service import AimetServiceClient
 
 
 class VpcdAdapter:
@@ -69,10 +75,10 @@ class VpcdAdapter:
         )
 
     def source_files(self, recipe: RecipeSpec) -> Mapping[str, Path]:
-        """Resolve VPCD model, tokenizer, and production calibration sources.
+        """Resolve VPCD model, tokenizer, and optional calibration sources.
 
         Args:
-            recipe: Canonical profile selecting whether calibration is required.
+            recipe: Canonical configuration selecting whether calibration is required.
 
         Returns:
             Source roles mapped to local or tracked Android fallback files.
@@ -97,7 +103,7 @@ class VpcdAdapter:
                     "model_to_tokenizer_id_map": self.android_model_dir / "tokenizer.from_model_id_map.json",
                 }
             )
-        if recipe.profile == "production":
+        if recipe.parameters["quantize_action"] == "aimet":
             sources["calibration_text"] = self.calibration_text
         return sources
 
@@ -105,16 +111,24 @@ class VpcdAdapter:
         """Freeze model shapes and materialize CPU tokenizer/runtime artifacts.
 
         Args:
-            recipe: VPCD recipe containing the A4 shape contract.
+            recipe: VPCD recipe containing the fixed 384-by-64 shape contract.
             sources: Resolved model and tokenizer sources.
             output_dir: Stage directory for prepared artifacts.
 
         Returns:
             Fixed model, tokenizer bridges, and autoregressive-loop contract.
         """
-        model = freeze_input_shapes(
-            sources["model"], output_dir / "model.fp32.fixed.onnx", recipe.parameters["fixed_input_shapes"]
+        fixed_before_qnn_rewrite = freeze_input_shapes(
+            sources["model"],
+            output_dir / "model.fp32.fixed.before-qnn-boolean-cast-rewrite.onnx",
+            recipe.parameters["fixed_input_shapes"],
         )
+        model = output_dir / "model.fp32.fixed.onnx"
+        rewrite_encoder_attention_mask_boolean_casts_for_qnn(
+            fixed_before_qnn_rewrite,
+            model,
+        )
+        fixed_before_qnn_rewrite.unlink()
         tokenizer_dir = output_dir / "tokenizer"
         if "tokenizer_encode" in sources:
             tokenizer_dir.mkdir(parents=True, exist_ok=True)
@@ -158,15 +172,15 @@ class VpcdAdapter:
         }
 
     def quantize(self, recipe: RecipeSpec, prepared: Mapping[str, Path], output_dir: Path):
-        """Copy the FP32 control or export the canonical AIMET production package.
+        """Copy the FP32 control or export the AIMET quantized package.
 
         Args:
-            recipe: VPCD control or production recipe.
+            recipe: VPCD fixed-shape or AIMET quantized recipe.
             prepared: Fixed model and CPU support artifacts.
-            output_dir: Stage directory for candidate artifacts and evidence.
+            output_dir: Stage directory for quantized artifacts and evidence.
 
         Returns:
-            Candidate model, support artifacts, and production quantization evidence.
+            Quantized model, support artifacts, and quantization evidence.
 
         Raises:
             FileNotFoundError: If AIMET does not materialize required package files.
@@ -175,7 +189,7 @@ class VpcdAdapter:
             role: path for role, path in prepared.items() if role != "model"
         }
         copied_support = _copy_components(support, output_dir / "support")
-        if recipe.profile == "fp32":
+        if recipe.parameters["quantize_action"] == "explicit-skip":
             model = output_dir / "model.fp32.fixed.onnx"
             shutil.copyfile(prepared["model"], model)
             return {"model": model, **copied_support}
@@ -187,10 +201,22 @@ class VpcdAdapter:
             tokenizer_encode_path=prepared["tokenizer_encode"],
             tokenizer_to_model_ids_path=prepared["tokenizer_to_model_id_map"],
         )
-        calibration_manifest = write_calibration_batches(calibration, output_dir / "calibration")
+        calibration_manifest = write_aimet_calibration_inputs(
+            [batch.inputs for batch in calibration],
+            output_dir / "calibration",
+        )
         config_path = output_dir / "aimet-config.json"
         config_path.write_text(
-            json.dumps(build_matmul_only_aimet_config(), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            json.dumps(
+                build_matmul_only_aimet_config(
+                    select_operators_from_policy=True,
+                    symmetric_activations=True,
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
         )
         policy = build_encoder_matmul_policy(prepared["model"])
         policy_path = output_dir / "quantization-policy.json"
@@ -223,28 +249,44 @@ class VpcdAdapter:
             **copied_support,
         }
 
-    def validate(self, recipe: RecipeSpec, candidate: Mapping[str, Path]) -> ValidationResult:
+    def validate(self, recipe: RecipeSpec, quantized_components: Mapping[str, Path]) -> ValidationResult:
         """Validate canonical MatMul inventory and encoder-only policy coverage.
 
         Args:
             recipe: Recipe containing expected graph and quantization contracts.
-            candidate: Candidate model and production policy files.
+            quantized_components: Quantized model and policy files.
 
         Returns:
             Structured graph, policy, and CPU-host execution evidence.
         """
-        inventory = inspect_vpcd_matmuls(candidate["model"])
+        inventory = inspect_vpcd_matmuls(quantized_components["model"])
         counts = inventory.counts
         expected = recipe.parameters["matmul_contract"]
         coverage_ok = (counts["encoder"], counts["decoder"], counts["lm_head"], counts["other"]) == (
             expected["encoder"], expected["decoder"], expected["lm_head"], 0
         )
         policy_ok = True
-        if recipe.profile == "production":
-            policy = json.loads(candidate["quantization_policy"].read_text(encoding="utf-8"))
+        encoding_ok = True
+        encoding_checks: dict[str, object] = {}
+        if recipe.parameters["quantize_action"] == "aimet":
+            policy = json.loads(
+                quantized_components["quantization_policy"].read_text(encoding="utf-8")
+            )
             policy_ok = (
                 policy["coverage"] == {"quantized": 96, "total_matmul": 265}
                 and len(policy["disable_op_names"]) == 169
+                and policy["quantizer_selection"] == "operator-name-allowlist"
+                and policy["symmetric_activation_encodings"] is True
+            )
+            encoding_checks = inspect_encoder_matmul_aimet_encodings(
+                quantized_components["encodings"]
+            )
+            encoding_ok = (
+                encoding_checks["activation_count"] == 168
+                and encoding_checks["parameter_count"] == 72
+                and encoding_checks["activation_contract"] is True
+                and encoding_checks["parameter_contract"] is True
+                and not encoding_checks["non_encoder_names"]
             )
         checks = {
             "encoder_matmul": counts["encoder"],
@@ -252,51 +294,56 @@ class VpcdAdapter:
             "lm_head_matmul": counts["lm_head"],
             "graph_contract": coverage_ok,
             "encoder_matmul_policy": policy_ok,
+            "encoder_matmul_encodings": encoding_ok,
+            **{f"encoding_{name}": value for name, value in encoding_checks.items()},
             "tokenizer_execution_target": "cpu",
             "autoregressive_execution_target": "cpu",
         }
-        return ValidationResult("passed" if coverage_ok and policy_ok else "failed", checks)
+        return ValidationResult(
+            "passed" if coverage_ok and policy_ok and encoding_ok else "failed",
+            checks,
+        )
 
-    def compile_inputs(self, recipe: RecipeSpec, candidate: Mapping[str, Path]):
-        """Describe the whole VPCD package required by production compilation.
+    def compile_inputs(self, recipe: RecipeSpec, validated_components: Mapping[str, Path]):
+        """Describe the whole VPCD package required by AI Hub compilation.
 
         Args:
             recipe: Recipe containing compilation and fixed I/O contracts.
-            candidate: Validated AIMET or FP32 candidate files.
+            validated_components: Validated AIMET or FP32 files.
 
         Returns:
-            An empty control list or one package-level production compile input.
+            An empty control list or one package-level compile input.
         """
         if recipe.artifact.compilation.compiler == "none":
             return []
         return [
             CompileInput(
                 "model",
-                candidate["model"].parent,
+                validated_components["model"].parent,
                 recipe.parameters["fixed_input_shapes"],
                 True,
                 {name: "int64" for name in recipe.parameters["fixed_input_shapes"]},
             )
         ]
 
-    def bundle_components(self, recipe, candidate, compiled):
+    def bundle_components(self, recipe, validated_components, compiled_components):
         """Describe model and CPU support artifacts for manifest-v2 packaging.
 
         Args:
             recipe: Recipe accepted for adapter protocol consistency.
-            candidate: Validated local model and support files.
-            compiled: Compiled model and optional external data.
+            validated_components: Validated local model and support files.
+            compiled_components: Compiled model and optional external data.
 
         Returns:
             Component files with explicit execution targets and formats.
         """
         del recipe
-        model = compiled.get("model", candidate["model"])
+        model = compiled_components.get("model", validated_components["model"])
         result = {
             "model": (
                 model,
-                "qnn-htp" if "model" in compiled else "cpu",
-                "onnx-epcontext" if "model" in compiled else "onnx",
+                "qnn-htp" if "model" in compiled_components else "cpu",
+                "onnx-epcontext" if "model" in compiled_components else "onnx",
             )
         }
         formats = {
@@ -307,10 +354,10 @@ class VpcdAdapter:
             "autoregressive_loop": "host-runtime-contract",
         }
         for role, file_format in formats.items():
-            result[role] = (candidate[role], "cpu", file_format)
-        if "model_external_data" in compiled:
+            result[role] = (validated_components[role], "cpu", file_format)
+        if "model_external_data" in compiled_components:
             result["model_external_data"] = (
-                compiled["model_external_data"], "qnn-htp", "onnx-external-data"
+                compiled_components["model_external_data"], "qnn-htp", "onnx-external-data"
             )
         return result
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from model_pipeline.datasets import AudioSampleFixture, VlspRow
 from model_pipeline.datasets.golden import generate_audio_golden, generate_text_golden
-from model_pipeline.datasets.selection import AudioInfo, select_fixture_candidates
+from model_pipeline.datasets.selection import AudioInfo, select_fixtures
 
 
 def test_fixture_selection_applies_wip_quality_rules_deterministically() -> None:
@@ -27,7 +27,7 @@ def test_fixture_selection_applies_wip_quality_rules_deterministically() -> None
         b"good-2": AudioInfo(duration_seconds=5.0, sample_rate=16_000),
     }
 
-    selected = select_fixture_candidates(rows, selection_count=2, probe=lambda row: info[row.audio_bytes])
+    selected = select_fixtures(rows, selection_count=2, probe=lambda row: info[row.audio_bytes])
 
     assert [row.sample_id for row in selected] == ["sample-2", "sample-3"]
     assert [row.source.audio_file_name for row in selected] == ["good.wav", "good-2.wav"]

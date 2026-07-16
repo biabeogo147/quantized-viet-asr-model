@@ -13,6 +13,7 @@ _SHAPE = re.compile(r"^[a-z][a-z0-9x]*(?:-[a-z][a-z0-9x]*)*$")
 _ALLOWED_QUANTIZATION = {
     ("none", "fp32", "fp32", "none"),
     ("aimet", "int8", "int16", "encoder-matmul"),
+    ("ortqnn", "uint8", "uint16", "encoder-matmul"),
 }
 _ALLOWED_COMPILATION = {
     ("none", "cpu", "none"),
@@ -197,21 +198,27 @@ class ArtifactSpec:
 @dataclass(frozen=True)
 class RecipeSpec:
     artifact: ArtifactSpec
-    profile: str
+    configuration: str
     components: tuple[str, ...]
     parameters: Mapping[str, Any]
 
     def __post_init__(self) -> None:
-        """Validate profile and component invariants for a recipe.
+        """Validate configuration and component invariants for a recipe.
 
         Returns:
             None.
 
         Raises:
-            ValueError: If the profile is unsupported or components are invalid.
+            ValueError: If the configuration is unsupported or components are invalid.
         """
-        if self.profile not in {"fp32", "production"}:
-            raise ValueError(f"Unsupported profile: {self.profile!r}")
+        supported_configurations = {
+            "fp32-fixed-shape",
+            "fp32-fixed-shape-aihub-encoder",
+            "ortqnn-uint8-uint16-encoder-matmul",
+            "aimet-int8-int16-encoder-matmul",
+        }
+        if self.configuration not in supported_configurations:
+            raise ValueError(f"Unsupported configuration: {self.configuration!r}")
         if not self.components or len(set(self.components)) != len(self.components):
             raise ValueError("Recipe components must be non-empty and unique")
 
@@ -225,7 +232,7 @@ class RecipeSpec:
         return stable_digest(
             {
                 "artifact": self.artifact.to_dict(),
-                "profile": self.profile,
+                "configuration": self.configuration,
                 "components": list(self.components),
                 "parameters": dict(self.parameters),
             }

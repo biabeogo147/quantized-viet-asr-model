@@ -14,6 +14,7 @@ BOOLEAN_MASK_UNSQUEEZE_NODES = (
     "/encoder/2/encoder/0/self_attn_weights/Unsqueeze_15",
     "/encoder/3/encoder/0/self_attn_weights/Unsqueeze_15",
 )
+ORT_DISABLED_OPTIMIZERS = ("MatMulAddFusion",)
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,12 @@ def prepare_encoder_for_aihub(source_path: str | Path, output_path: str | Path) 
         options = ort.SessionOptions()
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
         options.optimized_model_filepath = optimized.as_posix()
-        ort.InferenceSession(source.as_posix(), sess_options=options, providers=["CPUExecutionProvider"])
+        ort.InferenceSession(
+            source.as_posix(),
+            sess_options=options,
+            providers=["CPUExecutionProvider"],
+            disabled_optimizers=list(ORT_DISABLED_OPTIMIZERS),
+        )
         inferred = SymbolicShapeInference.infer_shapes(
             onnx.load(optimized.as_posix()), auto_merge=True, guess_output_rank=True, verbose=0
         )

@@ -7,14 +7,23 @@ import pytest
 from model_pipeline.cli import main
 
 
-@pytest.mark.parametrize("model", ["zipformer", "vpcd"])
-@pytest.mark.parametrize("profile", ["fp32", "production"])
-def test_cli_dry_run_all_model_profile_combinations(model: str, profile: str, capsys) -> None:
-    """Verify every public model/profile combination supports deterministic dry-run.
+@pytest.mark.parametrize(
+    ("model", "configuration"),
+    [
+        ("zipformer", "fp32-fixed-shape"),
+        ("zipformer", "fp32-fixed-shape-aihub-encoder"),
+        ("zipformer", "ortqnn-uint8-uint16-encoder-matmul"),
+        ("zipformer", "aimet-int8-int16-encoder-matmul"),
+        ("vpcd", "fp32-fixed-shape"),
+        ("vpcd", "aimet-int8-int16-encoder-matmul"),
+    ],
+)
+def test_cli_dry_run_all_model_configurations(model: str, configuration: str, capsys) -> None:
+    """Verify every public model configuration supports deterministic dry-run.
 
     Args:
         model: Parameterized canonical model family.
-        profile: Parameterized control or production profile.
+        configuration: Parameterized descriptive model configuration.
         capsys: Pytest capture fixture for emitted JSON.
 
     Returns:
@@ -25,8 +34,8 @@ def test_cli_dry_run_all_model_profile_combinations(model: str, profile: str, ca
             "run",
             "--model",
             model,
-            "--profile",
-            profile,
+            "--configuration",
+            configuration,
             "--through",
             "sync",
             "--dry-run",
@@ -36,7 +45,7 @@ def test_cli_dry_run_all_model_profile_combinations(model: str, profile: str, ca
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["model"] == model
-    assert payload["profile"] == profile
+    assert payload["configuration"] == configuration
     assert payload["stages"] == [
         "source",
         "prepare",
@@ -47,4 +56,25 @@ def test_cli_dry_run_all_model_profile_combinations(model: str, profile: str, ca
         "sync",
     ]
     assert "artifact_id" in payload
-    assert payload["actions"]["quantize"] in {"aimet", "explicit-skip"}
+    assert payload["actions"]["quantize"] in {"aimet", "ortqnn", "explicit-skip"}
+
+
+def test_cli_rejects_removed_generic_configuration_option() -> None:
+    """Verify the removed generic option has no compatibility alias.
+
+    Returns:
+        None.
+    """
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "run",
+                "--model",
+                "vpcd",
+                "--pro" + "file",
+                "pro" + "duction",
+                "--through",
+                "validate",
+                "--dry-run",
+            ]
+        )

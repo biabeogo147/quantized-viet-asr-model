@@ -53,38 +53,38 @@ class FakeVpcdAdapter:
         return self._copy(sources, output_dir)
 
     def quantize(self, recipe, prepared, output_dir):
-        """Assert the AIMET action and copy fake candidate files.
+        """Assert the AIMET action and copy fake quantized files.
 
         Args:
-            recipe: Production recipe expected to request AIMET.
+            recipe: Quantized configuration expected to request AIMET.
             prepared: Fake prepared files by role.
             output_dir: Quantization-stage output directory.
 
         Returns:
-            Copied candidate files by role.
+            Copied quantized files by role.
         """
         assert recipe.parameters["quantize_action"] == "aimet"
         return self._copy(prepared, output_dir)
 
-    def validate(self, recipe, candidate):
-        """Return passing validation when fake candidates are present.
+    def validate(self, recipe, quantized_components):
+        """Return passing validation when fake quantized components are present.
 
         Args:
             recipe: Recipe accepted for protocol consistency.
-            candidate: Fake candidate files by role.
+            quantized_components: Fake quantized files by role.
 
         Returns:
             Structured fake validation evidence.
         """
         del recipe
-        return ValidationResult("passed", {"graph_contract": bool(candidate)})
+        return ValidationResult("passed", {"graph_contract": bool(quantized_components)})
 
-    def compile_inputs(self, recipe, candidate):
+    def compile_inputs(self, recipe, validated_components):
         """Describe one package-level fake compile input.
 
         Args:
-            recipe: Production recipe containing fixed shapes.
-            candidate: Fake candidate files by role.
+            recipe: Quantized recipe containing fixed shapes.
+            validated_components: Fake validated files by role.
 
         Returns:
             One VPCD model compile input.
@@ -92,19 +92,19 @@ class FakeVpcdAdapter:
         return [
             CompileInput(
                 role="model",
-                source_path=candidate["model"],
+                source_path=validated_components["model"],
                 input_shapes=recipe.parameters["fixed_input_shapes"],
                 truncate_64bit_io=True,
             )
         ]
 
-    def bundle_components(self, recipe, candidate, compiled):
+    def bundle_components(self, recipe, validated_components, compiled_components):
         """Describe compiled model and CPU support bundle components.
 
         Args:
             recipe: Recipe accepted for protocol consistency.
-            candidate: Fake local candidate files.
-            compiled: Fake compiled model output.
+            validated_components: Fake validated local files.
+            compiled_components: Fake compiled model output.
 
         Returns:
             Component file, target, and format tuples by role.
@@ -112,9 +112,13 @@ class FakeVpcdAdapter:
         del recipe
         result = {
             role: (path, "cpu", "json" if path.suffix == ".json" else "onnx")
-            for role, path in candidate.items()
+            for role, path in validated_components.items()
         }
-        result["model"] = (compiled["model"], "qnn-htp", "onnx-epcontext")
+        result["model"] = (
+            compiled_components["model"],
+            "qnn-htp",
+            "onnx-epcontext",
+        )
         return result
 
     @staticmethod
@@ -150,7 +154,7 @@ def test_full_pipeline_with_fake_aihub_and_deterministic_sync(tmp_path: Path) ->
     sources.mkdir()
     for name in ("model.onnx", "tokenizer.encode.onnx", "tokenizer.decode.onnx", "runtime.json"):
         (sources / name).write_bytes(name.encode())
-    recipe = get_recipe("vpcd", "production")
+    recipe = get_recipe("vpcd", "aimet-int8-int16-encoder-matmul")
     client = FakeAiHubClient(compiled_bytes=b"compiled-model")
     pipeline = ModelPipeline(
         build_root=tmp_path / "build",

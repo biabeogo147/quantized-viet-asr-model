@@ -32,7 +32,7 @@ class SelectedFixture:
     exported_sample_rate: int = 16_000
 
 
-def select_fixture_candidates(
+def select_fixtures(
     rows: Iterable[VlspRow],
     *,
     selection_count: int,
@@ -41,7 +41,7 @@ def select_fixture_candidates(
     """Select deterministic Vietnamese speech fixtures under quality bounds.
 
     Args:
-        rows: Candidate VLSP rows in stable source order.
+        rows: Eligible VLSP rows in stable source order.
         selection_count: Exact number of fixtures required.
         probe: Callback returning duration and sample-rate metadata.
 
@@ -92,7 +92,7 @@ def _has_vietnamese_marks(text: str) -> bool:
     """Detect precomposed or combining Vietnamese diacritic marks.
 
     Args:
-        text: Candidate transcription text.
+        text: Transcription text to inspect.
 
     Returns:
         `True` when the text contains a Vietnamese-specific marked character.

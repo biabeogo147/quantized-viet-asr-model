@@ -7,6 +7,7 @@ from pathlib import Path
 from model_pipeline.core import RecipeSpec, Stage
 from model_pipeline.integrations.aihub import EvidenceStore, QualcommAiHubClient
 from model_pipeline.models.vpcd.adapter import VpcdAdapter
+from model_pipeline.models.aimet_service import AimetServiceClient
 from model_pipeline.models.zipformer.adapter import ZipformerAdapter
 from model_pipeline.pipeline import ModelPipeline
 
@@ -23,7 +24,7 @@ def run_pipeline(
     """Resolve concrete adapters and execute a pipeline from CLI inputs.
 
     Args:
-        recipe: Canonical model/profile recipe.
+        recipe: Canonical model configuration.
         repo_root: Repository root used to resolve source assets.
         build_root: Absolute or repository-relative pipeline output directory.
         through: Final pipeline stage requested by the caller.
@@ -38,10 +39,20 @@ def run_pipeline(
     """
     resolved_repo = repo_root.resolve()
     resolved_build = (resolved_repo / build_root).resolve() if not build_root.is_absolute() else build_root.resolve()
+    reaches_quantization = (
+        Stage.ordered().index(Stage(through))
+        >= Stage.ordered().index(Stage.QUANTIZE)
+    )
+    aimet_service = None
+    if recipe.parameters["quantize_action"] == "aimet" and reaches_quantization:
+        aimet_service = AimetServiceClient(
+            repo_root=resolved_repo,
+            url=os.environ.get("AIMET_SERVICE_URL", "http://127.0.0.1:18080"),
+        )
     adapter = (
-        ZipformerAdapter(resolved_repo)
+        ZipformerAdapter(resolved_repo, aimet_service=aimet_service)
         if recipe.artifact.model == "zipformer"
-        else VpcdAdapter(resolved_repo)
+        else VpcdAdapter(resolved_repo, aimet_service=aimet_service)
     )
     needs_aihub = (
         recipe.artifact.compilation.compiler == "aihub"

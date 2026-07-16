@@ -11,18 +11,20 @@ RecipeSpec → source → prepare → quantize/explicit-skip → validate → co
 CLI công khai duy nhất:
 
 ```powershell
-python -m model_pipeline run --model zipformer --profile production --through sync
-python -m model_pipeline run --model vpcd --profile production --through sync
+python -m model_pipeline run --model zipformer --configuration ortqnn-uint8-uint16-encoder-matmul --through sync
+python -m model_pipeline run --model vpcd --configuration aimet-int8-int16-encoder-matmul --through sync
 ```
 
-Thêm `--dry-run` để xem recipe và stage mà không đọc model hay gọi AI Hub. Profile `fp32` là control; profile `production` không có nghĩa mọi component đều chạy NPU. Manifest v2 ghi execution target riêng cho từng component.
+Thêm `--dry-run` để xem recipe và stage mà không đọc model hay gọi AI Hub. Configuration `fp32-fixed-shape` là control local; tên configuration mô tả trực tiếp engine, precision, shape, operator scope hoặc compile target. Manifest v2 ghi execution target riêng cho từng component.
 
 ## Cài đặt
 
 ```powershell
-python -m pip install -e ".[onnx,datasets,aihub,test]"
+python -m pip install -e ".[onnx,runtime-gpu,datasets,aihub,test]"
 python -m pytest -q
 ```
+
+`runtime-cpu` và `runtime-gpu` là hai lựa chọn loại trừ nhau; không cài đồng thời hai distribution ONNX Runtime. Pipeline pin `1.22.0` vì fixed-shape Zipformer optimizer đã được kiểm chứng ở version này, trong khi `1.26.0` lỗi khi đồng thời cố định batch và time dimensions. Chỉ ghi kết quả GPU khi profiler cho thấy node chạy trên `CUDAExecutionProvider`.
 
 AIMET ONNX chạy trong Docker Linux đã pin dependency; xem [AI Hub → Android operations](docs/aihub-android-operations.md).
 
@@ -36,6 +38,7 @@ Mọi thay đổi tracked phải tuân theo [AGENTS.md](AGENTS.md): thực hiệ
 - [Zipformer recipe](docs/zipformer-recipe.md)
 - [VPCD recipe](docs/vpcd-recipe.md)
 - [AI Hub → Android operations](docs/aihub-android-operations.md)
+- [Báo cáo VLSP 100 mẫu và compile Qualcomm HTP](docs/evidence/2026-07-15-vlsp100-quantization-compile.md)
 - [Retained artifact evidence](docs/evidence/retained-artifacts.json)
 
 Model adapter ưu tiên model đã materialize trong `assets/`, rồi fallback sang FP32 bundle được track ở repo `BKMeeting` cùng cấp; vì vậy clean clone của workspace hai repo vẫn resolve được source. Các fixture speech/golden nhỏ được track để test và refresh deterministic. `build/` chỉ là cache/output, không phải nguồn sự thật.

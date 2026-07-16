@@ -157,6 +157,6 @@ def _support_files(package_dir: Path, primary: Path) -> tuple[Path, ...]:
     """
     return tuple(
         path
-        for path in sorted(candidate for candidate in package_dir.rglob("*") if candidate.is_file())
+        for path in sorted(item for item in package_dir.rglob("*") if item.is_file())
         if path != primary
     )

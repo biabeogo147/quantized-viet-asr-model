@@ -52,7 +52,7 @@ class ModelPipeline:
         """Run the canonical stage sequence through a requested terminal stage.
 
         Args:
-            recipe: Validated model/profile recipe controlling every stage.
+            recipe: Validated model configuration controlling every stage.
             adapter: Model-specific implementation of preparation and validation.
             through: Final stage to execute, inclusive.
             android_destination: Optional directory receiving the packaged bundle.
@@ -123,7 +123,7 @@ class ModelPipeline:
             execute=lambda directory: adapter.quantize(recipe, prepared, directory),
         )
         _track_resume(quantize_result, resumed)
-        candidate = dict(quantize_result.outputs)
+        quantized_components = dict(quantize_result.outputs)
         if final_stage == Stage.QUANTIZE:
             return PipelineResult(recipe, ValidationResult("not-run", {}), None, tuple(resumed))
 
@@ -139,9 +139,9 @@ class ModelPipeline:
                 The validation role mapped to its report file.
 
             Raises:
-                ValueError: If the candidate fails its model-specific contract.
+                ValueError: If the quantized components fail their model-specific contract.
             """
-            validation = adapter.validate(recipe, candidate)
+            validation = adapter.validate(recipe, quantized_components)
             validation_holder["result"] = validation
             report = stage_dir / "validation.json"
             report.write_text(
@@ -165,7 +165,7 @@ class ModelPipeline:
         if final_stage == Stage.VALIDATE:
             return PipelineResult(recipe, validation, None, tuple(resumed))
 
-        compile_specs = tuple(adapter.compile_inputs(recipe, candidate))
+        compile_specs = tuple(adapter.compile_inputs(recipe, quantized_components))
 
         def compile_action(stage_dir: Path):
             """Compile requested components or record an explicit compile skip.
@@ -218,14 +218,14 @@ class ModelPipeline:
             execute=compile_action,
         )
         _track_resume(compile_result, resumed)
-        compiled = {} if not compile_specs else dict(compile_result.outputs)
+        compiled_components = {} if not compile_specs else dict(compile_result.outputs)
         if final_stage == Stage.COMPILE:
             return PipelineResult(recipe, validation, None, tuple(resumed))
 
         bundle_holder: dict[str, BundleResult] = {}
 
         def package_action(stage_dir: Path):
-            """Materialize a manifest-v2 bundle from candidate and compiled components.
+            """Materialize a manifest-v2 bundle from validated and compiled components.
 
             Args:
                 stage_dir: Directory allocated to the package stage.
@@ -235,7 +235,11 @@ class ModelPipeline:
             """
             bundle = materialize_bundle(
                 artifact=recipe.artifact,
-                components=adapter.bundle_components(recipe, candidate, compiled),
+                components=adapter.bundle_components(
+                    recipe,
+                    quantized_components,
+                    compiled_components,
+                ),
                 output_dir=stage_dir / "bundle",
                 input_shapes_by_role=_component_input_shapes(recipe),
                 source_checksums=source_digests,

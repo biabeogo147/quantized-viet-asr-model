@@ -5,25 +5,25 @@ from model_pipeline.models.vpcd import vpcd_recipe
 from model_pipeline.models.zipformer import zipformer_recipe
 
 
-def get_recipe(model: str, profile: str) -> RecipeSpec:
-    """Resolve the canonical recipe for a supported model profile.
+def get_recipe(model: str, configuration: str) -> RecipeSpec:
+    """Resolve the canonical recipe for a supported model configuration.
 
     Args:
         model: Canonical model family name.
-        profile: Requested control or production profile.
+        configuration: Requested descriptive model configuration.
 
     Returns:
         The validated model recipe.
 
     Raises:
-        ValueError: If the model or profile is unsupported.
+        ValueError: If the model or configuration is unsupported.
     """
     factories = {"zipformer": zipformer_recipe, "vpcd": vpcd_recipe}
     try:
         factory = factories[model]
     except KeyError as exc:
         raise ValueError(f"Unsupported model: {model!r}") from exc
-    return factory(profile)
+    return factory(configuration)
 
 
 __all__ = ["get_recipe"]

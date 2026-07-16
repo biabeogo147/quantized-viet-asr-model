@@ -19,7 +19,7 @@ def build_calibration_batches(
     tokenizer_encode_path: str | Path | None = None,
     tokenizer_to_model_ids_path: str | Path | None = None,
 ) -> tuple[list[CalibrationBatch], dict[str, int]]:
-    """Generate A4 calibration prefixes from FP32 greedy decoding.
+    """Generate fixed-shape calibration prefixes from FP32 greedy decoding.
 
     Args:
         model_dir: Native tokenizer/model metadata directory when available.

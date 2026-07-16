@@ -21,7 +21,7 @@ class ModelAdapter(Protocol):
         """Resolve every source file required by a recipe.
 
         Args:
-            recipe: Canonical recipe selecting model inputs and profile.
+            recipe: Canonical recipe selecting model inputs and configuration.
 
         Returns:
             Logical source roles mapped to existing paths.
@@ -50,28 +50,32 @@ class ModelAdapter(Protocol):
             output_dir: Stage directory for quantized artifacts.
 
         Returns:
-            Candidate components and supporting quantization evidence.
+            Quantized components and supporting quantization evidence.
         """
         ...
 
-    def validate(self, recipe: RecipeSpec, candidate: Mapping[str, Path]) -> ValidationResult:
-        """Validate graph and precision contracts for a candidate.
+    def validate(self, recipe: RecipeSpec, quantized_components: Mapping[str, Path]) -> ValidationResult:
+        """Validate graph and precision contracts for quantized components.
 
         Args:
             recipe: Canonical recipe containing expected contracts.
-            candidate: Candidate component files by role.
+            quantized_components: Quantized component files by role.
 
         Returns:
             Structured pass/fail evidence.
         """
         ...
 
-    def compile_inputs(self, recipe: RecipeSpec, candidate: Mapping[str, Path]) -> Sequence[CompileInput]:
+    def compile_inputs(
+        self,
+        recipe: RecipeSpec,
+        validated_components: Mapping[str, Path],
+    ) -> Sequence[CompileInput]:
         """Describe components that require hosted compilation.
 
         Args:
             recipe: Canonical recipe controlling compilation.
-            candidate: Validated candidate component files.
+            validated_components: Validated component files.
 
         Returns:
             Zero or more compile-input contracts.
@@ -81,15 +85,15 @@ class ModelAdapter(Protocol):
     def bundle_components(
         self,
         recipe: RecipeSpec,
-        candidate: Mapping[str, Path],
-        compiled: Mapping[str, Path],
+        validated_components: Mapping[str, Path],
+        compiled_components: Mapping[str, Path],
     ) -> Mapping[str, tuple[Path, str, str]]:
         """Describe files and runtime truth to store in an Android bundle.
 
         Args:
             recipe: Canonical recipe defining component precision and targets.
-            candidate: Validated local candidate files.
-            compiled: Hosted compilation outputs and support files.
+            validated_components: Validated local component files.
+            compiled_components: Hosted compilation outputs and support files.
 
         Returns:
             Component roles mapped to file, execution target, and format tuples.

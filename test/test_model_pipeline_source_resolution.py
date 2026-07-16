@@ -37,8 +37,12 @@ def test_adapters_resolve_sources_from_sibling_android_repo_on_clean_python_clon
     calibration.parent.mkdir(parents=True)
     calibration.write_text('{"raw_text":"xin chào"}\n', encoding="utf-8")
 
-    zip_sources = ZipformerAdapter(python_repo).source_files(get_recipe("zipformer", "fp32"))
-    vpcd_sources = VpcdAdapter(python_repo).source_files(get_recipe("vpcd", "production"))
+    zip_sources = ZipformerAdapter(python_repo).source_files(
+        get_recipe("zipformer", "fp32-fixed-shape")
+    )
+    vpcd_sources = VpcdAdapter(python_repo).source_files(
+        get_recipe("vpcd", "aimet-int8-int16-encoder-matmul")
+    )
 
     assert zip_sources["encoder"] == zip_dir / "encoder.onnx"
     assert vpcd_sources["model"] == vpcd_dir / "model.mobile.onnx"
@@ -47,10 +51,15 @@ def test_adapters_resolve_sources_from_sibling_android_repo_on_clean_python_clon
 
     external = tmp_path / "model.bin"
     external.write_bytes(b"external")
-    candidate = {"encoder": zip_dir / "encoder.onnx", "decoder": zip_dir / "decoder.onnx", "joiner": zip_dir / "joiner.onnx", "tokens": zip_dir / "tokens.txt"}
+    validated_components = {
+        "encoder": zip_dir / "encoder.onnx",
+        "decoder": zip_dir / "decoder.onnx",
+        "joiner": zip_dir / "joiner.onnx",
+        "tokens": zip_dir / "tokens.txt",
+    }
     bundle = ZipformerAdapter(python_repo).bundle_components(
-        get_recipe("zipformer", "production"),
-        candidate,
+        get_recipe("zipformer", "fp32-fixed-shape-aihub-encoder"),
+        validated_components,
         {"encoder": zip_dir / "encoder.onnx", "encoder_external_data": external},
     )
     assert bundle["encoder_external_data"] == (external, "qnn-htp", "onnx-external-data")

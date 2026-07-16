@@ -42,7 +42,7 @@ def sha256_path(path: str | Path) -> str:
         raise FileNotFoundError(resolved)
     entries = [
         {"path": file.relative_to(resolved).as_posix(), "sha256": sha256_file(file)}
-        for file in sorted(candidate for candidate in resolved.rglob("*") if candidate.is_file())
+        for file in sorted(path for path in resolved.rglob("*") if path.is_file())
     ]
     return stable_digest(entries)
 

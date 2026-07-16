@@ -19,7 +19,16 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="Run the canonical model artifact pipeline")
     run.add_argument("--model", choices=("zipformer", "vpcd"), required=True)
-    run.add_argument("--profile", choices=("fp32", "production"), required=True)
+    run.add_argument(
+        "--configuration",
+        choices=(
+            "fp32-fixed-shape",
+            "fp32-fixed-shape-aihub-encoder",
+            "ortqnn-uint8-uint16-encoder-matmul",
+            "aimet-int8-int16-encoder-matmul",
+        ),
+        required=True,
+    )
     run.add_argument(
         "--through",
         choices=tuple(stage.value for stage in Stage if stage != Stage.SOURCE),
@@ -43,7 +52,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         Zero when the requested command completes successfully.
     """
     args = build_parser().parse_args(argv)
-    recipe = get_recipe(args.model, args.profile)
+    recipe = get_recipe(args.model, args.configuration)
     stages = [
         stage.value
         for stage in Stage.ordered()[: Stage.ordered().index(Stage(args.through)) + 1]
@@ -53,7 +62,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.dumps(
                 {
                     "model": args.model,
-                    "profile": args.profile,
+                    "configuration": args.configuration,
                     "artifact_id": recipe.artifact.artifact_id,
                     "stages": stages,
                     "actions": {

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
+import json
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 import numpy as np
 
 from model_pipeline.models.vpcd.graph import inspect_vpcd_matmuls
 
 
-A4_INPUT_SHAPES: dict[str, tuple[int, int]] = {
+VPCD_FIXED_INPUT_SHAPES: dict[str, tuple[int, int]] = {
     "input_ids": (1, 384),
     "attention_mask": (1, 384),
     "decoder_input_ids": (1, 64),
@@ -21,34 +21,6 @@ A4_INPUT_SHAPES: dict[str, tuple[int, int]] = {
 @dataclass(frozen=True)
 class CalibrationBatch:
     inputs: Mapping[str, np.ndarray]
-
-
-def build_matmul_only_aimet_config() -> dict[str, Any]:
-    """Build the canonical AIMET W8A16 MatMul-only configuration.
-
-    Returns:
-        AIMET configuration fields with per-channel and bias quantization disabled.
-    """
-    return {
-        "defaults": {
-            "ops": {},
-            "params": {},
-            "strict_symmetric": "False",
-            "unsigned_symmetric": "True",
-            "per_channel_quantization": "False",
-        },
-        "params": {"bias": {"is_quantized": "False"}},
-        "op_type": {
-            "MatMul": {
-                "is_input_quantized": "True",
-                "is_output_quantized": "True",
-                "params": {"weight": {"is_quantized": "True"}},
-            }
-        },
-        "supergroups": [],
-        "model_input": {"is_input_quantized": "True"},
-        "model_output": {"is_output_quantized": "True"},
-    }
 
 
 def build_encoder_matmul_policy(
@@ -85,24 +57,68 @@ def build_encoder_matmul_policy(
         "quantize_op_types": ["MatMul"],
         "quantize_op_names": list(inventory.encoder),
         "disable_op_names": list(disabled),
+        "quantizer_selection": "operator-name-allowlist",
+        "symmetric_activation_encodings": True,
         "coverage": {"quantized": len(inventory.encoder), "total_matmul": inventory.total},
     }
 
 
+def inspect_encoder_matmul_aimet_encodings(
+    encodings_path: str | Path,
+) -> dict[str, Any]:
+    """Inspect VPCD AIMET encoding precision, symmetry, and graph scope.
+
+    Args:
+        encodings_path: AIMET JSON encoding file exported with the VPCD model.
+
+    Returns:
+        Encoding counts plus activation, parameter, and encoder-only scope checks.
+    """
+    payload = json.loads(Path(encodings_path).read_text(encoding="utf-8"))
+    activations = list(payload.get("activation_encodings") or ())
+    parameters = list(payload.get("param_encodings") or ())
+    non_encoder_names = sorted(
+        str(encoding.get("name", ""))
+        for encoding in (*activations, *parameters)
+        if "/decoder/" in str(encoding.get("name", ""))
+        or ".decoder." in str(encoding.get("name", ""))
+        or "lm_head" in str(encoding.get("name", ""))
+    )
+    activation_contract = all(
+        int(encoding.get("bw", -1)) == 16
+        and str(encoding.get("dtype", "")).upper() == "INT"
+        and bool(encoding.get("is_sym"))
+        and list(encoding.get("offset") or ()) == [-32768.0]
+        for encoding in activations
+    )
+    parameter_contract = all(
+        int(encoding.get("bw", -1)) == 8
+        and str(encoding.get("dtype", "")).upper() == "INT"
+        for encoding in parameters
+    )
+    return {
+        "activation_count": len(activations),
+        "parameter_count": len(parameters),
+        "activation_contract": bool(activations) and activation_contract,
+        "parameter_contract": bool(parameters) and parameter_contract,
+        "non_encoder_names": non_encoder_names,
+    }
+
+
 def pad_calibration_batch(batch: CalibrationBatch, *, pad_token_id: int) -> CalibrationBatch:
-    """Pad one calibration prefix to the canonical A4 input shapes.
+    """Pad one calibration prefix to the fixed source and decoder shapes.
 
     Args:
         batch: Ordered source and decoder prefix arrays.
         pad_token_id: Model token ID used for sequence padding.
 
     Returns:
-        A batch whose four inputs exactly match the A4 shapes.
+        A batch whose four inputs match source length 384 and decoder length 64.
 
     Raises:
         ValueError: If input ordering, rank, batch size, or sequence length is invalid.
     """
-    expected_order = tuple(A4_INPUT_SHAPES)
+    expected_order = tuple(VPCD_FIXED_INPUT_SHAPES)
     if tuple(batch.inputs) != expected_order:
         raise ValueError(f"VPCD calibration input order must be {expected_order!r}")
     pad_values = {
@@ -114,145 +130,9 @@ def pad_calibration_batch(batch: CalibrationBatch, *, pad_token_id: int) -> Cali
     return CalibrationBatch(
         inputs={
             name: _pad_array(np.asarray(batch.inputs[name]), shape, pad_values[name])
-            for name, shape in A4_INPUT_SHAPES.items()
+            for name, shape in VPCD_FIXED_INPUT_SHAPES.items()
         }
     )
-
-
-def write_calibration_batches(
-    batches: Sequence[CalibrationBatch], output_dir: str | Path
-) -> Path:
-    """Persist ordered calibration batches and their deterministic manifest.
-
-    Args:
-        batches: Non-empty sequence of identically ordered calibration batches.
-        output_dir: Directory receiving compressed arrays and the manifest.
-
-    Returns:
-        Path to the calibration manifest.
-
-    Raises:
-        ValueError: If batches are empty or input ordering changes.
-    """
-    normalized = tuple(batches)
-    if not normalized:
-        raise ValueError("Calibration batches must not be empty")
-    output = Path(output_dir).resolve()
-    output.mkdir(parents=True, exist_ok=True)
-    input_order = tuple(normalized[0].inputs)
-    batch_files: list[str] = []
-    for index, batch in enumerate(normalized):
-        if tuple(batch.inputs) != input_order:
-            raise ValueError("Calibration input ordering changed between batches")
-        batch_path = output / f"batch-{index:05d}.npz"
-        np.savez_compressed(batch_path, **{name: np.asarray(batch.inputs[name]) for name in input_order})
-        batch_files.append(batch_path.name)
-    manifest = output / "manifest.json"
-    manifest.write_text(
-        json.dumps({"input_order": list(input_order), "batch_files": batch_files}, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return manifest
-
-
-def load_calibration_batches(calibration_dir: str | Path) -> list[dict[str, np.ndarray]]:
-    """Restore calibration arrays in manifest-defined input order.
-
-    Args:
-        calibration_dir: Directory containing `manifest.json` and batch archives.
-
-    Returns:
-        Ordered input mappings suitable for AIMET encoding computation.
-    """
-    root = Path(calibration_dir).resolve()
-    payload = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
-    input_order = tuple(payload["input_order"])
-    batches: list[dict[str, np.ndarray]] = []
-    for file_name in payload["batch_files"]:
-        with np.load(root / file_name, allow_pickle=False) as arrays:
-            batches.append({name: np.asarray(arrays[name]) for name in input_order})
-    return batches
-
-
-def quantize_with_aimet(
-    *,
-    fp32_model_path: str | Path,
-    calibration_dir: str | Path,
-    output_dir: str | Path,
-    config_path: str | Path,
-    policy: Mapping[str, Any],
-) -> dict[str, Path]:
-    """Export the single supported AIMET W8A16 encoder-MatMul package.
-
-    Args:
-        fp32_model_path: Fixed-shape FP32 VPCD model.
-        calibration_dir: Directory containing serialized calibration batches.
-        output_dir: Directory receiving the AIMET model package.
-        config_path: Canonical MatMul-only AIMET configuration.
-        policy: Encoder allowlist and non-encoder disable policy.
-
-    Returns:
-        Exported model, encodings, and optional external-data paths.
-
-    Raises:
-        ValueError: If calibration is empty or policy nodes are missing.
-    """
-    import onnx
-    from aimet_common.defs import QuantScheme
-    from aimet_onnx.quantsim import QuantizationSimModel
-
-    model_path = Path(fp32_model_path).resolve()
-    destination = Path(output_dir).resolve()
-    destination.mkdir(parents=True, exist_ok=True)
-    batches = load_calibration_batches(calibration_dir)
-    if not batches:
-        raise ValueError("AIMET calibration batches must not be empty")
-    sim = QuantizationSimModel(
-        onnx.load(model_path.as_posix()),
-        quant_scheme=QuantScheme.min_max,
-        default_param_bw=8,
-        default_activation_bw=16,
-        config_file=Path(config_path).resolve().as_posix(),
-    )
-    disabled = _disable_ops(sim, policy.get("disable_op_names", ()))
-    if disabled["missing_op_names"]:
-        raise ValueError(f"AIMET policy nodes were not found: {disabled['missing_op_names']!r}")
-    sim.compute_encodings(batches)
-    sim.export(destination.as_posix(), "model")
-    outputs = {
-        "model": destination / "model.onnx",
-        "encodings": destination / "model.encodings",
-    }
-    external_data = destination / "model.onnx.data"
-    if external_data.is_file():
-        outputs["external_data"] = external_data
-    return outputs
-
-
-def _disable_ops(sim, op_names: Sequence[str]) -> dict[str, Any]:
-    """Disable every enabled quantizer associated with selected graph operations.
-
-    Args:
-        sim: AIMET quantization simulation model.
-        op_names: Connected-graph operation names that must remain unquantized.
-
-    Returns:
-        Disabled quantizer count and any operation names not found.
-    """
-    all_ops = sim.connected_graph.get_all_ops()
-    missing: list[str] = []
-    disabled = 0
-    for name in op_names:
-        op = all_ops.get(str(name))
-        if op is None:
-            missing.append(str(name))
-            continue
-        inputs, outputs, parameters = sim.get_op_quantizers(op)
-        for quantizer in (*inputs, *outputs, *parameters.values()):
-            if quantizer is not None and bool(getattr(quantizer, "enabled", False)):
-                quantizer.enabled = False
-                disabled += 1
-    return {"disabled_quantizer_count": disabled, "missing_op_names": missing}
 
 
 def _pad_array(values: np.ndarray, target_shape: tuple[int, int], pad_value: int) -> np.ndarray:

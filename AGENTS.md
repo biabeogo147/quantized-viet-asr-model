@@ -68,20 +68,26 @@ Describe semantics, side effects, units, accepted forms, and invariants. Do not 
 Example:
 
 ```python
-def resolve_recipe(model: str, profile: str) -> RecipeSpec:
-    """Resolve the canonical pipeline recipe for a model profile.
+def resolve_recipe(model: str, configuration: str) -> RecipeSpec:
+    """Resolve the canonical pipeline recipe for a model configuration.
 
     Args:
         model: Canonical model family name.
-        profile: Requested execution profile.
+        configuration: Requested precision, shape, scope, and execution configuration.
 
     Returns:
         The validated recipe used by all pipeline stages.
 
     Raises:
-        ValueError: If the model or profile is unsupported.
+        ValueError: If the model or configuration is unsupported.
     """
 ```
+
+## Descriptive Naming Contract
+
+Public and internal identifiers must describe observable technical properties: model family, quantization engine, weight and activation precision, fixed input shape, operator scope, or execution target. Write a technical abbreviation in full on first use in prose.
+
+Do not use notebook names, numbered experiment labels, chronological stage labels, subjective quality labels, or deployment-campaign terminology as model identity. Do not preserve aliases for removed identities. Use `configuration` for recipe and command-line selection. Name intermediate values by state or role, such as `prepared_components`, `quantized_components`, `validated_components`, and `compiled_components`; name booleans by the condition they represent.
 
 ## Verification Discipline
 

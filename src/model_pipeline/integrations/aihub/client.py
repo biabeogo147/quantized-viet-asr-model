@@ -48,11 +48,24 @@ class AiHubClient(Protocol):
         """
         ...
 
+    def live_run(self, *, job_id: str, inputs: Mapping[str, list[Any]]) -> Mapping[str, Any]:
+        """Run one bounded hosted validation input against a compiled target.
+
+        Args:
+            job_id: Compile job whose target model should be executed.
+            inputs: Named single-item input batches accepted by AI Hub.
+
+        Returns:
+            Provider inference job ID and named output tensors.
+        """
+        ...
+
 
 @dataclass
 class FakeAiHubClient:
     compiled_bytes: bytes = b"fake-ep-context"
     submit_count: int = 0
+    live_run_count: int = 0
 
     def submit_compile(self, *, source_path: Path, input_shapes, options) -> str:
         """Record a fake compile submission for deterministic integration tests.
@@ -94,6 +107,24 @@ class FakeAiHubClient:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(self.compiled_bytes)
         return output_path
+
+    def live_run(self, *, job_id: str, inputs: Mapping[str, list[Any]]) -> Mapping[str, Any]:
+        """Return deterministic fake outputs for one hosted validation input.
+
+        Args:
+            job_id: Fake compile job identifier.
+            inputs: Named single-item input batches echoed as output data.
+
+        Returns:
+            Monotonic fake inference job ID and deterministic output tensors.
+        """
+        del job_id
+        self.live_run_count += 1
+        first_value = next(iter(inputs.values()))[0]
+        return {
+            "job_id": f"fake-inference-{self.live_run_count}",
+            "outputs": {"output": [first_value]},
+        }
 
 
 class QualcommAiHubClient:
@@ -182,7 +213,12 @@ class QualcommAiHubClient:
         Returns:
             Success/failure status, message, and target model ID.
         """
-        job = self._jobs[job_id]
+        job = self._jobs.get(job_id)
+        if job is None:
+            import qai_hub as hub
+
+            job = hub.get_job(job_id)
+            self._jobs[job_id] = job
         target = job.get_target_model()
         status = job.get_status()
         if target is not None:
@@ -232,11 +268,21 @@ class QualcommAiHubClient:
         """
         import qai_hub as hub
 
+        target = self._targets.get(job_id)
+        if target is None:
+            compile_job = hub.get_job(job_id)
+            target = compile_job.get_target_model()
+            if target is None:
+                raise RuntimeError(
+                    f"AI Hub compile job {job_id!r} has no executable target model"
+                )
+            self._jobs[job_id] = compile_job
+            self._targets[job_id] = target
         inference = hub.submit_inference_job(
-            model=self._targets[job_id],
+            model=target,
             device=hub.Device(self.device_name),
             inputs=dict(inputs),
-            options="--compute_unit htp",
+            options="--compute_unit npu",
             name=f"model-pipeline-live-{job_id}",
         )
         return {

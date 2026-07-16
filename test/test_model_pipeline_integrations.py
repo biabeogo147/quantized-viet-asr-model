@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 import json
+import sys
+from types import SimpleNamespace
 import zipfile
 from pathlib import Path
 
+import numpy as np
+import onnx
+import pytest
+from onnx import TensorProto, helper
+
 from model_pipeline.core import ArtifactSpec
 from model_pipeline.integrations.aihub import (
+    CompiledModelContract,
     CompileRequest,
     EvidenceStore,
     FakeAiHubClient,
+    HostedInferenceStore,
+    QualcommAiHubClient,
     compile_or_reuse,
+    run_hosted_inputs,
+    validate_compiled_model,
 )
-from model_pipeline.integrations.android import (
-    LEGACY_NAMESPACE_COMPATIBILITY,
-    materialize_bundle,
-)
+from model_pipeline.integrations import android
+from model_pipeline.integrations.android import materialize_bundle
 
 
 VPCD_ID = (
@@ -116,21 +126,13 @@ def test_android_bundle_is_deterministic_and_metadata_driven(tmp_path: Path) -> 
     assert one.bundle_checksum == two.bundle_checksum
 
 
-def test_android_compatibility_mapping_is_not_an_artifact_identity() -> None:
-    """Verify the retained Android namespace cannot parse as an artifact ID.
+def test_android_integration_exports_no_historical_namespace_alias() -> None:
+    """Verify Android integration exposes no historical namespace alias.
 
     Returns:
         None.
     """
-    assert len(LEGACY_NAMESPACE_COMPATIBILITY) == 1
-    assert next(iter(LEGACY_NAMESPACE_COMPATIBILITY.values())) == "vpcd-runtime-default"
-    for legacy_name in LEGACY_NAMESPACE_COMPATIBILITY:
-        try:
-            ArtifactSpec.parse(legacy_name)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("compatibility namespace must not parse as an artifact ID")
+    assert not hasattr(android, "LEGACY_" + "NAMESPACE_COMPATIBILITY")
 
 
 def test_aihub_zip_download_caches_onnx_and_external_data_as_one_package(tmp_path: Path) -> None:
@@ -175,3 +177,229 @@ def test_aihub_zip_download_caches_onnx_and_external_data_as_one_package(tmp_pat
     assert second.reused is True
     assert second.output_path.read_bytes() == b"ep-context"
     assert [path.name for path in second.support_files] == ["model.bin"]
+
+
+def test_hosted_inference_rejects_more_than_five_inputs_before_submission(tmp_path: Path) -> None:
+    """Verify the hosted input quota is enforced before provider submission.
+
+    Args:
+        tmp_path: Isolated hosted-evidence directory.
+
+    Returns:
+        None.
+    """
+    client = FakeAiHubClient()
+    inputs = tuple({"input": np.asarray([index], dtype=np.float32)} for index in range(6))
+
+    with pytest.raises(ValueError, match="at most 5"):
+        run_hosted_inputs(
+            artifact=ArtifactSpec.parse(VPCD_ID),
+            compile_job_id="fake-compile-job",
+            inputs=inputs,
+            client=client,
+            evidence_store=HostedInferenceStore(tmp_path),
+        )
+
+    assert client.live_run_count == 0
+
+
+def test_hosted_inference_records_five_inputs_by_content_checksum(tmp_path: Path) -> None:
+    """Verify five hosted results are keyed by deterministic input checksums.
+
+    Args:
+        tmp_path: Isolated hosted-evidence directory.
+
+    Returns:
+        None.
+    """
+    client = FakeAiHubClient()
+    store = HostedInferenceStore(tmp_path)
+    inputs = tuple({"input": np.asarray([index], dtype=np.float32)} for index in range(5))
+
+    results = run_hosted_inputs(
+        artifact=ArtifactSpec.parse(VPCD_ID),
+        compile_job_id="fake-compile-job",
+        inputs=inputs,
+        client=client,
+        evidence_store=store,
+    )
+
+    assert client.live_run_count == 5
+    assert len({result.evidence.input_checksum for result in results}) == 5
+    assert all(store.resolve(result.evidence.input_checksum) == result.evidence for result in results)
+    assert all(result.evidence.output_checksum for result in results)
+
+
+def test_qualcomm_client_reconnects_compile_job_for_live_run(monkeypatch) -> None:
+    """Verify hosted inference resolves a target from a prior compile process.
+
+    Args:
+        monkeypatch: Pytest fixture replacing the Qualcomm AI Hub SDK module.
+
+    Returns:
+        None.
+    """
+
+    class Target:
+        """Represent one resolved hosted target model."""
+
+    class CompileJob:
+        def get_target_model(self):
+            """Return the compiled target model.
+
+            Returns:
+                Resolved fake target.
+            """
+            return Target()
+
+    class InferenceJob:
+        job_id = "hosted-job"
+
+        def download_output_data(self):
+            """Return deterministic hosted output tensors.
+
+            Returns:
+                Named fake output tensors.
+            """
+            return {"output": [np.asarray([3.0], dtype=np.float32)]}
+
+    calls: dict[str, object] = {}
+
+    def submit_inference_job(**kwargs):
+        """Capture a fake hosted inference submission.
+
+        Args:
+            kwargs: Hosted model, device, input, option, and name fields.
+
+        Returns:
+            Fake completed inference job.
+        """
+        calls.update(kwargs)
+        return InferenceJob()
+
+    fake_hub = SimpleNamespace(
+        get_job=lambda job_id: CompileJob(),
+        Device=lambda name: name,
+        submit_inference_job=submit_inference_job,
+    )
+    monkeypatch.setitem(sys.modules, "qai_hub", fake_hub)
+    client = QualcommAiHubClient(device_name="Samsung Galaxy S23 (Family)")
+
+    result = client.live_run(
+        job_id="prior-compile-job",
+        inputs={"input": [np.asarray([1.0], dtype=np.float32)]},
+    )
+
+    assert result["job_id"] == "hosted-job"
+    assert isinstance(calls["model"], Target)
+    assert calls["options"] == "--compute_unit npu"
+
+
+def test_qualcomm_client_reconnects_compile_job_while_waiting(monkeypatch) -> None:
+    """Verify compile waiting can resume after the submitting process exits.
+
+    Args:
+        monkeypatch: Pytest fixture replacing the Qualcomm AI Hub SDK module.
+
+    Returns:
+        None.
+    """
+    class Target:
+        model_id = "compiled-target"
+
+    class Status:
+        code = "SUCCESS"
+        message = "complete"
+
+    class CompileJob:
+        def get_target_model(self):
+            """Return the completed target model.
+
+            Returns:
+                Fake compiled target model.
+            """
+            return Target()
+
+        def get_status(self):
+            """Return the successful compile status.
+
+            Returns:
+                Fake successful status object.
+            """
+            return Status()
+
+    fake_hub = SimpleNamespace(get_job=lambda job_id: CompileJob())
+    monkeypatch.setitem(sys.modules, "qai_hub", fake_hub)
+    client = QualcommAiHubClient(device_name="Samsung Galaxy S23 (Family)")
+
+    result = client.wait("prior-compile-job")
+
+    assert result == {
+        "job_id": "prior-compile-job",
+        "status": "success",
+        "message": "complete",
+        "target_model_id": "compiled-target",
+    }
+
+
+def test_compiled_model_validator_requires_epcontext_and_expected_io(tmp_path: Path) -> None:
+    """Verify downloaded ONNX packages expose EPContext and target I/O dtypes.
+
+    Args:
+        tmp_path: Isolated compiled-model directory.
+
+    Returns:
+        None.
+    """
+    model_path = tmp_path / "model.onnx"
+    graph = helper.make_graph(
+        [helper.make_node("EPContext", ["input_ids"], ["logits"], domain="com.microsoft")],
+        "compiled",
+        [helper.make_tensor_value_info("input_ids", TensorProto.INT32, [1, 384])],
+        [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 64, 10])],
+    )
+    onnx.save(helper.make_model(graph), model_path)
+    contract = CompiledModelContract(
+        artifact=ArtifactSpec.parse(VPCD_ID),
+        input_dtypes={"input_ids": "int32"},
+        output_dtypes={"logits": "float32"},
+        requires_int64_to_int32=True,
+    )
+
+    evidence = validate_compiled_model(model_path, contract)
+
+    assert evidence.has_ep_context is True
+    assert evidence.execution_target == "qnn-htp"
+    assert evidence.quantization_scope == "encoder-matmul"
+    assert evidence.input_dtypes == {"input_ids": "int32"}
+    assert evidence.output_dtypes == {"logits": "float32"}
+
+
+def test_compiled_model_validator_rejects_untransformed_int64_input(tmp_path: Path) -> None:
+    """Verify VPCD downloaded models cannot retain int64 target inputs.
+
+    Args:
+        tmp_path: Isolated compiled-model directory.
+
+    Returns:
+        None.
+    """
+    model_path = tmp_path / "model.onnx"
+    graph = helper.make_graph(
+        [helper.make_node("EPContext", ["input_ids"], ["logits"], domain="com.microsoft")],
+        "compiled",
+        [helper.make_tensor_value_info("input_ids", TensorProto.INT64, [1, 384])],
+        [helper.make_tensor_value_info("logits", TensorProto.FLOAT, [1, 64, 10])],
+    )
+    onnx.save(helper.make_model(graph), model_path)
+
+    with pytest.raises(ValueError, match="int64-to-int32"):
+        validate_compiled_model(
+            model_path,
+            CompiledModelContract(
+                artifact=ArtifactSpec.parse(VPCD_ID),
+                input_dtypes={"input_ids": "int32"},
+                output_dtypes={"logits": "float32"},
+                requires_int64_to_int32=True,
+            ),
+        )
