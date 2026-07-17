@@ -14,11 +14,13 @@ Clean clone không chứa model binary, VLSP parquet hoặc output `build/`. Tea
 RecipeSpec → source → prepare → quantize/explicit-skip → validate → compile → package → sync
 ```
 
-CLI công khai duy nhất:
+Các CLI công khai:
 
 ```bash
 python -m model_pipeline run --model zipformer --configuration ortqnn-uint8-uint16-encoder-matmul --through sync
 python -m model_pipeline run --model vpcd --configuration aimet-int8-int16-encoder-matmul --through sync
+python -m model_pipeline android-benchmark-payload --model zipformer --output build/android-benchmark/zipformer --dry-run
+python -m model_pipeline android-benchmark-payload --model vpcd --output build/android-benchmark/vpcd --dry-run
 ```
 
 Thêm `--dry-run` để xem recipe và stage mà không đọc model hay gọi AI Hub. Configuration `fp32-fixed-shape` là control local; tên configuration mô tả trực tiếp engine, precision, shape, operator scope hoặc compile target. Manifest v2 ghi execution target riêng cho từng component.
@@ -42,5 +44,6 @@ Mọi thay đổi tracked phải tuân theo [AGENTS.md](AGENTS.md): thực hiệ
 - [AI Hub → Android operations](docs/aihub-android-operations.md)
 - [Báo cáo VLSP 100 mẫu và compile Qualcomm HTP](docs/evidence/2026-07-15-vlsp100-quantization-compile.md)
 - [Retained artifact evidence](docs/evidence/retained-artifacts.json)
+- [QDC Appium CPU–NPU benchmark](docs/evidence/2026-07-17-qdc-appium-cpu-npu-performance.md)
 
 Model adapter ưu tiên model đã materialize trong `assets/`, rồi fallback sang FP32 bundle đã materialize ở repo `BKMeeting` cùng cấp. Fallback là filesystem convention, không phải downloader và không bảo đảm clean clone có binary. Các fixture speech/golden nhỏ được track để test và refresh deterministic. `build/` chỉ là cache/output, không phải nguồn sự thật.

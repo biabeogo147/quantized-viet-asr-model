@@ -172,6 +172,24 @@ Physical-device gate phải chứng minh:
 
 Nếu model bytes, input shape, quantization scope hoặc QAIRT target đổi, phải tạo compile/hosted/device evidence mới. Đổi manifest/path nhưng giữ bytes không tạo claim hiệu năng mới.
 
+## 8. QDC Appium model benchmark
+
+QDC Automated Job nhận một APK benchmark mỏng và một Appium ZIP theo model. Không nhúng model vào APK và không dùng Monkey Test: Appium đẩy payload vào external files, force-stop app giữa từng run, mở `BenchmarkActivity`, click một nút duy nhất, chờ trạng thái terminal rồi pull JSON vào `/qdc/logs/`.
+
+```bash
+python -m model_pipeline android-benchmark-payload \
+  --model zipformer \
+  --output build/android-benchmark/zipformer
+
+python -m model_pipeline android-benchmark-report \
+  --results-root <QDC_RESULTS_ROOT> \
+  --output build/android-benchmark/comparison
+```
+
+Pre-compile CPU có hai control riêng: FP32 fixed-shape và AIMET QDQ. Post-compile NPU luôn là cặp adjacent `EPContext ONNX + model.bin`, chạy strict QNN HTP; không thử load cặp này bằng CPU. Mỗi model phải giữ cả ba configuration trong cùng một Automated Job/device allocation. Nếu VPCD ZIP bị từ chối vì kích thước, không tách CPU và NPU sang hai handset rồi công bố speedup.
+
+Xem [QDC benchmark evidence](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md) và BKMeeting `docs/qnn/qdc-appium-model-benchmark.md`.
+
 ## Retained clean-rebuild evidence
 
 Canonical checksum-keyed records hiện tại:

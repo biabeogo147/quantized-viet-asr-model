@@ -41,3 +41,5 @@ Canonical package dùng MinMax, signed 8-bit weight, symmetric signed 16-bit act
 Encoder attention-mask condition dùng `Cast(attention_mask, INT32) → Equal(0)` để giữ ngữ nghĩa mask nhị phân mà không tạo floating-point-to-boolean Cast bị HTP từ chối. Clean rebuild đạt local full-output parity 100/100, first-five top-1 500/500, compile job `jgn71e3rp` thành công và hosted top-1 parity 5/5. Chi tiết nằm trong [báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md).
 
 Post-compile Android input là cặp `model.onnx` chứa `EPContext` và adjacent `model.bin`. Tokenizer, ID maps và autoregressive loop vẫn là CPU support components; AIMET package trước compile không phải deployment package. Xem [artifact taxonomy](architecture.md#phân-biệt-các-artifact) và [operations guide](aihub-android-operations.md).
+
+Benchmark Android xuất QDQ riêng dưới `build/` và vẫn khóa `96/168/1`; QDQ không mở rộng decoder/language-model-head coverage. Timing chỉ đo một VPCD model invocation, không gồm tokenizer hoặc autoregressive loop. Xem [QDC benchmark](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md).

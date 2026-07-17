@@ -227,6 +227,14 @@ Zipformer evaluation đo normalized character/word error rate, exact transcript 
 
 Sau handoff, BKMeeting sở hữu asset resolver, ONNX Runtime Android QNN options, CPU fallback, strict HTP test, app pipeline và release packaging. Xem [AI Hub → Android operations](aihub-android-operations.md).
 
+### Model-level benchmark boundary
+
+`benchmarks/` tạo payload chỉ dành cho đo kiểm, không thay đổi production bundle. Payload ghép ba representation có cùng provenance: FP32 fixed-shape ONNX, AIMET QDQ ONNX trước compile và `EPContext ONNX + model.bin` sau compile. QDQ được dựng lại từ đúng FP32 model, `model.encodings`, AIMET config và operator policy; strict graph gate vẫn yêu cầu Zipformer `278/278` và VPCD `96/168/1` với encoder-only encodings.
+
+BKMeeting sở hữu APK benchmark, ONNX Runtime CPU/QNN session, Appium scheduling và physical-device evidence. Mỗi model chạy ba fresh process cho mỗi representation, 10 warm-up và 100 measured inference mỗi process. Timer chỉ bao quanh `OrtSession.run`; tensor materialization, output validation và aggregation nằm ngoài vùng đo. QDC raw results quay lại `android-benchmark-report`; chúng không trở thành artifact production.
+
+CPU–NPU comparison chỉ hợp lệ khi ba run mỗi phía đầy đủ, checksum khớp, latency hữu hạn, quality contract đạt và strict QNN HTP không fallback. Zipformer timing chỉ gồm encoder; VPCD timing chỉ gồm một model invocation, không gồm autoregressive host loop.
+
 ## Development contract
 
 Mọi tracked change phải tuân theo [AGENTS.md](../AGENTS.md). Source change phải đi cùng canonical-doc update ngoài plan. Function Python viết tay trong `src/model_pipeline/` và `test/` dùng Google-style English docstring. Đọc [source-code guide](source-code-guide.md) trước khi chọn extension point.

@@ -215,3 +215,15 @@ Khi thêm model configuration hoặc thay adapter:
 8. nếu bytes/shape/scope đổi, tạo evidence AI Hub và Android mới.
 
 Nếu muốn biết lệnh chạy, quay lại [getting started](getting-started.md). Nếu muốn biết trạng thái model hiện tại, đọc [evidence report](evidence/2026-07-15-vlsp100-quantization-compile.md).
+Model-level device benchmark đi theo call chain riêng:
+
+```text
+cli.main
+→ benchmarks.runtime
+→ AIMET service QDQ export
+→ benchmarks.graph/payload
+→ BKMeeting BenchmarkActivity + Appium
+→ benchmarks.report
+```
+
+`benchmarks/` không sở hữu Android session và không được dùng để thay production manifest. Bắt đầu debug ở `test_android_benchmark.py`; chỉ sang BKMeeting sau khi payload checksum và graph contract đã xanh.

@@ -39,3 +39,5 @@ Local transcript evaluation dùng centered log-Mel spectrogram trên waveform ch
 Clean rebuild xác nhận ORT-QNN đạt local quality gate nhưng AI Hub từ chối `com.microsoft::DequantizeLinear`. AIMET fallback đạt 100/100 transcript parity với FP32 trên VLSP, compile job `jp1vnn07p` thành công và hosted transcript parity đạt 5/5. Chi tiết nằm trong [báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md).
 
 Post-compile Android input không phải AIMET `model.onnx`: đó là cặp `encoder.onnx` chứa `EPContext` và adjacent `model.bin`, cộng decoder/joiner/tokens CPU. Xem [artifact taxonomy](architecture.md#phân-biệt-các-artifact) và [operations guide](aihub-android-operations.md).
+
+Benchmark Android dùng thêm AIMET QDQ chỉ dưới `build/` để tạo CPU pre-compile control. QDQ vẫn phải phủ đúng 278 encoder MatMul và không thay production recipe. Xem [QDC benchmark](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md).

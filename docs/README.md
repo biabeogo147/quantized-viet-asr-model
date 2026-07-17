@@ -14,6 +14,7 @@
 6. [Zipformer recipe](zipformer-recipe.md) hoặc [VPCD recipe](vpcd-recipe.md) — graph và quantization contract riêng từng model.
 7. [AI Hub → Android operations](aihub-android-operations.md) — compile, hosted validation và handoff boundary.
 8. [Báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md) cùng [retained artifact record](evidence/retained-artifacts.json) — trạng thái thực nghiệm hiện tại.
+9. [QDC Appium CPU–NPU benchmark](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md) — protocol Android model-level và trạng thái chờ thiết bị.
 
 Khi công việc đi vào Android runtime, tiếp tục tại `../../BKMeeting/README.md`, `../../BKMeeting/AGENTS.md`, `../../BKMeeting/docs/architecture/overview.md` và `../../BKMeeting/docs/qnn/playbook.md`. Các path sibling này mô tả layout workspace mong đợi; chúng không biến BKMeeting thành một phần của package Python.
 
@@ -64,6 +65,7 @@ Kết thúc khi phân biệt được AIMET package trước compile, `EPContext
 | Đổi dataset/evaluation | `datasets/`, `evaluation/` | dataset/evaluation tests | architecture và evidence liên quan |
 | Đổi AI Hub compile/live-run | `integrations/aihub/` | integration tests | AI Hub → Android operations |
 | Đổi package/sync Android | `integrations/android/` | integration/flow tests | AI Hub → Android operations và BKMeeting docs tương ứng |
+| Đổi Android CPU–NPU benchmark | `benchmarks/` | `test_android_benchmark.py` | architecture, AI Hub → Android operations và QDC evidence |
 | Điều tra output sai | model runtime → adapter → graph/quantization | focused contract test, rồi local parity | model recipe và evidence nếu kết luận thay đổi |
 
 ## Tiêu chí hoàn thành onboarding
