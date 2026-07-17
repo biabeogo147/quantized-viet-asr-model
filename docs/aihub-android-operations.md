@@ -144,10 +144,11 @@ Khi bundle adapter đã đáp ứng Android contract:
 
 Canonical Android entrypoints nằm ở:
 
-- `../../BKMeeting/docs/architecture/overview.md`;
-- `../../BKMeeting/docs/architecture/runtime-config.md`;
-- `../../BKMeeting/docs/architecture/testing.md`;
-- `../../BKMeeting/docs/qnn/playbook.md`.
+- [BKMeeting documentation index](../../BKMeeting/docs/README.md);
+- [Android architecture](../../BKMeeting/docs/architecture.md);
+- [runtime configuration](../../BKMeeting/docs/runtime-configuration.md);
+- [testing](../../BKMeeting/docs/testing.md);
+- [Qualcomm NPU operations](../../BKMeeting/docs/qualcomm-npu-operations.md).
 
 Python repo không sở hữu Java asset resolver, QNN provider options, CPU fallback, app performance hay release packaging.
 
@@ -188,7 +189,7 @@ python -m model_pipeline android-benchmark-report \
 
 Pre-compile CPU có hai control riêng: FP32 fixed-shape và AIMET QDQ. Post-compile NPU luôn là cặp adjacent `EPContext ONNX + model.bin`, chạy strict QNN HTP; không thử load cặp này bằng CPU. Mỗi model phải giữ cả ba configuration trong cùng một Automated Job/device allocation. Nếu VPCD ZIP bị từ chối vì kích thước, không tách CPU và NPU sang hai handset rồi công bố speedup.
 
-Xem [QDC benchmark evidence](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md) và BKMeeting `docs/qnn/qdc-appium-model-benchmark.md`.
+Xem [QDC benchmark evidence](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md) và [BKMeeting QDC Appium benchmark](../../BKMeeting/docs/qdc-appium-benchmark.md).
 
 ## Retained clean-rebuild evidence
 
