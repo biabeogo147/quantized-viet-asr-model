@@ -62,6 +62,7 @@ This repository owns fixed-shape FP32 and AIMET QDQ preparation, fixture materia
 - 2026-07-17: Locked comparison provenance to one device, one artifact ID, one payload-manifest checksum, three distinct repetition indexes, positive finite timings, strict QNN HTP, and the model-specific quality contract. Runtime-only finite-output smoke is intentionally insufficient for a valid speedup.
 - 2026-07-17: Updated architecture, recipes, operations, source tour, README indexes, and the active evidence record. Full local source gates pass with `90 passed, 2 skipped`; the skips are asset-contract checks because the authorized clean removed ignored model assets.
 - 2026-07-17: Blocked before real payload generation: no team-provided VLSP parquet/materialized 24/100 split or exact retained AIMET encodings remain after the authorized clean. Recreating QDQ from different calibration inputs would break pre/post provenance, so no placeholder payload or speedup is being produced.
+- 2026-07-17: Committed the source checkpoint as `1d0aaaa` after a fresh `91 passed, 2 skipped`, `compileall`, both payload dry-runs, and `git diff --check`. The plan stays active because asset-dependent graph/checksum gates and real payload generation cannot run yet.
 
 ## Completion
 
