@@ -320,17 +320,19 @@ def _enable_only_allowlisted_ops(
         if op is None:
             missing.append(str(name))
             continue
-        tensor_names = {
+        connected_tensor_names = {
             product.name
             for product in (*op.inputs, *op.outputs)
             if getattr(product, "name", None)
         }
-        tensor_names.update(str(parameter_name) for parameter_name in op.parameters)
+        parameter_names = {str(parameter_name) for parameter_name in op.parameters}
+        activation_names = connected_tensor_names - parameter_names
+        tensor_names = activation_names | parameter_names
         for tensor_name in tensor_names:
             quantizer = sim.qc_quantize_op_dict.get(tensor_name)
             if quantizer is not None:
                 quantizer.enabled = True
-                if symmetric_encodings:
+                if symmetric_encodings and tensor_name in activation_names:
                     quantizer.use_symmetric_encodings = True
                 enabled_quantizers.add(quantizer)
     return {

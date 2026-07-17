@@ -36,7 +36,7 @@ Configuration `fp32-fixed-shape` dùng cùng source length 384 và decoder lengt
 
 ## Qualcomm HTP compatibility đã kiểm chứng
 
-Canonical package dùng MinMax, signed 8-bit weight, symmetric signed 16-bit activation và `per_channel=False`. Service tắt toàn bộ quantizer rồi name-allowlist đúng 96 encoder MatMul. Package có 168 activation encodings, tất cả offset `-32768`, và 72 initializer-weight encodings; decoder và language-model head không có encoding.
+Canonical package dùng MinMax, signed 8-bit weight, symmetric signed 16-bit activation và `per_channel=False`. Service tắt toàn bộ quantizer rồi name-allowlist đúng 96 encoder MatMul. Symmetry chỉ được ép trên activation quantizer; initializer-weight quantizer giữ đúng asymmetric encoding đã hiệu chỉnh. Package có 168 activation encodings, tất cả offset `-32768`, và 72 initializer-weight encodings; decoder và language-model head không có encoding.
 
 Encoder attention-mask condition dùng `Cast(attention_mask, INT32) → Equal(0)` để giữ ngữ nghĩa mask nhị phân mà không tạo floating-point-to-boolean Cast bị HTP từ chối. Clean rebuild đạt local full-output parity 100/100, first-five top-1 500/500, compile job `jgn71e3rp` thành công và hosted top-1 parity 5/5. Chi tiết nằm trong [báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md).
 

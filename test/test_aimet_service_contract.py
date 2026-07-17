@@ -350,7 +350,7 @@ def test_operator_allowlist_enables_only_selected_tensor_quantizers() -> None:
 
 
 def test_operator_allowlist_can_force_every_selected_quantizer_symmetric() -> None:
-    """Verify shared MatMul input quantizers receive symmetric encoding settings.
+    """Verify only selected activation quantizers receive symmetric settings.
 
     Returns:
         None.
@@ -378,9 +378,9 @@ def test_operator_allowlist_can_force_every_selected_quantizer_symmetric() -> No
             self.name = name
 
     class Operation:
-        inputs = [Product("shared-matmul-input")]
+        inputs = [Product("shared-matmul-input"), Product("matmul-weight")]
         outputs = [Product("matmul-output")]
-        parameters = {}
+        parameters = {"matmul-weight": object()}
 
     class ConnectedGraph:
         def get_all_ops(self):
@@ -396,6 +396,7 @@ def test_operator_allowlist_can_force_every_selected_quantizer_symmetric() -> No
         qc_quantize_op_dict = {
             "shared-matmul-input": Quantizer(),
             "matmul-output": Quantizer(),
+            "matmul-weight": Quantizer(),
             "unselected": Quantizer(),
         }
 
@@ -409,6 +410,8 @@ def test_operator_allowlist_can_force_every_selected_quantizer_symmetric() -> No
 
     assert simulation.qc_quantize_op_dict["shared-matmul-input"].use_symmetric_encodings is True
     assert simulation.qc_quantize_op_dict["matmul-output"].use_symmetric_encodings is True
+    assert simulation.qc_quantize_op_dict["matmul-weight"].enabled is True
+    assert simulation.qc_quantize_op_dict["matmul-weight"].use_symmetric_encodings is False
     assert simulation.qc_quantize_op_dict["unselected"].use_symmetric_encodings is False
 
 

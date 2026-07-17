@@ -40,9 +40,9 @@ This repository owns fixed-shape FP32 and AIMET QDQ preparation, fixture materia
 - [x] Add failing tests and implement deterministic Android payload/fixture materialization.
 - [x] Add failing tests and implement QDC result validation, statistics, and report generation.
 - [x] Add CLI tests and expose payload/report commands.
-- [ ] Rebuild both model payloads from an empty build root and pass local quality contracts.
+- [x] Rebuild both model payloads from an empty build root and pass local quality contracts.
 - [x] Synchronize canonical documentation and the BKMeeting checksum contract.
-- [ ] Run all local verification gates and commit the source checkpoint.
+- [x] Run all local verification gates and commit the source checkpoint.
 - [ ] Run physical-device smoke and both QDC Automated Jobs when access is provided.
 - [ ] Publish final evidence and close the plan only when both comparisons are valid.
 
@@ -63,6 +63,10 @@ This repository owns fixed-shape FP32 and AIMET QDQ preparation, fixture materia
 - 2026-07-17: Updated architecture, recipes, operations, source tour, README indexes, and the active evidence record. Full local source gates pass with `90 passed, 2 skipped`; the skips are asset-contract checks because the authorized clean removed ignored model assets.
 - 2026-07-17: Blocked before real payload generation: no team-provided VLSP parquet/materialized 24/100 split or exact retained AIMET encodings remain after the authorized clean. Recreating QDQ from different calibration inputs would break pre/post provenance, so no placeholder payload or speedup is being produced.
 - 2026-07-17: Committed the source checkpoint as `1d0aaaa` after a fresh `91 passed, 2 skipped`, `compileall`, both payload dry-runs, and `git diff --check`. The plan stays active because asset-dependent graph/checksum gates and real payload generation cannot run yet.
+- 2026-07-17: Retained AI Hub access was revalidated. Compile sources and targets for `jp1vnn07p` and `jgn71e3rp` were downloaded into ignored `build/qdc-benchmark/retained/`; their inner compiled ONNX checksums match `8568fdc...9415d` and `c2886b67...4cb4`. All ten hosted inference input/output datasets remain downloadable, so exact five-fixture recovery can proceed without recalibration or stale BKMeeting model bytes.
+- 2026-07-17: Pre-device review found that the Android result currently labels only finite tensors as quality evidence while the Python aggregator requires transcript/top-1 contracts. Device placement is likewise asserted from the requested provider without a validation profile. Both contracts must be corrected and test-driven before any QDC upload or device allocation.
+- 2026-07-17: Recovered exact retained AIMET sources, compiled `EPContext` targets, and ten hosted fixtures by AI Hub record ID. Strict QDQ restoration exposed and fixed an allowlist bug that incorrectly forced symmetric weight quantizers; activation symmetry remains enforced while 72 retained VPCD weight encodings remain asymmetric. Graph gates pass at Zipformer `278/278` and VPCD `96/168/1`.
+- 2026-07-17: Materialized both checksum-locked payloads. Zipformer FP32 and QDQ each achieved transcript parity `5/5`; VPCD FP32 and QDQ each achieved teacher-forced first-five top-1 parity `25/25`. Full repository gates pass with `91 passed, 2 skipped`, `compileall`, and `git diff --check`.
 
 ## Completion
 

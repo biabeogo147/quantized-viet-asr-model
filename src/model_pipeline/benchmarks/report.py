@@ -82,7 +82,7 @@ def build_comparison(model: str, runs: Sequence[Mapping[str, object]]) -> dict[s
         reasons.append("quality-gate")
     expected_quality_contract = {
         "zipformer": "zipformer-transcript-parity-5-of-5",
-        "vpcd": "vpcd-top1-25-of-25-restored-5-of-5",
+        "vpcd": "vpcd-teacher-forced-top1-25-of-25",
     }.get(model)
     if expected_quality_contract is None or not all(
         row.get("quality_contract") == expected_quality_contract for row in rows

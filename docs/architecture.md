@@ -157,7 +157,7 @@ AIMET service nhận duy nhất:
 - operator allow/disable policy;
 - output directory nằm trong repo mount.
 
-Service không biết Zipformer hay VPCD. Adapter sở hữu cách tạo calibration và operator policy. Với operator-name allowlist, service tắt toàn bộ tensor quantizer rồi chỉ bật quantizer gắn với node được chọn. VPCD còn bắt buộc selected activation quantizer dùng symmetric signed 16-bit range với offset `-32768` để đáp ứng HTP MatMul contract.
+Service không biết Zipformer hay VPCD. Adapter sở hữu cách tạo calibration và operator policy. Với operator-name allowlist, service tắt toàn bộ tensor quantizer rồi chỉ bật quantizer gắn với node được chọn. VPCD còn bắt buộc selected activation quantizer dùng symmetric signed 16-bit range với offset `-32768` để đáp ứng HTP MatMul contract; parameter quantizer không bị ép symmetry và phải giữ nguyên encoding đã hiệu chỉnh.
 
 ## Zipformer data flow
 

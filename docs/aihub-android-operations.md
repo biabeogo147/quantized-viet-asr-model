@@ -187,7 +187,7 @@ python -m model_pipeline android-benchmark-report \
   --output build/android-benchmark/comparison
 ```
 
-Pre-compile CPU có hai control riêng: FP32 fixed-shape và AIMET QDQ. Post-compile NPU luôn là cặp adjacent `EPContext ONNX + model.bin`, chạy strict QNN HTP; không thử load cặp này bằng CPU. Mỗi model phải giữ cả ba configuration trong cùng một Automated Job/device allocation. Nếu VPCD ZIP bị từ chối vì kích thước, không tách CPU và NPU sang hai handset rồi công bố speedup.
+Pre-compile CPU có hai control riêng: FP32 fixed-shape và AIMET QDQ. Post-compile NPU luôn là cặp adjacent `EPContext ONNX + model.bin`, chạy strict QNN HTP; không thử load cặp này bằng CPU. Mỗi model phải giữ cả ba configuration trong cùng một Automated Job/device allocation. Quality gate ngoài timing dùng transcript parity `5/5` cho Zipformer và teacher-forced first-five top-1 `25/25` cho VPCD; phép đo VPCD này không được gọi là full restored-output parity vì APK không chạy toàn bộ autoregressive loop. Nếu VPCD ZIP bị từ chối vì kích thước, không tách CPU và NPU sang hai handset rồi công bố speedup.
 
 Xem [QDC benchmark evidence](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md) và [BKMeeting QDC Appium benchmark](../../BKMeeting/docs/qdc-appium-benchmark.md).
 
