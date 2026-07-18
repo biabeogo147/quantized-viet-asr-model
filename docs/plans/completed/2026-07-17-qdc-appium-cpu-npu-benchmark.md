@@ -1,12 +1,12 @@
 # Qualcomm Device Cloud Appium CPU-NPU Benchmark Implementation Plan
 
-**Status:** Active
+**Status:** Completed
 
 **Goal:** Produce reproducible Android model-level CPU and Qualcomm HTP NPU benchmarks for Zipformer and VPCD on the same physical device per model.
 
 **Scope:** Add benchmark payload generation, QDQ export, result aggregation, tests, and evidence to `quantized-viet-asr-model`; coordinate with the BKMeeting Android/Appium harness. Cloud execution waits for device access. No new quantization recipe or AI Hub compile job is introduced.
 
-**Counterpart plan:** BKMeeting `docs/plans/active/2026-07-17-qdc-appium-cpu-npu-benchmark.md`.
+**Counterpart plan:** BKMeeting `docs/plans/completed/2026-07-17-qdc-appium-cpu-npu-benchmark.md`.
 
 ## Options Considered
 
@@ -43,8 +43,8 @@ This repository owns fixed-shape FP32 and AIMET QDQ preparation, fixture materia
 - [x] Rebuild both model payloads from an empty build root and pass local quality contracts.
 - [x] Synchronize canonical documentation and the BKMeeting checksum contract.
 - [x] Run all local verification gates and commit the source checkpoint.
-- [ ] Run physical-device smoke and both QDC Automated Jobs when access is provided.
-- [ ] Publish final evidence and close the plan only when both comparisons are valid.
+- [x] Run both QDC Automated Jobs; use the complete Zipformer job as smoke and measurement before submitting VPCD.
+- [x] Publish final evidence and close the plan only when both comparisons are valid.
 
 ## Verification Gates
 
@@ -67,15 +67,19 @@ This repository owns fixed-shape FP32 and AIMET QDQ preparation, fixture materia
 - 2026-07-17: Pre-device review found that the Android result currently labels only finite tensors as quality evidence while the Python aggregator requires transcript/top-1 contracts. Device placement is likewise asserted from the requested provider without a validation profile. Both contracts must be corrected and test-driven before any QDC upload or device allocation.
 - 2026-07-17: Recovered exact retained AIMET sources, compiled `EPContext` targets, and ten hosted fixtures by AI Hub record ID. Strict QDQ restoration exposed and fixed an allowlist bug that incorrectly forced symmetric weight quantizers; activation symmetry remains enforced while 72 retained VPCD weight encodings remain asymmetric. Graph gates pass at Zipformer `278/278` and VPCD `96/168/1`.
 - 2026-07-17: Materialized both checksum-locked payloads. Zipformer FP32 and QDQ each achieved transcript parity `5/5`; VPCD FP32 and QDQ each achieved teacher-forced first-five top-1 parity `25/25`. Full repository gates pass with `91 passed, 2 skipped`, `compileall`, and `git diff --check`.
+- 2026-07-18: QDC Zipformer job `704393` passed the complete nine-process Appium schedule on Snapdragon 8 Gen 2 HDK8550. Imported nine result files and three ONNX Runtime placement profiles into ignored build evidence. Aggregation is valid with 300 observations per configuration: FP32 CPU median `545.577 ms`, QDQ CPU median `669.529 ms`, and EPContext QNN HTP median `431.728 ms`; speedups are `1.264x` FP32 CPU over NPU and `1.551x` QDQ CPU over NPU. At this checkpoint VPCD job `704409` was still running, so only Zipformer values were available.
+- 2026-07-18: QDC VPCD job `704409` passed the complete nine-process schedule. Aggregation is valid with 300 observations per configuration: FP32 CPU median `2482.567 ms`, QDQ CPU median `2591.874 ms`, and EPContext QNN HTP median `625.446 ms`; speedups are `3.969x` FP32 CPU over NPU and `4.144x` QDQ CPU over NPU.
+- 2026-07-18: Verified all six NPU profile files byte-for-byte against result SHA-256, one device fingerprint within each model, Android 14/API 34, strict CPU-fallback disable, `QNNExecutionProvider`, `libQnnHtp.so`, and HTP v73 loading through CDSP. Canonical report now records complete statistics, per-run variation, artifact/job provenance, limitations, and the four failed-job diagnoses.
+- 2026-07-18: Final verification passed: `91 passed, 2 skipped`; compileall; both payload dry-runs; aggregate regenerated both comparisons with `valid=true`; AST audit passed 73 files and 375 functions; 14 canonical Markdown files resolved every local target; naming/path/secret and whitespace gates passed. The two ignored raw evidence sets contain 18 result JSON files and six checksum-matched placement profiles.
 
 ## Completion
 
 Fill this section only after every task and required gate passes.
 
-**Completion Status:** Active
+**Completion Status:** Completed on 2026-07-18.
 
-**Verification Evidence:** Pending.
+**Verification Evidence:** Zipformer QDC job `704393` and VPCD job `704409` passed. Each model has nine result files, 900 measured inferences, three checksum-verified QNN profiles, one consistent device fingerprint, model-specific quality evidence, strict CPU-fallback disable and HTP v73 execution. Fresh local gates passed with `91 passed, 2 skipped`, compileall, two dry-runs, deterministic aggregate, AST/Markdown/naming/path/secret audits and `git diff --check`.
 
-**Canonical Docs Updated:** Pending.
+**Canonical Docs Updated:** `docs/evidence/2026-07-17-qdc-appium-cpu-npu-performance.md` now owns complete device results, provenance, interpretation, failure analysis and limits. `docs/README.md` links the completed evidence. BKMeeting's QDC benchmark and Qualcomm NPU operations guides contain the Android execution summary and link back through `<QUANTIZED_MODEL_ROOT>`.
 
-**Repository Update Notes:** Pending.
+**Repository Update Notes:** Source and tests were committed at earlier checkpoints; this closure commits only canonical documentation and plan lifecycle. Generated payloads, APKs, Appium ZIPs, raw QDC logs, profiles and aggregate JSON remain ignored under `build/`. No model bytes, recipe, compile target, production bundle or deployment default changed.

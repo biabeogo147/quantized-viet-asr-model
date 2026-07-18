@@ -14,7 +14,7 @@
 6. [Zipformer recipe](zipformer-recipe.md) hoặc [VPCD recipe](vpcd-recipe.md) — graph và quantization contract riêng từng model.
 7. [AI Hub → Android operations](aihub-android-operations.md) — compile, hosted validation và handoff boundary.
 8. [Báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md) cùng [retained artifact record](evidence/retained-artifacts.json) — trạng thái thực nghiệm hiện tại.
-9. [QDC Appium CPU–NPU benchmark](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md) — protocol Android model-level và trạng thái chờ thiết bị.
+9. [QDC Appium CPU–NPU benchmark](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md) — kết quả Android model-level trên Snapdragon 8 Gen 2, gồm latency, memory, quality và strict HTP placement.
 
 Khi công việc đi vào Android runtime, tiếp tục tại [BKMeeting README](../../BKMeeting/README.md), [working agreement](../../BKMeeting/AGENTS.md), [documentation index](../../BKMeeting/docs/README.md), [architecture](../../BKMeeting/docs/architecture.md) và [Qualcomm NPU operations](../../BKMeeting/docs/qualcomm-npu-operations.md). Các path sibling này mô tả layout workspace mong đợi; chúng không biến BKMeeting thành một phần của package Python.
 
