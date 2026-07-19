@@ -81,39 +81,6 @@ class AimetServiceClient:
             timeout=7200,
         )
 
-    def export_qdq(
-        self,
-        *,
-        fp32_model_path: Path,
-        encodings_path: Path,
-        output_dir: Path,
-        config_path: Path,
-        policy_path: Path,
-    ) -> Mapping[str, Any]:
-        """Request benchmark-only QDQ export from exact AIMET encodings.
-
-        Args:
-            fp32_model_path: Fixed-shape FP32 model used to rebuild the simulation.
-            encodings_path: Exact AIMET encoding file from the canonical package.
-            output_dir: Host directory receiving the benchmark QDQ model.
-            config_path: AIMET configuration used by the canonical quantization run.
-            policy_path: Operator allowlist used by the canonical quantization run.
-
-        Returns:
-            Decoded service response describing the exported QDQ files.
-        """
-        return self._request(
-            "/export-qdq",
-            {
-                "fp32_model_path": self._container_path(fp32_model_path),
-                "encodings_path": self._container_path(encodings_path),
-                "output_dir": self._container_path(output_dir),
-                "config_path": self._container_path(config_path),
-                "policy_path": self._container_path(policy_path),
-            },
-            timeout=7200,
-        )
-
     def _container_path(self, path: Path) -> str:
         """Translate a repository-contained host path into the container mount.
 
@@ -225,73 +192,6 @@ def export_with_aimet(
     return outputs
 
 
-def export_qdq_with_aimet(
-    *,
-    fp32_model_path: str | Path,
-    encodings_path: str | Path,
-    output_dir: str | Path,
-    config_path: str | Path,
-    policy: Mapping[str, Any],
-) -> dict[str, Path]:
-    """Export benchmark QDQ from the canonical fixed model and encodings.
-
-    Args:
-        fp32_model_path: Fixed-shape FP32 ONNX model used for quantization.
-        encodings_path: Canonical AIMET encodings restored strictly.
-        output_dir: Directory receiving the QDQ model and external data.
-        config_path: Canonical AIMET quantization configuration.
-        policy: Exact operation selection policy used during calibration.
-
-    Returns:
-        QDQ model and optional external-data paths.
-
-    Raises:
-        ValueError: If policy operations are missing from the rebuilt simulation.
-    """
-    import onnx
-    from aimet_common.defs import QuantScheme
-    from aimet_onnx.quantsim import QuantizationSimModel, load_encodings_to_sim
-
-    destination = Path(output_dir).resolve()
-    destination.mkdir(parents=True, exist_ok=True)
-    sim = QuantizationSimModel(
-        onnx.load(Path(fp32_model_path).resolve().as_posix()),
-        quant_scheme=QuantScheme.min_max,
-        default_param_bw=8,
-        default_activation_bw=16,
-        config_file=Path(config_path).resolve().as_posix(),
-    )
-    if policy.get("quantizer_selection") == "operator-name-allowlist":
-        selection = _enable_only_allowlisted_ops(
-            sim,
-            policy.get("quantize_op_names", ()),
-            symmetric_encodings=bool(policy.get("symmetric_activation_encodings", False)),
-        )
-    else:
-        selection = _disable_ops(sim, policy.get("disable_op_names", ()))
-    if selection["missing_op_names"]:
-        raise ValueError(
-            f"AIMET policy nodes were not found: {selection['missing_op_names']!r}"
-        )
-    load_encodings_to_sim(
-        sim,
-        Path(encodings_path).resolve().as_posix(),
-        strict=True,
-        disable_missing_quantizers=True,
-    )
-    qdq_model = sim.to_onnx_qdq(
-        prequantize_constants=True,
-        force_activation_as="signed",
-    )
-    model_path = destination / "model.qdq.onnx"
-    onnx.save_model(qdq_model, model_path.as_posix())
-    outputs = {"model": model_path}
-    external_data = destination / "model.qdq.onnx.data"
-    if external_data.is_file():
-        outputs["external_data"] = external_data
-    return outputs
-
-
 def _enable_only_allowlisted_ops(
     sim,
     op_names: Sequence[str],
@@ -397,29 +297,20 @@ class _Handler(BaseHTTPRequestHandler):
         Returns:
             None.
         """
-        if self.path not in {"/export", "/export-qdq"}:
+        if self.path != "/export":
             self._send(404, {"error": "not-found"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length).decode())
             policy = json.loads(Path(payload["policy_path"]).read_text(encoding="utf-8"))
-            if self.path == "/export-qdq":
-                outputs = export_qdq_with_aimet(
-                    fp32_model_path=payload["fp32_model_path"],
-                    encodings_path=payload["encodings_path"],
-                    output_dir=payload["output_dir"],
-                    config_path=payload["config_path"],
-                    policy=policy,
-                )
-            else:
-                outputs = export_with_aimet(
-                    fp32_model_path=payload["fp32_model_path"],
-                    calibration_dir=payload["calibration_dir"],
-                    output_dir=payload["output_dir"],
-                    config_path=payload["config_path"],
-                    policy=policy,
-                )
+            outputs = export_with_aimet(
+                fp32_model_path=payload["fp32_model_path"],
+                calibration_dir=payload["calibration_dir"],
+                output_dir=payload["output_dir"],
+                config_path=payload["config_path"],
+                policy=policy,
+            )
             self._send(200, {"outputs": {name: path.name for name, path in outputs.items()}})
         except Exception as exc:  # noqa: BLE001
             self._send(500, {"error": str(exc), "type": type(exc).__name__})

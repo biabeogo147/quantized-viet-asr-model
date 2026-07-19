@@ -165,12 +165,12 @@ Tests: `test_model_pipeline_integrations.py`, dùng fake client trước khi g�
 
 ## Android integration boundary
 
-`integrations/android/bundle.py` copy component và tạo manifest v2. `sync.py` reconcile đúng danh sách file trong manifest đó. Hiện sync không sở hữu toàn bộ BKMeeting live-bundle contract; xem cảnh báo trong [operations guide](aihub-android-operations.md).
+`integrations/android/repository.py` định nghĩa bốn artifact canonical và atomic model-repository materialization. `repository_runtime.py` resolve prepared/compiled/support bytes, fixtures và runtime metadata theo checksum.
 
 Phía BKMeeting chịu trách nhiệm:
 
-- asset pack và resolver;
-- `bundle_manifest.json`/`io_contract.json`;
+- Gradle surface filtering và asset pack;
+- manifest-v2-only resolver;
 - ONNX Runtime Android QNN provider;
 - CPU fallback hoặc strict HTP;
 - app end-to-end tests và physical-device evidence.
@@ -188,7 +188,7 @@ request/configuration
 → validation.json
 → compile record + downloaded contract
 → hosted output
-→ Android bundle
+→ canonical model repository
 → Android provider diagnostics
 ```
 
@@ -219,11 +219,10 @@ Model-level device benchmark đi theo call chain riêng:
 
 ```text
 cli.main
-→ benchmarks.runtime
-→ AIMET service QDQ export
-→ benchmarks.graph/payload
-→ BKMeeting BenchmarkActivity + Appium
+→ android-model-repository materialization
+→ BKMeeting model-specific repository filter
+→ BenchmarkActivity + Appium
 → benchmarks.report
 ```
 
-`benchmarks/` không sở hữu Android session và không được dùng để thay production manifest. Bắt đầu debug ở `test_android_benchmark.py`; chỉ sang BKMeeting sau khi payload checksum và graph contract đã xanh.
+`benchmarks/` chỉ sở hữu result schema/statistics, không sở hữu model export hoặc Android session. Bắt đầu debug ở repository checksum/manifest, sau đó sang BKMeeting Appium/session boundary.

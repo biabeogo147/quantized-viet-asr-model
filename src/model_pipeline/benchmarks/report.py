@@ -12,7 +12,6 @@ from model_pipeline.benchmarks.contracts import (
     BENCHMARK_CONFIGURATIONS,
     FP32_CPU_CONFIGURATION,
     NPU_CONFIGURATION,
-    QDQ_CPU_CONFIGURATION,
 )
 
 
@@ -44,7 +43,7 @@ def calculate_statistics(values: Sequence[float]) -> dict[str, float]:
 
 
 def build_comparison(model: str, runs: Sequence[Mapping[str, object]]) -> dict[str, object]:
-    """Validate nine device runs and aggregate comparable CPU/NPU metrics.
+    """Validate six device runs and aggregate comparable CPU/NPU metrics.
 
     Args:
         model: Canonical model family represented by the results.
@@ -56,7 +55,7 @@ def build_comparison(model: str, runs: Sequence[Mapping[str, object]]) -> dict[s
     rows = [dict(run) for run in runs]
     reasons: list[str] = []
     counts = Counter(str(row.get("configuration")) for row in rows)
-    if len(rows) != 9 or any(counts[name] != 3 for name in BENCHMARK_CONFIGURATIONS):
+    if len(rows) != 6 or any(counts[name] != 3 for name in BENCHMARK_CONFIGURATIONS):
         reasons.append("three-complete-runs")
     if any(
         {
@@ -145,12 +144,9 @@ def build_comparison(model: str, runs: Sequence[Mapping[str, object]]) -> dict[s
             ),
         }
     npu_median = summaries[NPU_CONFIGURATION]["median_ms"]
-    qdq_median = summaries[QDQ_CPU_CONFIGURATION]["median_ms"]
     fp32_median = summaries[FP32_CPU_CONFIGURATION]["median_ms"]
     result["configurations"] = summaries
     result["speedups"] = {
         "fp32_cpu_over_npu": fp32_median / npu_median,
-        "qdq_cpu_over_npu": qdq_median / npu_median,
-        "fp32_cpu_over_qdq_cpu": fp32_median / qdq_median,
     }
     return result

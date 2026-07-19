@@ -45,21 +45,21 @@ class VpcdAdapter:
         """
         self.repo_root = Path(repo_root).resolve()
         self.model_dir = self.repo_root / "assets" / "vietnamese-punc-cap-denorm-v1"
-        self.android_model_dir = (
+        self.android_model_repository = (
             self.repo_root.parent
             / "BKMeeting"
             / "modelassets"
             / "src"
             / "main"
             / "assets"
-            / "models"
-            / "punctuation"
-            / "vpcd"
-            / "fp32"
+            / "model-repository"
         )
         local_fp32_model = self.model_dir / "onnx" / "model.fp32.onnx"
         self.fp32_model = (
-            local_fp32_model if local_fp32_model.is_file() else self.android_model_dir / "model.mobile.onnx"
+            local_fp32_model
+            if local_fp32_model.is_file()
+            else self.android_model_repository
+            / "artifacts/vpcd/fp32-fixed-shape/cpu/model.onnx"
         )
         default_calibration = self.repo_root / "build" / "calibration" / "vlsp2020" / "transcriptions.txt"
         if not default_calibration.is_file():
@@ -97,10 +97,14 @@ class VpcdAdapter:
         else:
             sources.update(
                 {
-                    "tokenizer_encode": self.android_model_dir / "tokenizer.encode.onnx",
-                    "tokenizer_decode": self.android_model_dir / "tokenizer.decode.onnx",
-                    "tokenizer_to_model_id_map": self.android_model_dir / "tokenizer.to_model_id_map.json",
-                    "model_to_tokenizer_id_map": self.android_model_dir / "tokenizer.from_model_id_map.json",
+                    "tokenizer_encode": self.android_model_repository
+                    / "artifacts/vpcd/shared-fp32-cpu/tokenizer.encode.onnx",
+                    "tokenizer_decode": self.android_model_repository
+                    / "artifacts/vpcd/shared-fp32-cpu/tokenizer.decode.onnx",
+                    "tokenizer_to_model_id_map": self.android_model_repository
+                    / "artifacts/vpcd/shared-fp32-cpu/tokenizer.to_model_id_map.json",
+                    "model_to_tokenizer_id_map": self.android_model_repository
+                    / "artifacts/vpcd/shared-fp32-cpu/tokenizer.from_model_id_map.json",
                 }
             )
         if recipe.parameters["quantize_action"] == "aimet":

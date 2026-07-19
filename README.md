@@ -19,8 +19,7 @@ Các CLI công khai:
 ```bash
 python -m model_pipeline run --model zipformer --configuration ortqnn-uint8-uint16-encoder-matmul --through sync
 python -m model_pipeline run --model vpcd --configuration aimet-int8-int16-encoder-matmul --through sync
-python -m model_pipeline android-benchmark-payload --model zipformer --output build/android-benchmark/zipformer --dry-run
-python -m model_pipeline android-benchmark-payload --model vpcd --output build/android-benchmark/vpcd --dry-run
+python -m model_pipeline android-model-repository --build-root build/android-integration --destination <BKMEETING_ROOT>/modelassets/src/main/assets/model-repository --dry-run
 ```
 
 Thêm `--dry-run` để xem recipe và stage mà không đọc model hay gọi AI Hub. Configuration `fp32-fixed-shape` là control local; tên configuration mô tả trực tiếp engine, precision, shape, operator scope hoặc compile target. Manifest v2 ghi execution target riêng cho từng component.

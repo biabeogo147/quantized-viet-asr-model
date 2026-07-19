@@ -50,17 +50,14 @@ class ZipformerAdapter:
         """
         self.repo_root = Path(repo_root).resolve()
         self.model_dir = self.repo_root / "assets" / "zipformer"
-        self.android_model_dir = (
+        self.android_model_repository = (
             self.repo_root.parent
             / "BKMeeting"
             / "modelassets"
             / "src"
             / "main"
             / "assets"
-            / "models"
-            / "asr"
-            / "zipformer"
-            / "fp32"
+            / "model-repository"
         )
         self.calibration_inputs = calibration_inputs
         self.aimet_service = aimet_service
@@ -93,10 +90,14 @@ class ZipformerAdapter:
             local
             if all(path.is_file() for path in local.values())
             else {
-                "encoder": self.android_model_dir / "encoder.onnx",
-                "decoder": self.android_model_dir / "decoder.onnx",
-                "joiner": self.android_model_dir / "joiner.onnx",
-                "tokens": self.android_model_dir / "tokens.txt",
+                "encoder": self.android_model_repository
+                / "artifacts/zipformer/fp32-fixed-shape/cpu/encoder.onnx",
+                "decoder": self.android_model_repository
+                / "artifacts/zipformer/shared-fp32-cpu/decoder.onnx",
+                "joiner": self.android_model_repository
+                / "artifacts/zipformer/shared-fp32-cpu/joiner.onnx",
+                "tokens": self.android_model_repository
+                / "artifacts/zipformer/shared-fp32-cpu/tokens.txt",
             }
         )
         if recipe.parameters["quantize_action"] != "explicit-skip" and self.calibration_inputs is None:

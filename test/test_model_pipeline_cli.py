@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from model_pipeline.cli import main
+from model_pipeline.cli import build_parser, main
 
 
 @pytest.mark.parametrize(
@@ -80,35 +80,35 @@ def test_cli_rejects_removed_generic_configuration_option() -> None:
         )
 
 
-@pytest.mark.parametrize("model", ["zipformer", "vpcd"])
-def test_android_benchmark_payload_dry_run_is_portable(model: str, capsys) -> None:
-    """Verify benchmark payload dry-run resolves contracts without filesystem writes.
+def test_android_model_repository_dry_run_lists_four_canonical_artifacts(
+    tmp_path,
+    capsys,
+) -> None:
+    """Verify repository dry-run reports identity without writing files.
 
     Args:
-        model: Canonical model family under test.
+        tmp_path: Isolated build and destination paths.
         capsys: Pytest capture fixture for emitted JSON.
 
     Returns:
         None.
     """
+    destination = tmp_path / "model-repository"
     exit_code = main(
         [
-            "android-benchmark-payload",
-            "--model",
-            model,
-            "--output",
-            "build/android-benchmark/" + model,
+            "android-model-repository",
+            "--build-root",
+            str(tmp_path / "build"),
+            "--destination",
+            str(destination),
             "--dry-run",
         ]
     )
 
-    payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert payload["model"] == model
-    assert payload["configurations"] == [
-        "fp32-fixed-shape-onnxruntime-cpu",
-        "aimet-int8-int16-encoder-matmul-onnxruntime-cpu",
-        "aimet-int8-int16-encoder-matmul-aihub-qnn-htp",
-    ]
+    payload = json.loads(capsys.readouterr().out)
     assert payload["writes"] is False
-    assert payload["cloud_calls"] is False
+    assert payload["destination"] == destination.as_posix()
+    assert len(payload["artifact_ids"]) == 4
+    assert {row["model"] for row in payload["artifact_ids"]} == {"zipformer", "vpcd"}
+    assert not destination.exists()

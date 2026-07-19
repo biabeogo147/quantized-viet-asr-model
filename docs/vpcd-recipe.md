@@ -42,4 +42,4 @@ Encoder attention-mask condition dùng `Cast(attention_mask, INT32) → Equal(0)
 
 Post-compile Android input là cặp `model.onnx` chứa `EPContext` và adjacent `model.bin`. Tokenizer, ID maps và autoregressive loop vẫn là CPU support components; AIMET package trước compile không phải deployment package. Xem [artifact taxonomy](architecture.md#phân-biệt-các-artifact) và [operations guide](aihub-android-operations.md).
 
-Benchmark Android xuất QDQ riêng dưới `build/` và vẫn khóa `96/168/1`; QDQ không mở rộng decoder/language-model-head coverage. Timing chỉ đo một VPCD model invocation, không gồm tokenizer hoặc autoregressive loop. Xem [QDC benchmark](evidence/2026-07-17-qdc-appium-cpu-npu-performance.md).
+Android handoff chứa FP32 fixed-shape và post-compile `EPContext ONNX + model.bin` từ cùng provenance. Benchmark chỉ timing một VPCD model invocation; tokenizer và autoregressive loop vẫn ở CPU và nằm ngoài timing. App chính và benchmark dùng chung model repository, không có model export riêng cho benchmark.

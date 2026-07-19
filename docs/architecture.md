@@ -223,17 +223,11 @@ Zipformer evaluation đo normalized character/word error rate, exact transcript 
 
 ## Android handoff boundary
 
-`integrations/android` hiện tạo manifest v2 và copy component files đã khai báo. BKMeeting live namespace còn cần `bundle_manifest.json`, `io_contract.json` và fixtures riêng. Vì sync hiện xóa file ngoài manifest v2, không chạy trực tiếp vào live BKMeeting namespace cho đến khi bundle materializer bảo toàn đầy đủ Android contract.
+`integrations/android/repository.py` materialize một repository duy nhất gồm `model-index.json`, manifest v2, bốn artifact canonical và fixtures. Output được stage đầy đủ rồi promote nguyên tử; mọi path tương đối và mọi component có SHA-256.
 
-Sau handoff, BKMeeting sở hữu asset resolver, ONNX Runtime Android QNN options, CPU fallback, strict HTP test, app pipeline và release packaging. Xem [AI Hub → Android operations](aihub-android-operations.md).
+BKMeeting main app và benchmark cùng consume repository này. CPU build chỉ chọn hai FP32 artifacts. QNN build chỉ chọn hai post-compile artifacts cùng CPU support components. Appium package chọn FP32 và NPU của đúng một model; không có benchmark-only model export.
 
-### Model-level benchmark boundary
-
-`benchmarks/` tạo payload chỉ dành cho đo kiểm, không thay đổi production bundle. Payload ghép ba representation có cùng provenance: FP32 fixed-shape ONNX, AIMET QDQ ONNX trước compile và `EPContext ONNX + model.bin` sau compile. QDQ được dựng lại từ đúng FP32 model, `model.encodings`, AIMET config và operator policy; strict graph gate vẫn yêu cầu Zipformer `278/278` và VPCD `96/168/1` với encoder-only encodings.
-
-BKMeeting sở hữu APK benchmark, ONNX Runtime CPU/QNN session, Appium scheduling và physical-device evidence. Mỗi model chạy ba fresh process cho mỗi representation, 10 warm-up và 100 measured inference mỗi process. Timer chỉ bao quanh `OrtSession.run`; tensor materialization, output validation và aggregation nằm ngoài vùng đo. QDC raw results quay lại `android-benchmark-report`; chúng không trở thành artifact production.
-
-CPU–NPU comparison chỉ hợp lệ khi ba run mỗi phía đầy đủ, checksum khớp, latency hữu hạn, quality contract đạt và strict QNN HTP không fallback. Zipformer timing chỉ gồm encoder; VPCD timing chỉ gồm một model invocation, không gồm autoregressive host loop.
+Sau handoff, BKMeeting sở hữu Gradle filtering, asset pack, ONNX Runtime Android, strict HTP tests, app pipeline và device evidence. Python repo tiếp tục sở hữu artifact identity, provenance, graph contract và fixture truth. Xem [AI Hub → Android operations](aihub-android-operations.md).
 
 ## Development contract
 

@@ -6,11 +6,9 @@ from dataclasses import dataclass
 
 
 FP32_CPU_CONFIGURATION = "fp32-fixed-shape-onnxruntime-cpu"
-QDQ_CPU_CONFIGURATION = "aimet-int8-int16-encoder-matmul-onnxruntime-cpu"
 NPU_CONFIGURATION = "aimet-int8-int16-encoder-matmul-aihub-qnn-htp"
 BENCHMARK_CONFIGURATIONS = (
     FP32_CPU_CONFIGURATION,
-    QDQ_CPU_CONFIGURATION,
     NPU_CONFIGURATION,
 )
 
@@ -26,19 +24,19 @@ class BenchmarkRun:
 
 
 def balanced_run_schedule() -> tuple[BenchmarkRun, ...]:
-    """Build the three-round Latin-square benchmark order.
+    """Build a three-round alternating CPU/NPU benchmark order.
 
     Returns:
-        Nine executions where every configuration occupies every ordinal once.
+        Six executions that alternate which configuration runs first.
     """
     providers = {
         FP32_CPU_CONFIGURATION: "onnxruntime-cpu",
-        QDQ_CPU_CONFIGURATION: "onnxruntime-cpu",
         NPU_CONFIGURATION: "qnn-htp",
     }
     runs: list[BenchmarkRun] = []
     for round_offset in range(3):
-        ordered = BENCHMARK_CONFIGURATIONS[round_offset:] + BENCHMARK_CONFIGURATIONS[:round_offset]
+        rotation = round_offset % len(BENCHMARK_CONFIGURATIONS)
+        ordered = BENCHMARK_CONFIGURATIONS[rotation:] + BENCHMARK_CONFIGURATIONS[:rotation]
         for ordinal, configuration in enumerate(ordered, start=1):
             runs.append(
                 BenchmarkRun(
