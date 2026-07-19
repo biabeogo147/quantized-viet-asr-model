@@ -65,7 +65,7 @@ def test_comparison_requires_three_complete_runs_and_strict_npu() -> None:
                 "strict_npu": entry.provider != "qnn-htp" or True,
                 "execution_provider": entry.provider,
                 "device_fingerprint": "samsung/s23/device-build",
-                "artifact_id": "zipformer-artifact",
+                "artifact_id": f"zipformer-{entry.configuration}-artifact",
                 "payload_manifest_checksum": "a" * 64,
             }
         )

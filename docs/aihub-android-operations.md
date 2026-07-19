@@ -98,6 +98,16 @@ Benchmark current workflow compares only:
 
 Each representation runs three fresh processes, 10 warm-up and 100 timed inferences/process. Zipformer timing covers encoder only; VPCD timing covers one model invocation only.
 
+CPU và NPU là hai artifact canonical khác nhau. Benchmark provenance yêu cầu một
+`artifact_id` ổn định trong ba repetitions của từng configuration, cùng một payload
+manifest checksum cho toàn comparison và cùng device fingerprint; không yêu cầu hai
+representations dùng chung artifact ID.
+
+Kết quả canonical gần nhất nằm trong [Android repository handoff evidence](evidence/2026-07-19-android-model-repository-handoff.md):
+
+- Zipformer encoder: FP32 CPU / QNN HTP median speedup `1.255×`.
+- VPCD một model invocation: FP32 CPU / QNN HTP median speedup `3.780×`.
+
 ## Ownership
 
 `quantized-viet-asr-model` owns artifact bytes, graph/shape/scope, provenance, index/manifests and fixtures. BKMeeting owns Android resolver, Gradle filtering, providers, strict device validation, UI and release delivery. Neither side may infer backend from folder name.

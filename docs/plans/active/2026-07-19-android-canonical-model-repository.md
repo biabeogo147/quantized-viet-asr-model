@@ -38,7 +38,7 @@ BKMeeting owns Android runtime, Gradle packaging, UI, and physical-device valida
 - [x] Implement the canonical Android model repository and CLI.
 - [x] Remove the separate benchmark model-export path, CLI surface, tests, and current canonical references.
 - [x] Materialize and verify the repository in BKMeeting modelassets.
-- [ ] Update canonical documentation and evidence.
+- [x] Update canonical documentation and evidence.
 - [ ] Run the full Python, graph, documentation, naming, path, and Git gates.
 - [ ] Record closure evidence and move this plan to `completed/`.
 
@@ -64,6 +64,8 @@ Additional gates cover Zipformer 278 encoder MatMul, VPCD `96/168/1`, retained c
 - 2026-07-19: Removed the separate benchmark model exporter and AIMET-service endpoint; benchmark aggregation now accepts only FP32 CPU and post-compile NPU representations.
 - 2026-07-19: Materialized the repository into BKMeeting and validated exact compiled checksums. BKMeeting CPU/QNN unit, packaging, instrumentation compilation, and Appium package tests passed in focused runs.
 - 2026-07-19: Updated architecture, source guide, model recipes, root README, and Android operations to describe the shared canonical repository.
+- 2026-07-19: QDC Automated Jobs `704740` (Zipformer) and `704742` (VPCD) passed on Snapdragon 8 Gen 2 HDK8550. Each comparison contains three CPU and three strict-HTP runs with 100 timed inferences/run. Median CPU/NPU speedups are `1.255×` for the Zipformer encoder and `3.780×` for one VPCD invocation.
+- 2026-07-19: Corrected the benchmark aggregator provenance contract: CPU and NPU keep distinct canonical artifact IDs, while each configuration must retain one stable identity across its three repetitions and the comparison must retain one payload checksum.
 
 ## Completion Evidence
 

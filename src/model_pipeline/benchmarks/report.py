@@ -92,14 +92,23 @@ def build_comparison(model: str, runs: Sequence[Mapping[str, object]]) -> dict[s
     }
     if len(device_fingerprints) != 1 or "" in device_fingerprints:
         reasons.append("same-device")
-    artifact_ids = {str(row.get("artifact_id", "")).strip() for row in rows}
+    artifact_ids_by_configuration = {
+        configuration: {
+            str(row.get("artifact_id", "")).strip()
+            for row in rows
+            if row.get("configuration") == configuration
+        }
+        for configuration in BENCHMARK_CONFIGURATIONS
+    }
     payload_checksums = {
         str(row.get("payload_manifest_checksum", "")).strip().lower()
         for row in rows
     }
     if (
-        len(artifact_ids) != 1
-        or "" in artifact_ids
+        any(
+            len(artifact_ids) != 1 or "" in artifact_ids
+            for artifact_ids in artifact_ids_by_configuration.values()
+        )
         or len(payload_checksums) != 1
         or not all(re.fullmatch(r"[0-9a-f]{64}", value) for value in payload_checksums)
     ):
@@ -135,6 +144,7 @@ def build_comparison(model: str, runs: Sequence[Mapping[str, object]]) -> dict[s
         ]
         summaries[configuration] = {
             **calculate_statistics(observations),
+            "artifact_id": next(iter(artifact_ids_by_configuration[configuration])),
             "observations": len(observations),
             "median_session_creation_ms": statistics.median(
                 float(row["session_creation_ms"]) for row in configuration_rows
