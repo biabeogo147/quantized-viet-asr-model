@@ -66,10 +66,13 @@ Additional gates cover Zipformer 278 encoder MatMul, VPCD `96/168/1`, retained c
 - 2026-07-19: Updated architecture, source guide, model recipes, root README, and Android operations to describe the shared canonical repository.
 - 2026-07-19: QDC Automated Jobs `704740` (Zipformer) and `704742` (VPCD) passed on Snapdragon 8 Gen 2 HDK8550. Each comparison contains three CPU and three strict-HTP runs with 100 timed inferences/run. Median CPU/NPU speedups are `1.255×` for the Zipformer encoder and `3.780×` for one VPCD invocation.
 - 2026-07-19: Corrected the benchmark aggregator provenance contract: CPU and NPU keep distinct canonical artifact IDs, while each configuration must retain one stable identity across its three repetitions and the comparison must retain one payload checksum.
+- 2026-07-19: QDC Interactive Session `704755` passed strict HTP loading and ran all ten main-app samples on CPU and twice on NPU. NPU repeats were exact `10/10` with each other, but CPU versus NPU raw/final parity was only `8/10` because samples 1 and 8 changed deterministically.
 
 ## Completion Evidence
 
-Pending.
+Blocked from completion by the main-app exact-parity gate: CPU versus NPU is
+`8/10`, not the required `10/10`. The retained NPU artifact is not promoted by
+this plan.
 
 ## Repository Update Notes
 

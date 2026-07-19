@@ -2,7 +2,7 @@
 
 ## Trạng thái
 
-Model repository canonical đã được materialize và cả hai benchmark model-level trên Qualcomm Device Cloud (QDC) đều hợp lệ. Main-app end-to-end validation vẫn đang tiếp tục; evidence này không tuyên bố app chính đã đạt gate `10/10`.
+Model repository canonical đã được materialize và cả hai benchmark model-level trên Qualcomm Device Cloud (QDC) đều hợp lệ. Main-app physical-device validation đã chạy nhưng gate exact CPU–NPU chỉ đạt `8/10`; artifact NPU chưa được promote thành deployment mặc định từ evidence này.
 
 ## Kết luận
 
@@ -93,3 +93,49 @@ Khi tổng hợp job mới, aggregator ban đầu yêu cầu CPU và NPU có cù
 - Kết quả chưa đóng main-app gate `10/10`; main app cần physical-device validation riêng từ cùng model repository.
 
 Machine-readable aggregate nằm tại ignored path `build/qdc-benchmark/comparison/comparison.json`; raw six-run JSON nằm tại `build/qdc-device-results/<model>/raw/`.
+
+## Main-app physical-device validation
+
+Interactive Session [704755](https://qdc.qualcomm.com/reports/job/interactive/704755)
+chạy trên cùng HDK8550 fingerprint từ 22:38:45 đến 23:26:47 ngày 2026-07-19.
+
+Strict-load instrumentation đạt trong `2.976 s`:
+
+- Zipformer encoder và VPCD model resolve đúng retained compiled checksums;
+- `QNNExecutionProvider` khởi tạo `libQnnHtp.so`;
+- `libQnnHtpV73Skel.so` được mở trên CDSP domain 3;
+- Zipformer decoder/joiner và VPCD tokenizer giữ CPU.
+
+Full main-app instrumentation chạy cùng 10 bundled audio samples:
+
+| Surface | Thời gian 10 samples | Raw exact so với CPU | Final exact so với CPU |
+|---|---:|---:|---:|
+| FP32 CPU | 1,126.091 s | control | control |
+| QNN HTP | 385.502 s | `8/10` | `8/10` |
+| QNN HTP repeat | 393.335 s | `8/10` | `8/10` |
+
+Tỷ lệ tổng thời gian CPU/NPU là `2.921×`. Đây là instrumentation elapsed time
+bao gồm model load và full orchestration, không thay thế latency benchmark quanh
+`OrtSession.run()`.
+
+Hai mismatches ổn định:
+
+- `sample-1`: raw CPU có `... HAI MƯƠI NĂM ...`, NPU có
+  `... HAI MƯƠI LĂM ...`; final đổi từ chuỗi chứa `21/12/2020, năm` thành
+  `21/12/2025`.
+- `sample-8`: NPU bỏ từ đầu `MỘT`, nên final đổi từ `Một số tiền...` thành
+  `Số tiền...`.
+
+Hai NPU runs tự khớp raw/final `10/10`, chứng minh mismatch deterministic và
+không phải runtime variance. Theo exact-promotion contract, comparison main app
+`valid=false`; active plans phải giữ nguyên cho tới khi model/acceptance decision
+được xử lý có chủ đích.
+
+Machine-readable records nằm trong ignored
+`build/qdc-device-results/main-app/`.
+
+Evidence SHA-256:
+
+- `cpu.json`: `ac28e9788b6b92e8587ed6ad56f44171967c3608d68c1428818c4397e12c0d68`.
+- `npu.json` và `npu-repeat.json`: `4b2ee7f7fe3524e106a90cdf552dca2edd9f889899977a7c3e660f08e015fe94`.
+- `comparison.json`: `b16dc7896df297c5be1860dfa8c1f3267ece557ee429d7176748306b9223a265`.
