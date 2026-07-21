@@ -12,9 +12,10 @@
 4. [Architecture](architecture.md) — boundaries, stage flow, artifact lifecycle và execution target.
 5. [Source-code guide](source-code-guide.md) — lần theo call chain từ CLI tới model/integration.
 6. [Zipformer recipe](zipformer-recipe.md) hoặc [VPCD recipe](vpcd-recipe.md) — graph và quantization contract riêng từng model.
-7. [AI Hub → Android operations](aihub-android-operations.md) — compile, hosted validation và handoff boundary.
-8. [Báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md) cùng [retained artifact record](evidence/retained-artifacts.json) — trạng thái thực nghiệm hiện tại.
-9. [Canonical Android repository handoff](evidence/2026-07-19-android-model-repository-handoff.md) — kết quả Android model-level mới nhất trên Snapdragon 8 Gen 2, gồm latency, memory, quality và strict HTP placement.
+7. [Tái tạo benchmark VLSP 100 mẫu](benchmarking.md) — chạy lại local, compile và hosted protocol bằng CLI công khai.
+8. [AI Hub → Android operations](aihub-android-operations.md) — compile, hosted validation và handoff boundary.
+9. [Báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md) cùng [retained artifact record](evidence/retained-artifacts.json) — trạng thái thực nghiệm hiện tại.
+10. [Canonical Android repository handoff](evidence/2026-07-19-android-model-repository-handoff.md) — kết quả Android model-level mới nhất trên Snapdragon 8 Gen 2, gồm latency, memory, quality và strict HTP placement.
 
 Khi công việc đi vào Android runtime, tiếp tục tại [BKMeeting README](../../BKMeeting/README.md), [working agreement](../../BKMeeting/AGENTS.md), [documentation index](../../BKMeeting/docs/README.md), [architecture](../../BKMeeting/docs/architecture.md) và [Qualcomm NPU operations](../../BKMeeting/docs/qualcomm-npu-operations.md). Các path sibling này mô tả layout workspace mong đợi; chúng không biến BKMeeting thành một phần của package Python.
 
@@ -63,6 +64,7 @@ Kết thúc khi phân biệt được AIMET package trước compile, `EPContext
 | Đổi calibration/quantization | `models/<model>/quantization.py`, `models/aimet*.py` | AIMET service và graph-contract tests | getting started và model recipe |
 | Đổi stage/cache/manifest | `core/`, `pipeline.py` | core, boundary và flow tests | architecture và source-code guide |
 | Đổi dataset/evaluation | `datasets/`, `evaluation/` | dataset/evaluation tests | architecture và evidence liên quan |
+| Tái tạo benchmark VLSP local/cloud | `benchmarks/vlsp*.py`, `evaluation/` | `test_vlsp_benchmark.py` | benchmark guide, model recipe và evidence liên quan |
 | Đổi AI Hub compile/live-run | `integrations/aihub/` | integration tests | AI Hub → Android operations |
 | Đổi package/sync Android | `integrations/android/` | integration/flow tests | AI Hub → Android operations và BKMeeting docs tương ứng |
 | Đổi Android CPU–NPU benchmark | `benchmarks/` | `test_android_benchmark.py` | architecture, AI Hub → Android operations và QDC evidence |

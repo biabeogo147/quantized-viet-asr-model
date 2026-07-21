@@ -230,6 +230,39 @@ def test_hosted_inference_records_five_inputs_by_content_checksum(tmp_path: Path
     assert all(result.evidence.output_checksum for result in results)
 
 
+def test_hosted_inference_reuses_saved_outputs_without_new_submission(tmp_path: Path) -> None:
+    """Verify successful hosted inputs resume without consuming cloud quota again.
+
+    Args:
+        tmp_path: Isolated hosted evidence and output store.
+
+    Returns:
+        None.
+    """
+    client = FakeAiHubClient()
+    store = HostedInferenceStore(tmp_path)
+    inputs = tuple({"input": np.asarray([index], dtype=np.float32)} for index in range(5))
+
+    first = run_hosted_inputs(
+        artifact=ArtifactSpec.parse(VPCD_ID),
+        compile_job_id="fake-compile-job",
+        inputs=inputs,
+        client=client,
+        evidence_store=store,
+    )
+    second = run_hosted_inputs(
+        artifact=ArtifactSpec.parse(VPCD_ID),
+        compile_job_id="fake-compile-job",
+        inputs=inputs,
+        client=client,
+        evidence_store=store,
+    )
+
+    assert client.live_run_count == 5
+    assert [result.evidence for result in second] == [result.evidence for result in first]
+    assert [result.outputs for result in second] == [result.outputs for result in first]
+
+
 def test_qualcomm_client_reconnects_compile_job_for_live_run(monkeypatch) -> None:
     """Verify hosted inference resolves a target from a prior compile process.
 

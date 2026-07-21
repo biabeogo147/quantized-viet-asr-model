@@ -114,3 +114,11 @@ CUDA profiler ghi 998,006 CUDA node events trong phần profile được lưu. T
 - VPCD được đánh giá bằng parity với FP32 vì dataset không có punctuation/capitalization ground truth phù hợp.
 
 Machine-readable evidence nằm dưới `build/evaluation/`, `build/model-pipeline/aihub-evidence/records/` và stage directories của hai artifact.
+
+## Cách tái tạo protocol
+
+Dùng CLI và checklist trong [hướng dẫn benchmark VLSP 100 mẫu](../benchmarking.md). `--through local` dựng split 24/100, prepare, quantize và so sánh FP32/QDQ trên local. `--through compile` thực hiện thêm AI Hub compile và downloaded-package validation. `--through hosted` thực hiện thêm đúng 5 hosted inputs/model.
+
+Các latency trong báo cáo này là quan sát lịch sử của môi trường ghi ở đầu tài liệu, không phải golden latency. Một lần tái tạo hợp lệ phải khớp source/dataset/recipe/checksum, graph contract và quality gate; latency mới phải được báo cáo cùng environment evidence của lần chạy mới.
+
+AIMET compile-source `model.onnx` không tự chứa explicit Q/DQ; quantization encodings nằm trong `model.encodings`. Vì vậy không được chạy riêng compile-source ONNX bằng stock ONNX Runtime rồi gọi kết quả đó là quantized inference. Workflow tái tạo xuất benchmark-only QDQ bằng cách nạp strict đúng encodings và policy; AI Hub compile vẫn nhận canonical AIMET package, không nhận QDQ này.

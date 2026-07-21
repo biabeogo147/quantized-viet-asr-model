@@ -181,3 +181,5 @@ Các nhóm lỗi thường gặp:
 - graph count, encoding scope hoặc mask rewrite không đạt contract.
 
 Đọc [architecture](architecture.md) để hiểu boundaries và [source-code guide](source-code-guide.md) để tìm đúng owner/test. Chỉ chuyển sang [AI Hub → Android operations](aihub-android-operations.md) sau khi local validation đạt.
+
+Walkthrough này chỉ xác nhận pipeline đến `validate`. Khi cần chạy lại 24 calibration và 100 evaluation records, so sánh FP32/QDQ hoặc tiếp tục tới cloud, dùng [hướng dẫn tái tạo benchmark VLSP](benchmarking.md); không ghép thủ công các API dataset/evaluation thành command riêng.

@@ -34,6 +34,8 @@ VPCD và Zipformer dùng chung model-independent AIMET service và calibration p
 
 Configuration `fp32-fixed-shape` dùng cùng source length 384 và decoder length 64 làm control, đồng thời explicit-skip quantize/compile. Refactor không mở rộng decoder coverage, không thêm policy thử nghiệm và không đưa ra claim latency mới.
 
+Local quantized benchmark dùng explicit QDQ được khôi phục strict từ cùng encodings và allowlist 96 encoder MatMul. QDQ không phải compile source hoặc Android artifact. Xem [benchmark guide](benchmarking.md#chạy-local-benchmark) để tái tạo parity `500/500`, full-output gate và CPU/CUDA placement.
+
 ## Qualcomm HTP compatibility đã kiểm chứng
 
 Canonical package dùng MinMax, signed 8-bit weight, symmetric signed 16-bit activation và `per_channel=False`. Service tắt toàn bộ quantizer rồi name-allowlist đúng 96 encoder MatMul. Symmetry chỉ được ép trên activation quantizer; initializer-weight quantizer giữ đúng asymmetric encoding đã hiệu chỉnh. Package có 168 activation encodings, tất cả offset `-32768`, và 72 initializer-weight encodings; decoder và language-model head không có encoding.

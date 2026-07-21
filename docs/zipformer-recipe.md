@@ -34,6 +34,8 @@ ORT-QNN xuất Q/DQ ONNX và graph validation yêu cầu đủ 278/278 MatMul en
 
 Local transcript evaluation dùng centered log-Mel spectrogram trên waveform chuẩn hóa. Greedy transducer decoder có thể emit nhiều token trên một encoder frame và tiếp tục frame kế tiếp khi joiner trả blank; decoder và joiner luôn chạy CPU kể cả khi encoder chạy CUDA/mixed.
 
+Để benchmark local AIMET bằng stock ONNX Runtime, pipeline xuất explicit QDQ từ đúng AIMET encodings. QDQ này chỉ phục vụ benchmark và phải giữ đủ 278 encoder MatMul trong scope; canonical compile input vẫn là AIMET package directory. Quy trình, quality gate và output evidence nằm trong [benchmark guide](benchmarking.md#chạy-local-benchmark).
+
 ## Evidence 2026-07-15/16
 
 Clean rebuild xác nhận ORT-QNN đạt local quality gate nhưng AI Hub từ chối `com.microsoft::DequantizeLinear`. AIMET fallback đạt 100/100 transcript parity với FP32 trên VLSP, compile job `jp1vnn07p` thành công và hosted transcript parity đạt 5/5. Chi tiết nằm trong [báo cáo VLSP](evidence/2026-07-15-vlsp100-quantization-compile.md).

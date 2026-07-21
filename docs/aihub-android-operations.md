@@ -31,6 +31,13 @@ Hosted smoke giới hạn năm inputs/model:
 
 Hosted pass không thay Android app/device proof.
 
+CLI benchmark dùng stop point tích lũy:
+
+- `--through compile` chạy local benchmark trước, compile canonical AIMET package, download và validate `EPContext + model.bin`, rồi dừng;
+- `--through hosted` thực hiện thêm đúng 5 hosted inputs/model.
+
+Cả hai bắt buộc `--submit-cloud`, device và QAIRT version. QDQ chỉ là local benchmark representation và không được gửi làm canonical compile input. Xem [hướng dẫn tái tạo benchmark](benchmarking.md#compile-và-hosted-validation).
+
 ## Materialize canonical repository
 
 Dry-run:

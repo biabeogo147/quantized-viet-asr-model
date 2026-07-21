@@ -20,6 +20,7 @@ Các CLI công khai:
 python -m model_pipeline run --model zipformer --configuration ortqnn-uint8-uint16-encoder-matmul --through sync
 python -m model_pipeline run --model vpcd --configuration aimet-int8-int16-encoder-matmul --through sync
 python -m model_pipeline android-model-repository --build-root build/android-integration --destination <BKMEETING_ROOT>/modelassets/src/main/assets/model-repository --dry-run
+python -m model_pipeline benchmark-vlsp --model all --dataset-root "$VLSP_PARQUET_ROOT" --build-root build/vlsp-benchmark --providers cpu,cuda --through local --dry-run
 ```
 
 Thêm `--dry-run` để xem recipe và stage mà không đọc model hay gọi AI Hub. Configuration `fp32-fixed-shape` là control local; tên configuration mô tả trực tiếp engine, precision, shape, operator scope hoặc compile target. Manifest v2 ghi execution target riêng cho từng component.
@@ -38,6 +39,7 @@ Mọi thay đổi tracked phải tuân theo [AGENTS.md](AGENTS.md): thực hiệ
 - [Local getting started](docs/getting-started.md)
 - [Kiến trúc pipeline](docs/architecture.md)
 - [Source-code guide](docs/source-code-guide.md)
+- [Tái tạo benchmark VLSP 100 mẫu](docs/benchmarking.md)
 - [Zipformer recipe](docs/zipformer-recipe.md)
 - [VPCD recipe](docs/vpcd-recipe.md)
 - [AI Hub → Android operations](docs/aihub-android-operations.md)

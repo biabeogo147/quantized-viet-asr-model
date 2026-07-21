@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+import types
 
 import numpy as np
+import onnx
+import pytest
+from onnx import TensorProto, helper
 
 from model_pipeline.models import get_recipe
 from model_pipeline.models.aimet_service import (
     AimetServiceClient,
     _enable_only_allowlisted_ops,
+    export_qdq_with_aimet,
 )
 from model_pipeline.models.vpcd.adapter import VpcdAdapter
 from model_pipeline.models.vpcd.quantization import CalibrationBatch
@@ -70,6 +76,232 @@ def test_generic_aimet_client_translates_only_repository_paths(
         "config_path": "/workspace/config.json",
         "policy_path": "/workspace/policy.json",
     }
+
+
+def test_aimet_client_requests_benchmark_only_qdq_export(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Verify QDQ export sends exact encodings and policy paths to AIMET.
+
+    Args:
+        tmp_path: Isolated host repository root.
+        monkeypatch: Pytest fixture replacing the HTTP request.
+
+    Returns:
+        None.
+    """
+    paths = {}
+    for name in ("model.onnx", "model.encodings", "output", "config.json", "policy.json"):
+        path = tmp_path / name
+        if name == "output":
+            path.mkdir()
+        else:
+            path.write_text("{}", encoding="utf-8")
+        paths[name] = path
+    captured: dict[str, object] = {}
+    client = AimetServiceClient(repo_root=tmp_path)
+
+    def fake_request(endpoint, payload=None, timeout=30):
+        """Capture one QDQ service request.
+
+        Args:
+            endpoint: Requested HTTP endpoint.
+            payload: JSON-compatible request body.
+            timeout: Request timeout in seconds.
+
+        Returns:
+            Fake service response.
+        """
+        captured.update({"endpoint": endpoint, "payload": payload, "timeout": timeout})
+        return {"outputs": {"model": "model.qdq.onnx"}}
+
+    monkeypatch.setattr(client, "_request", fake_request)
+
+    client.export_qdq(
+        fp32_model_path=paths["model.onnx"],
+        encodings_path=paths["model.encodings"],
+        output_dir=paths["output"],
+        config_path=paths["config.json"],
+        policy_path=paths["policy.json"],
+    )
+
+    assert captured == {
+        "endpoint": "/export-qdq",
+        "payload": {
+            "fp32_model_path": "/workspace/model.onnx",
+            "encodings_path": "/workspace/model.encodings",
+            "output_dir": "/workspace/output",
+            "config_path": "/workspace/config.json",
+            "policy_path": "/workspace/policy.json",
+        },
+        "timeout": 7200,
+    }
+
+
+def test_qdq_export_restores_encodings_strictly(tmp_path: Path, monkeypatch) -> None:
+    """Verify benchmark QDQ restores exact AIMET encodings before conversion.
+
+    Args:
+        tmp_path: Isolated model and output paths.
+        monkeypatch: Pytest fixture installing fake AIMET modules.
+
+    Returns:
+        None.
+    """
+    model = helper.make_model(
+        helper.make_graph(
+            [helper.make_node("Identity", ["input"], ["output"], name="identity")],
+            "model",
+            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1])],
+            [helper.make_tensor_value_info("output", TensorProto.FLOAT, [1])],
+        )
+    )
+    model_path = tmp_path / "model.onnx"
+    onnx.save(model, model_path)
+    encodings = tmp_path / "model.encodings"
+    encodings.write_text("{}", encoding="utf-8")
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    captured: dict[str, object] = {}
+
+    class Simulation:
+        def __init__(self, model, **kwargs) -> None:
+            """Initialize a fake AIMET simulation.
+
+            Args:
+                model: Loaded ONNX model.
+                kwargs: Quantization construction options.
+
+            Returns:
+                None.
+            """
+            captured["construction"] = kwargs
+            self.model = model
+            self.qc_quantize_op_dict = {}
+            self.connected_graph = types.SimpleNamespace(get_all_ops=lambda: {})
+
+        def to_onnx_qdq(self, **kwargs):
+            """Return the source model while recording QDQ conversion options.
+
+            Args:
+                kwargs: QDQ conversion options.
+
+            Returns:
+                The fake converted ONNX model.
+            """
+            captured["conversion"] = kwargs
+            return self.model
+
+    def fake_load_encodings(sim, path, **kwargs) -> None:
+        """Capture strict encoding restoration options.
+
+        Args:
+            sim: Fake simulation instance.
+            path: Encoding file path.
+            kwargs: Encoding restoration options.
+
+        Returns:
+            None.
+        """
+        captured["load"] = {"sim": sim, "path": path, **kwargs}
+
+    definitions = types.ModuleType("aimet_common.defs")
+    definitions.QuantScheme = types.SimpleNamespace(min_max="min-max")
+    common = types.ModuleType("aimet_common")
+    common.defs = definitions
+    quantsim = types.ModuleType("aimet_onnx.quantsim")
+    quantsim.QuantizationSimModel = Simulation
+    quantsim.load_encodings_to_sim = fake_load_encodings
+    aimet_onnx = types.ModuleType("aimet_onnx")
+    aimet_onnx.quantsim = quantsim
+    monkeypatch.setitem(sys.modules, "aimet_common", common)
+    monkeypatch.setitem(sys.modules, "aimet_common.defs", definitions)
+    monkeypatch.setitem(sys.modules, "aimet_onnx", aimet_onnx)
+    monkeypatch.setitem(sys.modules, "aimet_onnx.quantsim", quantsim)
+
+    outputs = export_qdq_with_aimet(
+        fp32_model_path=model_path,
+        encodings_path=encodings,
+        output_dir=tmp_path / "output",
+        config_path=config,
+        policy={"quantizer_selection": "operator-name-allowlist", "quantize_op_names": []},
+    )
+
+    assert outputs["model"].is_file()
+    assert captured["load"]["path"] == encodings.resolve().as_posix()
+    assert captured["load"]["strict"] is True
+    assert captured["load"]["disable_missing_quantizers"] is True
+    assert captured["conversion"] == {
+        "prequantize_constants": True,
+        "force_activation_as": "signed",
+    }
+
+
+def test_qdq_export_rejects_missing_policy_operation(tmp_path: Path, monkeypatch) -> None:
+    """Verify QDQ export rejects a policy that does not match the source graph.
+
+    Args:
+        tmp_path: Isolated model and output paths.
+        monkeypatch: Pytest fixture installing fake AIMET modules.
+
+    Returns:
+        None.
+    """
+    model = helper.make_model(
+        helper.make_graph(
+            [],
+            "model",
+            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1])],
+            [helper.make_tensor_value_info("input", TensorProto.FLOAT, [1])],
+        )
+    )
+    model_path = tmp_path / "model.onnx"
+    onnx.save(model, model_path)
+    encodings = tmp_path / "model.encodings"
+    encodings.write_text("{}", encoding="utf-8")
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+
+    class Simulation:
+        def __init__(self, _model, **_kwargs) -> None:
+            """Initialize an empty fake connected graph.
+
+            Args:
+                _model: Ignored ONNX model.
+                _kwargs: Ignored quantization options.
+
+            Returns:
+                None.
+            """
+            self.qc_quantize_op_dict = {}
+            self.connected_graph = types.SimpleNamespace(get_all_ops=lambda: {})
+
+    definitions = types.ModuleType("aimet_common.defs")
+    definitions.QuantScheme = types.SimpleNamespace(min_max="min-max")
+    common = types.ModuleType("aimet_common")
+    common.defs = definitions
+    quantsim = types.ModuleType("aimet_onnx.quantsim")
+    quantsim.QuantizationSimModel = Simulation
+    quantsim.load_encodings_to_sim = lambda *_args, **_kwargs: None
+    aimet_onnx = types.ModuleType("aimet_onnx")
+    aimet_onnx.quantsim = quantsim
+    monkeypatch.setitem(sys.modules, "aimet_common", common)
+    monkeypatch.setitem(sys.modules, "aimet_common.defs", definitions)
+    monkeypatch.setitem(sys.modules, "aimet_onnx", aimet_onnx)
+    monkeypatch.setitem(sys.modules, "aimet_onnx.quantsim", quantsim)
+
+    with pytest.raises(ValueError, match="missing-matmul"):
+        export_qdq_with_aimet(
+            fp32_model_path=model_path,
+            encodings_path=encodings,
+            output_dir=tmp_path / "output",
+            config_path=config,
+            policy={
+                "quantizer_selection": "operator-name-allowlist",
+                "quantize_op_names": ["missing-matmul"],
+            },
+        )
 
 
 def test_operator_allowlist_enables_only_selected_tensor_quantizers() -> None:

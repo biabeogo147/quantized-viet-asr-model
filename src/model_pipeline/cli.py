@@ -53,6 +53,19 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--results-root", required=True)
     report.add_argument("--output", required=True)
     report.add_argument("--dry-run", action="store_true")
+    benchmark = commands.add_parser(
+        "benchmark-vlsp",
+        help="Reproduce the VLSP local, compile, and hosted benchmark protocol",
+    )
+    benchmark.add_argument("--model", choices=("zipformer", "vpcd", "all"), required=True)
+    benchmark.add_argument("--dataset-root", required=True)
+    benchmark.add_argument("--build-root", default="build/vlsp-benchmark")
+    benchmark.add_argument("--providers", default="cpu,cuda")
+    benchmark.add_argument("--through", choices=("local", "compile", "hosted"), required=True)
+    benchmark.add_argument("--submit-cloud", action="store_true")
+    benchmark.add_argument("--device")
+    benchmark.add_argument("--qairt-version")
+    benchmark.add_argument("--dry-run", action="store_true")
     return parser
 
 
@@ -66,6 +79,34 @@ def main(argv: Sequence[str] | None = None) -> int:
         Zero when the requested command completes successfully.
     """
     args = build_parser().parse_args(argv)
+    if args.command == "benchmark-vlsp":
+        from model_pipeline.benchmarks.vlsp import (
+            VlspBenchmarkRequest,
+            build_benchmark_plan,
+            parse_provider_list,
+        )
+
+        request = VlspBenchmarkRequest(
+            model=args.model,
+            dataset_root=Path(args.dataset_root),
+            build_root=Path(args.build_root),
+            providers=parse_provider_list(args.providers),
+            through=args.through,
+            submit_cloud=args.submit_cloud,
+            device=args.device,
+            qairt_version=args.qairt_version,
+        )
+        payload = build_benchmark_plan(request)
+        if args.dry_run:
+            payload["writes"] = False
+            payload["cloud_calls"] = False
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+        from model_pipeline.benchmarks.vlsp import run_vlsp_benchmark
+
+        result = run_vlsp_benchmark(request, repo_root=Path.cwd())
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
     if args.command == "android-model-repository":
         artifact_ids = [
             {

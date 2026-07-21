@@ -88,6 +88,84 @@ class HostedInferenceStore:
         path.write_text(json.dumps(asdict(evidence), indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return path
 
+    def save_outputs(
+        self,
+        input_checksum: str,
+        outputs: Mapping[str, Any],
+        *,
+        output_checksum: str,
+    ) -> None:
+        """Persist hosted tensor outputs required for quota-safe resume.
+
+        Args:
+            input_checksum: Deterministic identity of the hosted input tensors.
+            outputs: Named scalar arrays or batched array sequences.
+            output_checksum: Expected checksum of the complete output mapping.
+
+        Returns:
+            None.
+        """
+        output_root = self.root / "outputs"
+        output_root.mkdir(parents=True, exist_ok=True)
+        arrays: dict[str, np.ndarray] = {}
+        fields: dict[str, dict[str, Any]] = {}
+        for field_index, (name, value) in enumerate(sorted(outputs.items())):
+            values = list(value) if isinstance(value, (list, tuple)) else [value]
+            keys: list[str] = []
+            for value_index, item in enumerate(values):
+                key = f"value_{field_index:04d}_{value_index:04d}"
+                arrays[key] = np.asarray(item)
+                keys.append(key)
+            fields[str(name)] = {
+                "sequence": isinstance(value, (list, tuple)),
+                "keys": keys,
+            }
+        np.savez_compressed(output_root / f"{input_checksum}.npz", **arrays)
+        (output_root / f"{input_checksum}.json").write_text(
+            json.dumps(
+                {"output_checksum": output_checksum, "fields": fields},
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def resolve_outputs(
+        self,
+        input_checksum: str,
+        *,
+        output_checksum: str,
+    ) -> Mapping[str, Any] | None:
+        """Restore hosted outputs only when serialized bytes match evidence.
+
+        Args:
+            input_checksum: Deterministic identity of the hosted input tensors.
+            output_checksum: Checksum required by hosted inference evidence.
+
+        Returns:
+            Restored output mapping, or `None` when unavailable or mismatched.
+        """
+        output_root = self.root / "outputs"
+        manifest_path = output_root / f"{input_checksum}.json"
+        arrays_path = output_root / f"{input_checksum}.npz"
+        if not manifest_path.is_file() or not arrays_path.is_file():
+            return None
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest.get("output_checksum") != output_checksum:
+                return None
+            restored: dict[str, Any] = {}
+            with np.load(arrays_path, allow_pickle=False) as arrays:
+                for name, field in manifest["fields"].items():
+                    values = [np.asarray(arrays[key]) for key in field["keys"]]
+                    restored[name] = values if field["sequence"] else values[0]
+        except (OSError, KeyError, ValueError, json.JSONDecodeError):
+            return None
+        if _checksum_output_values(restored) != output_checksum:
+            return None
+        return restored
+
 
 def checksum_named_values(values: Mapping[str, Any]) -> str:
     """Hash named tensors with stable name, dtype, shape, and byte semantics.
@@ -139,6 +217,19 @@ def run_hosted_inputs(
     results: list[HostedInferenceResult] = []
     for named_input in inputs:
         input_checksum = checksum_named_values(named_input)
+        cached = evidence_store.resolve(input_checksum)
+        if (
+            cached is not None
+            and cached.artifact_id == artifact.artifact_id
+            and cached.compile_job_id == compile_job_id
+        ):
+            cached_outputs = evidence_store.resolve_outputs(
+                input_checksum,
+                output_checksum=cached.output_checksum,
+            )
+            if cached_outputs is not None:
+                results.append(HostedInferenceResult(cached_outputs, cached))
+                continue
         response = dict(
             client.live_run(
                 job_id=compile_job_id,
@@ -152,6 +243,11 @@ def run_hosted_inputs(
             compile_job_id=compile_job_id,
             input_checksum=input_checksum,
             inference_job_id=str(response["job_id"]),
+            output_checksum=output_checksum,
+        )
+        evidence_store.save_outputs(
+            input_checksum,
+            outputs,
             output_checksum=output_checksum,
         )
         evidence_store.save(evidence)
